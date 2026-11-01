@@ -2494,6 +2494,64 @@ inline bool verify_waypoint_dtors( )
     return failed == 0;
 }
 
+// verify_boat_engine_dtor (boat batch 28): the engine's dtor body 0x41CF20 (+ 0x630EF0, 0x40D820, 0x401C30) on the
+// image retail ran it on (case boat_engine_dtor): the hook calls in order with their arguments, and all 0x44 words.
+inline bool verify_boat_engine_dtor( )
+{
+    int failed = 0;
+    for ( std::size_t index = 0; index < g_golden_boat_engine_dtor_count; ++index )
+    {
+        const unsigned* s = g_golden_boat_engine_dtor_words + g_golden_boat_engine_dtor_offsets[ index ];
+        const std::uint32_t engine = *s++;
+        std::uint32_t image[ 0x44 ];
+        std::memcpy( image, s, sizeof( image ) );
+        s += 0x44;
+        std::vector< unsigned > want;
+        const unsigned nlog = *s++;
+        for ( unsigned k = 0; k < nlog; ++k )
+        {
+            const unsigned length = *s++;
+            want.push_back( length );
+            want.insert( want.end( ), s, s + length );
+            s += length;
+        }
+        const unsigned* post = s;
+        bool outside = false;
+        vu_words_t w;
+        w.get = [ & ]( std::uint32_t a ) {
+            if ( a < engine || a >= engine + 0x110u || ( a & 3u ) != 0 )
+            {
+                outside = true;
+                return 0u;
+            }
+            return image[ ( a - engine ) / 4 ];
+        };
+        w.put = [ & ]( std::uint32_t a, std::uint32_t x ) {
+            if ( a < engine || a >= engine + 0x110u || ( a & 3u ) != 0 )
+                outside = true;
+            else
+                image[ ( a - engine ) / 4 ] = x;
+        };
+        std::vector< unsigned > log;
+        boat_engine_dtor_hooks_t h;
+        h.free_block = [ & ]( std::uint32_t a ) { log.insert( log.end( ), { 2u, 1u, a } ); };
+        h.aligned_free = [ & ]( std::uint32_t a ) { log.insert( log.end( ), { 2u, 2u, a } ); };
+        h.set_callback_none = [ & ]( std::uint32_t e ) { log.insert( log.end( ), { 4u, 4u, e, 0u, 0u } ); };
+        h.stop = [ & ]( std::uint32_t e, bool immediate ) { log.insert( log.end( ), { 3u, 5u, e, immediate ? 1u : 0u } ); };
+        boat_engine_destroy( w, engine, h );
+        const bool ok = !outside && log == want && std::memcmp( image, post, sizeof( image ) ) == 0;
+        if ( !ok && ++failed <= 4 )
+            LOG_ERROR( "boat engine dtor vector %d differs from retail (log %d words, retail %d)", static_cast< int >( index ),
+                       static_cast< int >( log.size( ) ), static_cast< int >( want.size( ) ) );
+    }
+    if ( failed == 0 )
+        LOG_SUCCESS( "the boat engine's dtor body 0x41CF20 (0x630EF0 / 0x40D820 / 0x401C30) matches retail: %d vectors (hook calls, "
+                     "the 0x44 image words)", static_cast< int >( g_golden_boat_engine_dtor_count ) );
+    else
+        LOG_ERROR( "boat engine dtor FAILED %d of %d vectors", failed, static_cast< int >( g_golden_boat_engine_dtor_count ) );
+    return failed == 0;
+}
+
 inline bool verify_boat_all( )
 {
     bool ok = true;
@@ -2502,6 +2560,7 @@ inline bool verify_boat_all( )
     ok = verify_boat_pfx_fill( ) && ok;
     ok = verify_boat_pfx_draw( ) && ok;
     ok = verify_waypoint_dtors( ) && ok;
+    ok = verify_boat_engine_dtor( ) && ok;
     ok = verify_boat_ai_driver( ) && ok;
     ok = verify_boat_driver_load( ) && ok;
     ok = verify_boat_tick_state( ) && ok;

@@ -1,11 +1,13 @@
 #pragma once
 
 #include <workspace/core/assets/tree.hxx>
+#include <workspace/core/boat/nuisance.hxx>
 #include <workspace/core/boat/parts.hxx>
 #include <workspace/core/entity/property.hxx>
 
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <algorithm>
 #include <array>
 #include <map>
@@ -340,4 +342,65 @@ inline void boat_load_engine( boat_engine_t& e, const value_t& section, const va
     {
         // HOOK: the FMOD event release / restart (platform audio).
     }
+}
+// ---- The engine's dtor body (boat +0x22C; VuBoatEntity's dtor 0x41CB10 runs it, then operator delete), on retail's
+// words (boat batch 28) ----
+//
+// 0x41CF20 (thiscall engine): the +0xF8 std::vector's block freed when its begin is non-null (begin / end / capacity
+// = 0 then), the five 8-byte audio events at +0xC4 released by `eh vector destructor iterator` 0x630EF0 (last to
+// first) with 0x40D820, the five std::strings at +0x4C reset the same way with 0x401C30, the +0x3C std::vector as
+// +0xF8, then _aligned_free( +0x30 ) whatever it holds (the Power Curve's Vu array data).
+// 0x40D820 (thiscall event { +0 byte, +4 FMOD::Event* }): with an event, FMOD::Event::setCallback( 0, 0 ), then
+// with the byte set FMOD::Event::stop( true ) (retail: edi = byte ? 2 : 0, stop( edi == 2 ) only when edi != 0);
+// +4 = 0. Nothing at all without an event. The FMOD calls are audio PLATFORM hooks; the imports hooks too.
+struct boat_engine_dtor_hooks_t
+{
+    std::function< void( std::uint32_t ) > free_block;                   // operator delete
+    std::function< void( std::uint32_t ) > aligned_free;                 // _aligned_free
+    std::function< void( std::uint32_t ) > set_callback_none;            // FMOD::Event::setCallback( event, 0, 0 )
+    std::function< void( std::uint32_t, bool ) > stop;                   // FMOD::Event::stop( event, immediate )
+};
+
+// 0x40D820.
+inline void boat_audio_event_release( const vu_words_t& w, std::uint32_t at, const boat_engine_dtor_hooks_t& h )
+{
+    const bool playing = ( w.get( at ) & 0xFFu ) != 0;
+    const std::uint32_t event = w.get( at + 4 );
+    if ( event == 0 )
+        return;
+    if ( h.set_callback_none )
+        h.set_callback_none( event );
+    if ( playing && h.stop )
+        h.stop( event, true );
+    w.put( at + 4, 0u );
+}
+
+// 0x41CF20.
+inline void boat_engine_destroy( const vu_words_t& w, std::uint32_t self, const boat_engine_dtor_hooks_t& h )
+{
+    auto vector_free = [ & ]( std::uint32_t at ) {
+        if ( const std::uint32_t begin = w.get( at ) )
+        {
+            if ( h.free_block )
+                h.free_block( begin );
+            w.put( at, 0u );
+            w.put( at + 4, 0u );
+            w.put( at + 8, 0u );
+        }
+    };
+    vector_free( self + 0xF8 );
+    for ( std::uint32_t k = 5; k-- > 0; )
+        boat_audio_event_release( w, self + 0xC4 + 8u * k, h );
+    for ( std::uint32_t k = 5; k-- > 0; )
+    {
+        const std::uint32_t s = self + 0x4C + 0x18u * k;   // 0x401C30
+        if ( w.get( s + 0x14 ) >= 0x10u && h.free_block )
+            h.free_block( w.get( s ) );
+        w.put( s + 0x14, 0xFu );
+        w.put( s + 0x10, 0u );
+        w.put( s, w.get( s ) & 0xFFFFFF00u );
+    }
+    vector_free( self + 0x3C );
+    if ( h.aligned_free )
+        h.aligned_free( w.get( self + 0x30 ) );
 }
