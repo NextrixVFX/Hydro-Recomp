@@ -12,6 +12,9 @@
 #include <workspace/core/boat/track.hxx>
 #include <workspace/core/boat/fleet.hxx>
 #include <workspace/core/boat/effects.hxx>
+#include <workspace/core/boat/damage.hxx>
+#include <workspace/core/boat/euler.hxx>
+#include <workspace/core/boat/keys.hxx>
 
 #include <array>
 #include <cstdio>
@@ -2632,6 +2635,115 @@ inline bool verify_boat_dtor( )
     return failed == 0;
 }
 
+// verify_euler_slerp (boat batch 29): 0x531850 against retail (case euler_slerp): the four out words, bit for bit.
+inline bool verify_euler_slerp( )
+{
+    int failed = 0;
+    const unsigned* s = g_golden_euler_slerp;
+    for ( std::size_t index = 0; index < g_golden_euler_slerp_count; ++index, s += 12 )
+    {
+        float a[ 3 ], b[ 3 ], t;
+        std::memcpy( a, s, 12 );
+        std::memcpy( b, s + 3, 12 );
+        std::memcpy( &t, s + 6, 4 );
+        const std::uint32_t g = s[ 7 ];
+        std::uint32_t out[ 4 ] = { g, g ^ 0x1234u, g ^ 0x5678u, g ^ 0x9ABCu };
+        float o[ 3 ];
+        euler_slerp( o, a, b, t );
+        std::memcpy( out, o, 12 );
+        if ( std::memcmp( out, s + 8, 16 ) != 0 && ++failed <= 4 )
+            LOG_ERROR( "euler slerp vector %d differs from retail (%08X %08X %08X, retail %08X %08X %08X)", static_cast< int >( index ), out[ 0 ], out[ 1 ],
+                       out[ 2 ], s[ 8 ], s[ 9 ], s[ 10 ] );
+    }
+    if ( failed == 0 )
+        LOG_SUCCESS( "the euler slerp 0x531850 matches retail: %d vectors (bit for bit)", static_cast< int >( g_golden_euler_slerp_count ) );
+    else
+        LOG_ERROR( "euler slerp FAILED %d of %d vectors", failed, static_cast< int >( g_golden_euler_slerp_count ) );
+    return failed == 0;
+}
+
+// verify_piece_clear (boat batch 29): 0x4120F0 against retail (case piece_clear): all 0x90 words.
+inline bool verify_piece_clear( )
+{
+    int failed = 0;
+    for ( std::size_t index = 0; index < g_golden_piece_clear_count; ++index )
+    {
+        const unsigned* s = g_golden_piece_clear + index * 0x120u;
+        std::uint8_t image[ 0x240 ];
+        std::memcpy( image, s, sizeof( image ) );
+        piece_clear( image );
+        if ( std::memcmp( image, s + 0x90, sizeof( image ) ) != 0 )
+            ++failed;
+    }
+    if ( failed == 0 )
+        LOG_SUCCESS( "the piece's clear 0x4120F0 matches retail: %d vectors (0x90 words)", static_cast< int >( g_golden_piece_clear_count ) );
+    else
+        LOG_ERROR( "piece clear FAILED %d of %d vectors", failed, static_cast< int >( g_golden_piece_clear_count ) );
+    return failed == 0;
+}
+
+// verify_boat_manager_key (boat batch 29): 0x4AB380 on the arena retail ran it on (case boat_manager_key): key sequences;
+// 0x5344A0's calls and every arena word.
+inline bool verify_boat_manager_key( )
+{
+    const std::uint32_t self = g_golden_boat_manager_key_header[ 0 ], keyboard = g_golden_boat_manager_key_header[ 1 ];
+    const std::uint32_t base = g_golden_boat_manager_key_header[ 2 ], size = g_golden_boat_manager_key_header[ 3 ];
+    int failed = 0;
+    std::vector< std::uint32_t > image( size / 4 ), post( size / 4 );
+    for ( std::size_t index = 0; index < g_golden_boat_manager_key_count; ++index )
+    {
+        const unsigned* s = g_golden_boat_manager_key_words + g_golden_boat_manager_key_offsets[ index ];
+        std::fill( image.begin( ), image.end( ), 0u );
+        for ( unsigned k = *s++; k-- > 0; s += 2 )
+            image[ ( s[ 0 ] - base ) / 4 ] = s[ 1 ];
+        const unsigned nkeys = *s++;
+        const unsigned* keys = s;
+        s += nkeys;
+        const unsigned nlog = *s++;
+        const std::vector< unsigned > want( s, s + nlog * 18u );
+        s += nlog * 18u;
+        post = image;
+        for ( unsigned k = *s++; k-- > 0; s += 2 )
+            post[ ( s[ 0 ] - base ) / 4 ] = s[ 1 ];
+        bool outside = false;
+        const auto bad = [ & ]( std::uint32_t a ) { return a < base || a >= base + size || ( a & 3u ) != 0; };
+        vu_words_t w;
+        w.get = [ & ]( std::uint32_t a ) {
+            if ( a == 0x75906Cu )
+                return keyboard;
+            if ( bad( a ) )
+            {
+                outside = true;
+                return 0u;
+            }
+            return image[ ( a - base ) / 4 ];
+        };
+        w.put = [ & ]( std::uint32_t a, std::uint32_t x ) {
+            if ( bad( a ) )
+                outside = true;
+            else
+                image[ ( a - base ) / 4 ] = x;
+        };
+        std::vector< unsigned > log;
+        const boat_manager_key_world_fn world = [ & ]( std::uint32_t component, const std::uint32_t* m, std::uint32_t notify ) {
+            log.push_back( component );
+            log.insert( log.end( ), m, m + 16 );
+            log.push_back( notify );
+        };
+        for ( unsigned k = 0; k < nkeys; ++k )
+            boat_manager_key( w, self, keys[ k ], world );
+        if ( ( outside || log != want || image != post ) && ++failed <= 4 )
+            LOG_ERROR( "boat manager key vector %d differs from retail (log %d words, retail %d; outside %d)", static_cast< int >( index ),
+                       static_cast< int >( log.size( ) ), static_cast< int >( want.size( ) ), outside ? 1 : 0 );
+    }
+    if ( failed == 0 )
+        LOG_SUCCESS( "VuBoatManager's keyboard callback 0x4AB380 matches retail: %d key sequences (0x5344A0's calls, the arena's words)",
+                     static_cast< int >( g_golden_boat_manager_key_count ) );
+    else
+        LOG_ERROR( "boat manager key FAILED %d of %d vectors", failed, static_cast< int >( g_golden_boat_manager_key_count ) );
+    return failed == 0;
+}
+
 inline bool verify_boat_all( )
 {
     bool ok = true;
@@ -2642,6 +2754,9 @@ inline bool verify_boat_all( )
     ok = verify_waypoint_dtors( ) && ok;
     ok = verify_boat_engine_dtor( ) && ok;
     ok = verify_boat_dtor( ) && ok;
+    ok = verify_euler_slerp( ) && ok;
+    ok = verify_piece_clear( ) && ok;
+    ok = verify_boat_manager_key( ) && ok;
     ok = verify_boat_ai_driver( ) && ok;
     ok = verify_boat_driver_load( ) && ok;
     ok = verify_boat_tick_state( ) && ok;
