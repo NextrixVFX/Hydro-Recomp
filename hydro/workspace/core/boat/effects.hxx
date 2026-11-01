@@ -311,6 +311,43 @@ inline bool boat_pfx_tick( boat_pfx_t& c, const boat_pfx_boat_t& b, float dt, co
     return true;
 }
 
+// The controller's DRAW, called by VuBoatEntity's draw 0x41EAE0 with its
+// VuGfxDrawParams. A system is drawn through VuPfxSystemInstance slot 14
+// (+0x38, the params pointer) - a render hook here: `draw( user, system,
+// params )`, the params passed as the address retail hands on.
+//
+// 0x41ACC0 (stdcall list, params; retn 8): every record's system drawn. Retail
+// recomputes the count ((end - begin) / 0x60) after each call; the draw does
+// not touch the controller, so a plain walk visits the same records.
+inline void boat_pfx_draw_list( const std::vector< boat_pfx_record_t >& l, std::uint32_t params,
+                                void ( *draw )( void* user, std::uint32_t system, std::uint32_t params ), void* user )
+{
+    for ( const boat_pfx_record_t& r : l )
+        draw( user, r.system, params );
+}
+
+// 0x419CE0 (thiscall controller; params; retn 4): nothing when the params'
+// byte +0x18 is set. Else list 4 (+0x68) when +0x8E (on[ 2 ]); then, unless
+// the boat's (+0x30) byte +0x46B is set, lists 2, 3, 0, 1, 5, 6 (+0x50 +0x5C
+// +0x38 +0x44 +0x74 +0x80) - whatever their "on" bytes; then +0x94's slot 14
+// when it is non-zero (whatever +0x46B).
+inline void boat_pfx_draw( const boat_pfx_t& c, std::uint8_t params_18, std::uint8_t boat_46b, std::uint32_t params,
+                           void ( *draw )( void* user, std::uint32_t system, std::uint32_t params ), void* user )
+{
+    if ( params_18 != 0 )
+        return;
+    if ( c.on[ 2 ] != 0 )
+        boat_pfx_draw_list( c.list[ 4 ], params, draw, user );
+    if ( boat_46b == 0 )
+    {
+        static const int order[ 6 ] = { 2, 3, 0, 1, 5, 6 };
+        for ( int l : order )
+            boat_pfx_draw_list( c.list[ l ], params, draw, user );
+    }
+    if ( c.extra != 0 )
+        draw( user, c.extra, params );
+}
+
 // The binding onto the recreated VuPfx runtime: the water agent's instance
 // exports (world/pfxsim.hxx pfx_instance_*, verified by its case pfx_calls; a
 // system is its heap word) - slot 0 as world/pfxclass.hxx's setter (no

@@ -2384,12 +2384,63 @@ inline bool verify_boat_pfx_fill( )
     return failed == 0;
 }
 
+// verify_boat_pfx_draw (boat batch 28): the pfx controller's draw 0x419CE0 (+ 0x41ACC0) against retail run whole
+// on fake controllers (case boat_pfx_draw): the slot-14 calls, in order, with the system and the params word.
+struct boat_pfx_draw_log_t
+{
+    std::vector< unsigned > calls;
+};
+
+inline bool verify_boat_pfx_draw( )
+{
+    int failed = 0;
+    for ( std::size_t index = 0; index < g_golden_boat_pfx_draw_count; ++index )
+    {
+        const unsigned* s = g_golden_boat_pfx_draw_words + g_golden_boat_pfx_draw_offsets[ index ];
+        const std::uint8_t p18 = static_cast< std::uint8_t >( *s++ ), b46b = static_cast< std::uint8_t >( *s++ );
+        boat_pfx_t c;
+        for ( int k = 0; k < 5; ++k )
+            c.on[ k ] = static_cast< std::uint8_t >( *s++ );
+        c.extra = *s++ ? 0x70u : 0u;
+        const unsigned params = *s++;
+        for ( int l = 0; l < 7; ++l )
+        {
+            const unsigned n = *s++;
+            for ( unsigned r = 0; r < n; ++r )
+            {
+                boat_pfx_record_t rec;
+                rec.system = static_cast< std::uint32_t >( l * 16 ) + r;
+                c.list[ l ].push_back( rec );
+            }
+        }
+        boat_pfx_draw_log_t log;
+        boat_pfx_draw( c, p18, b46b, params, []( void* u, std::uint32_t system, std::uint32_t p ) {
+            static_cast< boat_pfx_draw_log_t* >( u )->calls.push_back( system );
+            static_cast< boat_pfx_draw_log_t* >( u )->calls.push_back( p );
+        }, &log );
+        const unsigned count = *s++;
+        bool ok = log.calls.size( ) == 2u * count;
+        for ( unsigned k = 0; ok && k < 2u * count; ++k )
+            ok = log.calls[ k ] == s[ k ];
+        if ( !ok && ++failed <= 4 )
+            LOG_ERROR( "boat pfx draw vector %d differs from retail: %d calls, retail %u", static_cast< int >( index ),
+                       static_cast< int >( log.calls.size( ) / 2 ), count );
+    }
+    if ( failed == 0 )
+        LOG_SUCCESS( "the pfx controller's draw 0x419CE0 / 0x41ACC0 matches retail: %d vectors (slot-14 calls and their params)",
+                     static_cast< int >( g_golden_boat_pfx_draw_count ) );
+    else
+        LOG_ERROR( "boat pfx draw FAILED %d of %d vectors", failed, static_cast< int >( g_golden_boat_pfx_draw_count ) );
+    return failed == 0;
+}
+
 inline bool verify_boat_all( )
 {
     bool ok = true;
     ok = verify_boat_sections( ) && ok;
     ok = verify_boat_engine( ) && ok;
     ok = verify_boat_pfx_fill( ) && ok;
+    ok = verify_boat_pfx_draw( ) && ok;
     ok = verify_boat_ai_driver( ) && ok;
     ok = verify_boat_driver_load( ) && ok;
     ok = verify_boat_tick_state( ) && ok;
