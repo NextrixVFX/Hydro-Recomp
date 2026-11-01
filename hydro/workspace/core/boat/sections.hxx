@@ -375,6 +375,17 @@ inline void boat_audio_event_release( const vu_words_t& w, std::uint32_t at, con
     w.put( at + 4, 0u );
 }
 
+// 0x401C30 (thiscall std::string): the heap text freed when the capacity +0x14 is >= 16 (`jb`), +0x14 = 15, +0x10 = 0,
+// the byte +0 = 0.
+inline void boat_string_destroy( const vu_words_t& w, std::uint32_t s, const boat_engine_dtor_hooks_t& h )
+{
+    if ( w.get( s + 0x14 ) >= 0x10u && h.free_block )
+        h.free_block( w.get( s ) );
+    w.put( s + 0x14, 0xFu );
+    w.put( s + 0x10, 0u );
+    w.put( s, w.get( s ) & 0xFFFFFF00u );
+}
+
 // 0x41CF20.
 inline void boat_engine_destroy( const vu_words_t& w, std::uint32_t self, const boat_engine_dtor_hooks_t& h )
 {
@@ -392,15 +403,207 @@ inline void boat_engine_destroy( const vu_words_t& w, std::uint32_t self, const 
     for ( std::uint32_t k = 5; k-- > 0; )
         boat_audio_event_release( w, self + 0xC4 + 8u * k, h );
     for ( std::uint32_t k = 5; k-- > 0; )
-    {
-        const std::uint32_t s = self + 0x4C + 0x18u * k;   // 0x401C30
-        if ( w.get( s + 0x14 ) >= 0x10u && h.free_block )
-            h.free_block( w.get( s ) );
-        w.put( s + 0x14, 0xFu );
-        w.put( s + 0x10, 0u );
-        w.put( s, w.get( s ) & 0xFFFFFF00u );
-    }
+        boat_string_destroy( w, self + 0x4C + 0x18u * k, h );
     vector_free( self + 0x3C );
     if ( h.aligned_free )
         h.aligned_free( w.get( self + 0x30 ) );
+}
+
+// ---- VuBoatEntity's dtor, on retail's words (boat batch 29) ----
+//
+// 0x41CB10 (thiscall boat): the four vtables +0 0x7383D4, +0x5C 0x7383C4, +0x60 0x7383B8, +0x64 0x7383B0; 0x421870
+// (boat_teardown, a hook here); +0x21C's slot 1(1); +0x220 released by count (+4 decremented, slot 0(1) at 0); operator
+// delete( +0x224 ) when set; hull +0x228 0x4164C0, engine +0x22C 0x41CF20, animation +0x230 0x40FF10, pfx +0x234 0x4194D0,
+// debris +0x238 0x410F30, each when set and then operator delete of it; slot 0(1) of +0x2A4, +0x2A8, +0x2AC when set; the
+// audio event +0x488 (0x40D820's body, inlined by retail); the skins +0x2EC, +0x2DC, +0x2CC (VuModelSkin's vtable
+// 0x738068, 0x521E40, _aligned_free( +4 )); +0x240 = btStridingMeshInterface's vtable 0x738128; the five strings +0x1A4
+// last to first (0x630EF0), the ten strings +0x178 .. +0x74; +0x5C = btMotionState's 0x7380B4; VuEntity's dtor 0x500870.
+// 0x4164C0 and 0x4194D0's only caller is 0x41CB10, so both are recreated here (the attribution's "world" is the citation
+// in world/session.hxx, not a lane). 0x41CA20 = the scalar-deleting dtor; 0x42201F = its this - 0x5C thunk.
+// HOOKS: 0x421870 and 0x419EF0 (recreated on our model: boat_teardown, boat_pfx_clear), 0x521E40, 0x520000 (renderer /
+// asset), 0x500870 (entity framework), every virtual on an owned object, g 0x759004 vt+0x24, the allocator, FMOD.
+struct boat_dtor_hooks_t
+{
+    boat_engine_dtor_hooks_t engine;                                     // operator delete, _aligned_free, FMOD
+    std::function< void( std::uint32_t ) > delete_array;                 // operator delete[] (the import 0x64C148)
+    std::function< void( std::uint32_t, unsigned, std::uint32_t ) > virtual_call;   // object, slot, argument
+    std::function< void( std::uint32_t ) > asset_release;                // g 0x759004 vt+0x24
+    std::function< void( std::uint32_t ) > teardown;                     // 0x421870
+    std::function< void( std::uint32_t ) > pfx_clear;                    // 0x419EF0
+    std::function< void( std::uint32_t ) > skin_dtor;                    // 0x521E40
+    std::function< void( std::uint32_t ) > model_dtor;                   // 0x520000
+    std::function< void( std::uint32_t ) > entity_dtor;                  // 0x500870
+};
+
+// `dec [obj+4]; jne; slot 0(1)`, nothing for null.
+inline void boat_count_release( const vu_words_t& w, std::uint32_t object, const boat_dtor_hooks_t& h )
+{
+    if ( !object )
+        return;
+    const std::uint32_t count = w.get( object + 4 ) - 1u;
+    w.put( object + 4, count );
+    if ( count == 0 && h.virtual_call )
+        h.virtual_call( object, 0, 1 );
+}
+
+// The solver record's inline dtor (hull +0x1CC in 0x4164C0, pfx +0x34 in 0x4194D0): the asset +0 released when set,
+// operator delete[]( +0x34 ), _aligned_free( +0x44 ), _aligned_free( +0x38 ) unconditionally, operator delete of it.
+inline void boat_solver_destroy( const vu_words_t& w, std::uint32_t record, const boat_dtor_hooks_t& h )
+{
+    if ( !record )
+        return;
+    if ( const std::uint32_t asset = w.get( record ) )
+        if ( h.asset_release )
+            h.asset_release( asset );
+    if ( h.delete_array )
+        h.delete_array( w.get( record + 0x34 ) );
+    if ( h.engine.aligned_free )
+    {
+        h.engine.aligned_free( w.get( record + 0x44 ) );
+        h.engine.aligned_free( w.get( record + 0x38 ) );
+    }
+    if ( h.engine.free_block )
+        h.engine.free_block( record );
+}
+
+// 0x4164C0 (thiscall hull): the solver +0x1CC, the counted +0x1DC .. +0x1E8, the string +0x17C, the four events +0x134
+// and the four strings +0xD4 last to first, the string +4.
+inline void boat_hull_destroy( const vu_words_t& w, std::uint32_t self, const boat_dtor_hooks_t& h )
+{
+    boat_solver_destroy( w, w.get( self + 0x1CC ), h );
+    for ( std::uint32_t k = 0; k < 4; ++k )
+        boat_count_release( w, w.get( self + 0x1DC + 4u * k ), h );
+    boat_string_destroy( w, self + 0x17C, h.engine );
+    for ( std::uint32_t k = 4; k-- > 0; )
+        boat_audio_event_release( w, self + 0x134 + 8u * k, h.engine );
+    for ( std::uint32_t k = 4; k-- > 0; )
+        boat_string_destroy( w, self + 0xD4 + 0x18u * k, h.engine );
+    boat_string_destroy( w, self + 4, h.engine );
+}
+
+// 0x40FF10 (thiscall animation): the three events +0xC4 and the three strings +0x7C last to first, the strings +0x44,
+// +0x2C, +0x14.
+inline void boat_animation_destroy( const vu_words_t& w, std::uint32_t self, const boat_dtor_hooks_t& h )
+{
+    for ( std::uint32_t k = 3; k-- > 0; )
+        boat_audio_event_release( w, self + 0xC4 + 8u * k, h.engine );
+    for ( std::uint32_t k = 3; k-- > 0; )
+        boat_string_destroy( w, self + 0x7C + 0x18u * k, h.engine );
+    boat_string_destroy( w, self + 0x44, h.engine );
+    boat_string_destroy( w, self + 0x2C, h.engine );
+    boat_string_destroy( w, self + 0x14, h.engine );
+}
+
+// 0x4194D0 (thiscall pfx controller): 0x419EF0, the solver +0x34, the seven record lists +0x80 .. +0x38 (each with a
+// begin: 0x41AE50 resets the name at the head of every 0x60-byte record, the block is freed, begin / end / capacity =
+// 0), the strings +0x18, +0.
+inline void boat_pfx_destroy( const vu_words_t& w, std::uint32_t self, const boat_dtor_hooks_t& h )
+{
+    if ( h.pfx_clear )
+        h.pfx_clear( self );
+    boat_solver_destroy( w, w.get( self + 0x34 ), h );
+    for ( std::uint32_t k = 7; k-- > 0; )
+    {
+        const std::uint32_t at = self + 0x38 + 12u * k;
+        const std::uint32_t begin = w.get( at );
+        if ( !begin )
+            continue;
+        const std::uint32_t end = w.get( at + 4 );
+        for ( std::uint32_t record = begin; record != end; record += 0x60u )   // 0x41AE50
+            boat_string_destroy( w, record, h.engine );
+        if ( h.engine.free_block )
+            h.engine.free_block( begin );
+        w.put( at, 0u );
+        w.put( at + 4, 0u );
+        w.put( at + 8, 0u );
+    }
+    boat_string_destroy( w, self + 0x18, h.engine );
+    boat_string_destroy( w, self, h.engine );
+}
+
+// 0x410F30 (thiscall debris): 0x412170 (slot 0(1) of every non-null entry of the +0x9C array of +0xA0 words, in order,
+// then +0xA0 = 0), _aligned_free( +0x9C ), the string +0x78, +4 = 0x74CD9C, operator delete[]( +0x74 ), +4 = 0x74CDAC,
+// 0x520000( +4 ), +4 = VuModelInstance's 0x7505F8.
+inline void boat_debris_destroy( const vu_words_t& w, std::uint32_t self, const boat_dtor_hooks_t& h )
+{
+    const std::uint32_t data = w.get( self + 0x9C );
+    for ( std::int32_t k = 0; k < static_cast< std::int32_t >( w.get( self + 0xA0 ) ); ++k )   // `jle` / `jl`: signed
+        if ( const std::uint32_t piece = w.get( data + 4u * static_cast< std::uint32_t >( k ) ) )
+            if ( h.virtual_call )
+                h.virtual_call( piece, 0, 1 );
+    w.put( self + 0xA0, 0u );
+    if ( h.engine.aligned_free )
+        h.engine.aligned_free( data );
+    boat_string_destroy( w, self + 0x78, h.engine );
+    w.put( self + 4, 0x74CD9Cu );
+    if ( h.delete_array )
+        h.delete_array( w.get( self + 0x74 ) );
+    w.put( self + 4, 0x74CDACu );
+    if ( h.model_dtor )
+        h.model_dtor( self + 4 );
+    w.put( self + 4, 0x7505F8u );
+}
+
+// 0x41CB10.
+inline void boat_destroy( const vu_words_t& w, std::uint32_t self, const boat_dtor_hooks_t& h )
+{
+    w.put( self, 0x7383D4u );
+    w.put( self + 0x5C, 0x7383C4u );
+    w.put( self + 0x60, 0x7383B8u );
+    w.put( self + 0x64, 0x7383B0u );
+    if ( h.teardown )
+        h.teardown( self );
+    if ( const std::uint32_t body = w.get( self + 0x21C ) )
+        if ( h.virtual_call )
+            h.virtual_call( body, 1, 1 );
+    boat_count_release( w, w.get( self + 0x220 ), h );
+    if ( const std::uint32_t block = w.get( self + 0x224 ) )
+        if ( h.engine.free_block )
+            h.engine.free_block( block );
+    auto owned = [ & ]( std::uint32_t at, void ( *destroy )( const vu_words_t&, std::uint32_t, const boat_dtor_hooks_t& ) ) {
+        if ( const std::uint32_t part = w.get( self + at ) )
+        {
+            destroy( w, part, h );
+            if ( h.engine.free_block )
+                h.engine.free_block( part );
+        }
+    };
+    owned( 0x228, boat_hull_destroy );
+    owned( 0x22C, []( const vu_words_t& words, std::uint32_t part, const boat_dtor_hooks_t& hooks ) {
+        boat_engine_destroy( words, part, hooks.engine );
+    } );
+    owned( 0x230, boat_animation_destroy );
+    owned( 0x234, boat_pfx_destroy );
+    owned( 0x238, boat_debris_destroy );
+    for ( const std::uint32_t at : { 0x2A4u, 0x2A8u, 0x2ACu } )
+        if ( const std::uint32_t object = w.get( self + at ) )
+            if ( h.virtual_call )
+                h.virtual_call( object, 0, 1 );
+    boat_audio_event_release( w, self + 0x488, h.engine );
+    for ( const std::uint32_t at : { 0x2ECu, 0x2DCu, 0x2CCu } )
+    {
+        w.put( self + at, 0x738068u );
+        if ( h.skin_dtor )
+            h.skin_dtor( self + at );
+        if ( h.engine.aligned_free )
+            h.engine.aligned_free( w.get( self + at + 4 ) );
+    }
+    w.put( self + 0x240, 0x738128u );
+    for ( std::uint32_t k = 5; k-- > 0; )
+        boat_string_destroy( w, self + 0x1A4 + 0x18u * k, h.engine );
+    for ( const std::uint32_t at : { 0x178u, 0x160u, 0x148u, 0x11Cu, 0xF4u, 0xDCu, 0xC4u, 0xA4u, 0x8Cu, 0x74u } )
+        boat_string_destroy( w, self + at, h.engine );
+    w.put( self + 0x5C, 0x7380B4u );
+    if ( h.entity_dtor )
+        h.entity_dtor( self );
+}
+
+// 0x41CA20 (thiscall boat, flags; retn 4): 0x41CB10, with flags & 1 operator delete( boat ); returns boat. The thunk
+// 0x42201F is `this - 0x5C` then this: `self` is the adjusted pointer either way.
+inline std::uint32_t boat_delete( const vu_words_t& w, std::uint32_t self, std::uint32_t flags, const boat_dtor_hooks_t& h )
+{
+    boat_destroy( w, self, h );
+    if ( ( flags & 1u ) && h.engine.free_block )
+        h.engine.free_block( self );
+    return self;
 }

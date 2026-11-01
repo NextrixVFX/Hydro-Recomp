@@ -2552,6 +2552,86 @@ inline bool verify_boat_engine_dtor( )
     return failed == 0;
 }
 
+// verify_boat_dtor (boat batch 29): VuBoatEntity's dtor 0x41CB10 with its owned objects' dtors, through 0x41CA20 / 0x42201F,
+// on the arena retail ran it on (case boat_dtor): the hook calls in order with their arguments, and every arena word.
+inline bool verify_boat_dtor( )
+{
+    const std::uint32_t boat = g_golden_boat_dtor_header[ 0 ], base = g_golden_boat_dtor_header[ 1 ], size = g_golden_boat_dtor_header[ 2 ];
+    int failed = 0;
+    std::vector< std::uint32_t > image( size / 4 ), post( size / 4 );
+    for ( std::size_t index = 0; index < g_golden_boat_dtor_count; ++index )
+    {
+        const unsigned* s = g_golden_boat_dtor_words + g_golden_boat_dtor_offsets[ index ];
+        const std::uint32_t flags = *s++;
+        s++;   // entered through the thunk 0x42201F: its `this - 0x5C` is retail's, `boat_delete` takes the adjusted pointer
+        std::fill( image.begin( ), image.end( ), 0u );
+        for ( unsigned k = *s++; k-- > 0; s += 2 )
+            image[ ( s[ 0 ] - base ) / 4 ] = s[ 1 ];
+        std::vector< unsigned > want;
+        for ( unsigned k = *s++; k-- > 0; )
+        {
+            const unsigned length = *s++;
+            want.push_back( length );
+            want.insert( want.end( ), s, s + length );
+            s += length;
+        }
+        post = image;
+        for ( unsigned k = *s++; k-- > 0; s += 2 )
+            post[ ( s[ 0 ] - base ) / 4 ] = s[ 1 ];
+        bool outside = false;
+        const auto bad = [ & ]( std::uint32_t a ) { return a < base || a >= base + size || ( a & 3u ) != 0; };
+        vu_words_t w;
+        w.get = [ & ]( std::uint32_t a ) {
+            if ( bad( a ) )
+            {
+                outside = true;
+                return 0u;
+            }
+            return image[ ( a - base ) / 4 ];
+        };
+        w.put = [ & ]( std::uint32_t a, std::uint32_t x ) {
+            if ( bad( a ) )
+                outside = true;
+            else
+                image[ ( a - base ) / 4 ] = x;
+        };
+        std::vector< unsigned > log;
+        const auto one = [ & ]( unsigned kind ) {
+            return [ &log, kind ]( std::uint32_t a ) { log.insert( log.end( ), { 2u, kind, a } ); };
+        };
+        const auto worded = [ & ]( unsigned kind ) {
+            return [ &log, &w, kind ]( std::uint32_t a ) { log.insert( log.end( ), { 3u, kind, a, w.get( a ) } ); };
+        };
+        boat_dtor_hooks_t h;
+        h.engine.free_block = one( 1 );
+        h.engine.aligned_free = one( 2 );
+        h.delete_array = one( 3 );
+        h.engine.set_callback_none = [ & ]( std::uint32_t e ) { log.insert( log.end( ), { 4u, 4u, e, 0u, 0u } ); };
+        h.engine.stop = [ & ]( std::uint32_t e, bool immediate ) { log.insert( log.end( ), { 3u, 5u, e, immediate ? 1u : 0u } ); };
+        h.teardown = one( 10 );
+        h.pfx_clear = one( 11 );
+        h.skin_dtor = worded( 12 );
+        h.model_dtor = worded( 13 );
+        h.entity_dtor = worded( 14 );
+        h.virtual_call = [ & ]( std::uint32_t object, unsigned slot, std::uint32_t argument ) {
+            log.insert( log.end( ), { 3u, 20u + slot, object, argument } );
+        };
+        // Retail's `this` here is g 0x759004's object: the case's stub at arena +0x200.
+        h.asset_release = [ & ]( std::uint32_t handle ) { log.insert( log.end( ), { 3u, 30u, base + 0x200u, handle } ); };
+        const std::uint32_t answer = boat_delete( w, boat, flags, h );
+        const bool ok = !outside && answer == boat && log == want && image == post;
+        if ( !ok && ++failed <= 4 )
+            LOG_ERROR( "boat dtor vector %d differs from retail (log %d words, retail %d; outside %d)", static_cast< int >( index ),
+                       static_cast< int >( log.size( ) ), static_cast< int >( want.size( ) ), outside ? 1 : 0 );
+    }
+    if ( failed == 0 )
+        LOG_SUCCESS( "VuBoatEntity's dtor 0x41CB10 (0x41CA20 / 0x42201F, hull 0x4164C0, animation 0x40FF10, pfx 0x4194D0 + 0x41AE50, debris "
+                     "0x410F30 + 0x412170) matches retail: %d vectors (hook calls, the arena's words)", static_cast< int >( g_golden_boat_dtor_count ) );
+    else
+        LOG_ERROR( "boat dtor FAILED %d of %d vectors", failed, static_cast< int >( g_golden_boat_dtor_count ) );
+    return failed == 0;
+}
+
 inline bool verify_boat_all( )
 {
     bool ok = true;
@@ -2561,6 +2641,7 @@ inline bool verify_boat_all( )
     ok = verify_boat_pfx_draw( ) && ok;
     ok = verify_waypoint_dtors( ) && ok;
     ok = verify_boat_engine_dtor( ) && ok;
+    ok = verify_boat_dtor( ) && ok;
     ok = verify_boat_ai_driver( ) && ok;
     ok = verify_boat_driver_load( ) && ok;
     ok = verify_boat_tick_state( ) && ok;
