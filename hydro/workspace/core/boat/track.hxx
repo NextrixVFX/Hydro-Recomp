@@ -1,5 +1,6 @@
 #pragma once
 
+#include <workspace/core/boat/nuisance.hxx>
 #include <workspace/core/boat/state.hxx>
 #include <workspace/core/game/types.hxx>
 
@@ -696,4 +697,55 @@ inline bool waypoint_update_branches( track_manager_t& tm, track_waypoint_t& w, 
     const float a = use[ 0 ] ? value[ 0 ] : w.p.branch_a;
     const float b = use[ 1 ] ? value[ 1 ] : w.p.branch_b;
     return waypoint_set_branches( tm, w, a, b, replan );
+}
+// ---- VuAiWaypointEntity's dtor (vtable 0x739D44 slot 0, scalar-deleting: thiscall(entity, flags), retn 4; eax =
+// this), on retail's words (boat batch 28) ----
+//
+// 0x4320E0: the two 3-element arrays the ctor 0x431770 builds with `eh vector constructor iterator` 0x631110 (element
+// 0x10 bytes, ctor 0x432DB0) - +0xE4 first, then +0xA8 - destroyed by `eh vector destructor iterator` 0x630EF0 with
+// the element dtor 0x432DD0, then VuEntity's dtor 0x500870, then with flags & 1 operator delete(this).
+// 0x432DD0 (thiscall element): an array { +0 count, +4 capacity, +8 data, +0xC owned byte } of 0x1C-byte records
+// whose std::string is at +4: 0x432EC0 (thiscall array; an unused stack word, count; retn 8) resets the first
+// `count` strings (the heap text freed when the capacity +0x14 is >= 16; then capacity 15, size 0, the first byte 0),
+// then with the owned byte the data is _aligned_free'd; +0 / +4 / +8 = 0, the owned byte = 1.
+// The imports and 0x500870 are hooks, in retail's order.
+struct waypoint_dtor_hooks_t
+{
+    std::function< void( std::uint32_t ) > free_block;     // operator delete
+    std::function< void( std::uint32_t ) > aligned_free;   // _aligned_free
+    std::function< void( ) > entity_dtor;                  // 0x500870
+};
+
+// 0x432DD0 (with 0x432EC0).
+inline void waypoint_array_destroy( const vu_words_t& w, std::uint32_t a, const waypoint_dtor_hooks_t& h )
+{
+    const std::int32_t count = static_cast< std::int32_t >( w.get( a ) );
+    for ( std::int32_t k = 0; k < count; ++k )
+    {
+        const std::uint32_t s = w.get( a + 8 ) + 0x1Cu * static_cast< std::uint32_t >( k ) + 4u;
+        if ( w.get( s + 0x14 ) >= 0x10u && h.free_block )
+            h.free_block( w.get( s ) );
+        w.put( s + 0x14, 0xFu );
+        w.put( s + 0x10, 0u );
+        w.put( s, w.get( s ) & 0xFFFFFF00u );
+    }
+    if ( ( w.get( a + 0xC ) & 0xFFu ) != 0 && h.aligned_free )
+        h.aligned_free( w.get( a + 8 ) );
+    w.put( a, 0u );
+    w.put( a + 4, 0u );
+    w.put( a + 8, 0u );
+    w.put( a + 0xC, ( w.get( a + 0xC ) & 0xFFFFFF00u ) | 1u );
+}
+
+// 0x4320E0. `eh vector destructor iterator` walks an array from its last element to its first.
+inline std::uint32_t waypoint_destroy( const vu_words_t& w, std::uint32_t self, std::uint32_t flags, const waypoint_dtor_hooks_t& h )
+{
+    for ( std::uint32_t base : { 0xE4u, 0xA8u } )
+        for ( std::uint32_t k = 3; k-- > 0; )
+            waypoint_array_destroy( w, self + base + 0x10u * k, h );
+    if ( h.entity_dtor )
+        h.entity_dtor( );
+    if ( ( flags & 1u ) && h.free_block )
+        h.free_block( self );
+    return self;
 }

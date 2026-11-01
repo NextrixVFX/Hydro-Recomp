@@ -2434,6 +2434,66 @@ inline bool verify_boat_pfx_draw( )
     return failed == 0;
 }
 
+// verify_waypoint_dtors (boat batch 28): VuAiWaypointEntity's dtor 0x4320E0 (+ 0x630EF0, 0x432DD0, 0x432EC0) on the
+// words retail ran it on (case waypoint_dtors): the hook calls in order and every array / string word after.
+inline bool verify_waypoint_dtors( )
+{
+    int failed = 0;
+    for ( std::size_t index = 0; index < g_golden_waypoint_dtors_count; ++index )
+    {
+        const unsigned* s = g_golden_waypoint_dtors_words + g_golden_waypoint_dtors_offsets[ index ];
+        const std::uint32_t ent = *s++, flags = *s++, eax_ok = *s++, untouched = *s++;
+        const unsigned n = *s++;
+        std::map< std::uint32_t, std::uint32_t > mem;
+        std::vector< std::uint32_t > addrs;
+        for ( unsigned k = 0; k < n; ++k, s += 2 )
+        {
+            mem[ s[ 0 ] ] = s[ 1 ];
+            addrs.push_back( s[ 0 ] );
+        }
+        const unsigned nlog = *s++;
+        const unsigned* glog = s;
+        s += 2 * nlog;
+        const unsigned* post = s;
+        bool unknown = false;
+        vu_words_t w;
+        w.get = [ & ]( std::uint32_t a ) {
+            auto it = mem.find( a );
+            if ( it == mem.end( ) )
+            {
+                unknown = true;
+                return 0u;
+            }
+            return it->second;
+        };
+        w.put = [ & ]( std::uint32_t a, std::uint32_t x ) {
+            if ( mem.find( a ) == mem.end( ) )
+                unknown = true;
+            mem[ a ] = x;
+        };
+        std::vector< unsigned > log;
+        waypoint_dtor_hooks_t h;
+        h.free_block = [ & ]( std::uint32_t a ) { log.push_back( 1u ); log.push_back( a ); };
+        h.aligned_free = [ & ]( std::uint32_t a ) { log.push_back( 2u ); log.push_back( a ); };
+        h.entity_dtor = [ & ]( ) { log.push_back( 3u ); log.push_back( ent ); };
+        const std::uint32_t r = waypoint_destroy( w, ent, flags, h );
+        bool ok = !unknown && r == ent && eax_ok == 1u && untouched == 1u && log.size( ) == 2u * nlog;
+        for ( unsigned k = 0; ok && k < 2u * nlog; ++k )
+            ok = log[ k ] == glog[ k ];
+        for ( unsigned k = 0; ok && k < n; ++k )
+            ok = mem[ addrs[ k ] ] == post[ k ];
+        if ( !ok && ++failed <= 4 )
+            LOG_ERROR( "waypoint dtor vector %d differs from retail (%d hook calls, retail %u)", static_cast< int >( index ),
+                       static_cast< int >( log.size( ) / 2 ), nlog );
+    }
+    if ( failed == 0 )
+        LOG_SUCCESS( "VuAiWaypointEntity's dtor 0x4320E0 (0x630EF0 / 0x432DD0 / 0x432EC0) matches retail: %d vectors (hook calls, "
+                     "array and string words)", static_cast< int >( g_golden_waypoint_dtors_count ) );
+    else
+        LOG_ERROR( "waypoint dtors FAILED %d of %d vectors", failed, static_cast< int >( g_golden_waypoint_dtors_count ) );
+    return failed == 0;
+}
+
 inline bool verify_boat_all( )
 {
     bool ok = true;
@@ -2441,6 +2501,7 @@ inline bool verify_boat_all( )
     ok = verify_boat_engine( ) && ok;
     ok = verify_boat_pfx_fill( ) && ok;
     ok = verify_boat_pfx_draw( ) && ok;
+    ok = verify_waypoint_dtors( ) && ok;
     ok = verify_boat_ai_driver( ) && ok;
     ok = verify_boat_driver_load( ) && ok;
     ok = verify_boat_tick_state( ) && ok;
