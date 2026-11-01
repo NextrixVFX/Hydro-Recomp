@@ -15,6 +15,7 @@
 #include <workspace/core/boat/damage.hxx>
 #include <workspace/core/boat/euler.hxx>
 #include <workspace/core/boat/keys.hxx>
+#include <workspace/core/boat/powerup.hxx>
 
 #include <array>
 #include <cstdio>
@@ -2744,6 +2745,29 @@ inline bool verify_boat_manager_key( )
     return failed == 0;
 }
 
+// verify_powerup_motion (boat batch 29): 0x43BD90 against retail (case powerup_motion): 0x5344A0's arguments.
+inline bool verify_powerup_motion( )
+{
+    int failed = 0;
+    for ( std::size_t index = 0; index < g_golden_powerup_motion_count; ++index )
+    {
+        const unsigned* s = g_golden_powerup_motion + index * 5u;
+        std::uint32_t got[ 3 ] = { };
+        powerup_motion_update( s[ 0 ], s[ 1 ], [ & ]( std::uint32_t c, std::uint32_t m, std::uint32_t n ) {
+            got[ 0 ] = c;
+            got[ 1 ] = m;
+            got[ 2 ] = n;
+        } );
+        if ( std::memcmp( got, s + 2, 12 ) != 0 )
+            ++failed;
+    }
+    if ( failed == 0 )
+        LOG_SUCCESS( "VuPowerUpBoostEntity's motion slot 0x43BD90 matches retail: %d vectors", static_cast< int >( g_golden_powerup_motion_count ) );
+    else
+        LOG_ERROR( "powerup motion FAILED %d of %d vectors", failed, static_cast< int >( g_golden_powerup_motion_count ) );
+    return failed == 0;
+}
+
 inline bool verify_boat_all( )
 {
     bool ok = true;
@@ -2757,6 +2781,7 @@ inline bool verify_boat_all( )
     ok = verify_euler_slerp( ) && ok;
     ok = verify_piece_clear( ) && ok;
     ok = verify_boat_manager_key( ) && ok;
+    ok = verify_powerup_motion( ) && ok;
     ok = verify_boat_ai_driver( ) && ok;
     ok = verify_boat_driver_load( ) && ok;
     ok = verify_boat_tick_state( ) && ok;
