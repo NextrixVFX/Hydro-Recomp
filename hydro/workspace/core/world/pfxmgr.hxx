@@ -176,6 +176,7 @@ inline void pfx_manager_game_release( pfx_manager_t& m, int e, const pfx_manager
 // 0x52BDE0. Returns the entry.
 inline int pfx_manager_create( pfx_manager_t& m, const char* path, const pfx_manager_ops_t& ops )
 {
+    spikes::count( spikes::c_pfx_created );
     if ( m.free_count == 0 )
         return -1;
     const std::uint32_t inst = ops.create != nullptr ? ops.create( ops.user, path ) : 0u;

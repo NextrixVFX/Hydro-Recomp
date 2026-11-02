@@ -5,6 +5,7 @@
 
 #include <workspace/core/render/gfx.hxx>
 #include <workspace/utility/drawstats.hxx>
+#include <workspace/utility/spikes.hxx>
 
 #include <impl/host.hxx>
 
@@ -37,72 +38,84 @@ struct gfx_direct_t final : gfx_api_t
 
     gfx_handle_t create_buffer( const gfx_buffer_desc_t& d ) override
     {
+        const spikes::scope_t spike( spikes::k_create ); spikes::count( spikes::c_creates );
         ID3D11Buffer* o = nullptr;
         m_device->CreateBuffer( reinterpret_cast< const D3D11_BUFFER_DESC* >( &d ), nullptr, &o );
         return out( o );
     }
     gfx_handle_t create_texture( const gfx_texture_desc_t& d ) override
     {
+        const spikes::scope_t spike( spikes::k_create ); spikes::count( spikes::c_creates );
         ID3D11Texture2D* o = nullptr;
         m_device->CreateTexture2D( reinterpret_cast< const D3D11_TEXTURE2D_DESC* >( &d ), nullptr, &o );
         return out( o );
     }
     gfx_handle_t create_view( gfx_handle_t t ) override
     {
+        const spikes::scope_t spike( spikes::k_create ); spikes::count( spikes::c_creates );
         ID3D11ShaderResourceView* o = nullptr;
         m_device->CreateShaderResourceView( as< ID3D11Resource >( t ), nullptr, &o );
         return out( o );
     }
     gfx_handle_t create_layout( const gfx_layout_element_t* e, std::uint32_t n, const void* code, std::uint32_t size ) override
     {
+        const spikes::scope_t spike( spikes::k_create ); spikes::count( spikes::c_creates );
         ID3D11InputLayout* o = nullptr;
         m_device->CreateInputLayout( reinterpret_cast< const D3D11_INPUT_ELEMENT_DESC* >( e ), n, code, size, &o );
         return out( o );
     }
     gfx_handle_t create_sampler( const gfx_sampler_desc_t& d ) override
     {
+        const spikes::scope_t spike( spikes::k_create ); spikes::count( spikes::c_creates );
         ID3D11SamplerState* o = nullptr;
         m_device->CreateSamplerState( reinterpret_cast< const D3D11_SAMPLER_DESC* >( &d ), &o );
         return out( o );
     }
     gfx_handle_t create_target_view( gfx_handle_t t ) override
     {
+        const spikes::scope_t spike( spikes::k_create ); spikes::count( spikes::c_creates );
         ID3D11RenderTargetView* o = nullptr;
         m_device->CreateRenderTargetView( as< ID3D11Resource >( t ), nullptr, &o );
         return out( o );
     }
     gfx_handle_t create_depth_view( gfx_handle_t t ) override
     {
+        const spikes::scope_t spike( spikes::k_create ); spikes::count( spikes::c_creates );
         ID3D11DepthStencilView* o = nullptr;
         m_device->CreateDepthStencilView( as< ID3D11Resource >( t ), nullptr, &o );
         return out( o );
     }
     gfx_handle_t create_vertex_shader( const void* code, std::uint32_t size ) override
     {
+        const spikes::scope_t spike( spikes::k_create ); spikes::count( spikes::c_creates );
         ID3D11VertexShader* o = nullptr;
         m_device->CreateVertexShader( code, size, nullptr, &o );
         return out( o );
     }
     gfx_handle_t create_pixel_shader( const void* code, std::uint32_t size ) override
     {
+        const spikes::scope_t spike( spikes::k_create ); spikes::count( spikes::c_creates );
         ID3D11PixelShader* o = nullptr;
         m_device->CreatePixelShader( code, size, nullptr, &o );
         return out( o );
     }
     gfx_handle_t create_blend( const gfx_blend_desc_t& d ) override
     {
+        const spikes::scope_t spike( spikes::k_create ); spikes::count( spikes::c_creates );
         ID3D11BlendState* o = nullptr;
         m_device->CreateBlendState( reinterpret_cast< const D3D11_BLEND_DESC* >( &d ), &o );
         return out( o );
     }
     gfx_handle_t create_depth( const gfx_depth_desc_t& d ) override
     {
+        const spikes::scope_t spike( spikes::k_create ); spikes::count( spikes::c_creates );
         ID3D11DepthStencilState* o = nullptr;
         m_device->CreateDepthStencilState( reinterpret_cast< const D3D11_DEPTH_STENCIL_DESC* >( &d ), &o );
         return out( o );
     }
     gfx_handle_t create_raster( const gfx_raster_desc_t& d ) override
     {
+        const spikes::scope_t spike( spikes::k_create ); spikes::count( spikes::c_creates );
         ID3D11RasterizerState* o = nullptr;
         m_device->CreateRasterizerState( reinterpret_cast< const D3D11_RASTERIZER_DESC* >( &d ), &o );
         return out( o );

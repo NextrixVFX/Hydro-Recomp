@@ -1197,6 +1197,7 @@ inline void race_session_mine_hide( race_session_t::dyn_prop_t& d )
 inline void race_session_explode( race_session_t& s, const float* m, const float* explosion9, const std::string& pfx, const std::string& audio,
                                   const char* who )
 {
+    spikes::count( spikes::c_explosions );
     LOG_INFO( "race: %s explodes at %.1f %.1f %.1f, pfx '%s' (frame %d)", who, m[ 12 ], m[ 13 ], m[ 14 ], pfx.c_str( ), s.frames );   // ours, a log line
     std::uint8_t params[ 0x38 ] = { };
     std::memcpy( params, m + 12, 16 );
@@ -2265,7 +2266,11 @@ inline void race_session_water( void* user, float dt )
 inline void race_session_dynamics_kick( void* user, float dt )
 {
     race_session_t& s = *static_cast< race_session_t* >( user );
-    race_dynamics_kick( *s.dynamics, dt );
+    {
+        const spikes::scope_t spike( spikes::k_physics );
+        race_dynamics_kick( *s.dynamics, dt );
+    }
+    spikes::count( spikes::c_manifolds, static_cast< std::uint32_t >( s.dynamics->collision.dispatcher.manifolds.size( ) ) );
     if ( !s.dynamics->stopped.empty( ) )
         race_unwired( s, s.dynamics->stopped );
 }
@@ -2287,6 +2292,7 @@ struct race_session_tick_t
 inline void race_session_decision( void* user, float dt )
 {
     race_session_tick_t& t = *static_cast< race_session_tick_t* >( user );
+    const spikes::scope_t spike( spikes::k_boat_decision );
     if ( t.boat->sections && t.index < t.session->drives.size( ) && t.session->drives[ t.index ] )
     {
         race_drive_decision( *t.session, t.index, dt );
@@ -2301,6 +2307,7 @@ inline void race_session_decision( void* user, float dt )
 inline void race_session_build( void* user, float dt )
 {
     race_session_tick_t& t = *static_cast< race_session_tick_t* >( user );
+    const spikes::scope_t spike( spikes::k_boat_build );
     if ( t.boat->sections && t.index < t.session->drives.size( ) && t.session->drives[ t.index ] )
     {
         race_drive_build( *t.session, t.index, dt );
@@ -2317,6 +2324,7 @@ inline void race_session_build( void* user, float dt )
 inline void race_session_fleet( void* user, float dt )
 {
     race_session_t& s = *static_cast< race_session_t* >( user );
+    const spikes::scope_t spike( spikes::k_fleet );
     fleet_tick( s.fleet, *s.track, s.pilots, s.fleet_boats, *s.random, dt );
 }
 

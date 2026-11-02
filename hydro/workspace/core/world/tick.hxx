@@ -158,8 +158,10 @@ inline void tick_run( tick_manager_t& tm, double now )
     }
     if ( tm.pause_count != 0 )
         dt = previous = 0.0f;
+    std::uint32_t phase_index = spikes::k_phase;   // ours: utility/spikes.hxx
     for ( tick_phase_t& p : tm.phases )
     {
+        const spikes::scope_t spike( phase_index++ );
         if ( !p.enabled )
             continue;
         const float d = p.last_dt ? previous : dt;

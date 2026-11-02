@@ -1555,7 +1555,12 @@ public:
         const float up[ 3 ] = { rt[ 1 ] * fw[ 2 ] - rt[ 2 ] * fw[ 1 ], rt[ 2 ] * fw[ 0 ] - rt[ 0 ] * fw[ 2 ], rt[ 0 ] * fw[ 1 ] - rt[ 1 ] * fw[ 0 ] };
         const float aspect = static_cast< float >( m_race.world.display_w ) / static_cast< float >( m_race.world.display_h );
         const water_frustum_t cam = water_frustum_build( m_eye, rt, fw, up, aspect, m_lens_near, m_far, m_lens_tan * aspect );
-        water_grid_frame( m_grid, cam, m_water, &m_water_view, m_grid_frame );
+        {
+            const spikes::scope_t spike( spikes::k_water_grid );
+            water_grid_frame( m_grid, cam, m_water, &m_water_view, m_grid_frame );
+            spikes::count( spikes::c_water_vertices, static_cast< std::uint32_t >( m_grid_frame.vertices.size( ) ) );
+        }
+        const spikes::scope_t spike( spikes::k_water_stage );
         water_stage_frame( dt );
     }
     // The frame's water on retail's programs (world/waterpass.hxx). The record is 0x53ABA0's statics 0x7596E0: 0x52F690 at the camera's eye (0x5588B0 runs it each view), the blender when a race
@@ -1903,6 +1908,7 @@ public:
     // reader of it is recreated). The ocean field rebuild and the render kick have no hook: counted.
     void water_frame( float dt )
     {
+        const spikes::scope_t spike( spikes::k_water_tick );
         const double ocean_start = trace::now( );
         water_built_hooks_t hooks{};
         hooks.user = this;
@@ -1938,15 +1944,22 @@ public:
         update_rotators( dt );
 
         const double props_start = trace::now( );
-        skin_props( dt );
-        animated_attach_tick( );
+        {
+            const spikes::scope_t spike( spikes::k_skin );
+            skin_props( dt );
+            animated_attach_tick( );
+        }
         trace::frame( ).props += trace::now( ) - props_start;
 
         const double pfx_start = trace::now( );
         // --no-pfx (diagnostic, ours): no pfx tick and no pfx draw - the A/B for a change that moves only the pfx.
         if ( c_engine::option( "no-pfx" ) == nullptr )
         {
-            m_pfx.frame( dt, m_eye );
+            {
+                const spikes::scope_t spike( spikes::k_pfx_tick );
+                m_pfx.frame( dt, m_eye );
+            }
+            const spikes::scope_t spike( spikes::k_pfx_emit );
             m_retail_geoms.clear( );
             race_session_pfx_draw( m_race, m_race_pfx_draw );
             m_pfx.draw( m_eye, m_target, [ this ]( const std::string& path ) { return texture_for( path ); },
@@ -1957,6 +1970,7 @@ public:
             c_engine::drop( 11 );
             c_engine::drop( 14 );
         }
+        const spikes::scope_t spike( spikes::k_corona );
         m_coronas.tick( dt );
         // VuCoronaEntity's occlusion 0x61D000, the race's collision world. SUBSTITUTION: the triangle's material byte +0x29 (0x5E7650) is not loaded: every triangle stops the ray. No world (the front end): visible.
         if ( m_race.active && m_race.dynamics )
