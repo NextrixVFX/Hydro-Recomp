@@ -50,6 +50,12 @@ public:
     static void screen( const unsigned char* rgba, int width, int height );
     static int geometry( const mesh_vertex_t* vertices, int vertex_count, const unsigned short* indices, int index_count );
     static int texture( const unsigned char* rgba, int width, int height );
+    // The running game's water (hydro world/waterpass.hxx): the pass called in the transparent stage, a texture's view, the device, the context, the planar target's view,
+    // the camera the pass draws with. Pointers are void* because this header has no D3D11.
+    static void water_pass( void ( *pass )( void* ), void* user );
+    static void* texture_view( int texture );
+    static void device( void*& device, void*& context, void*& mirror );
+    static void matrices( float* view, float* projection, float* eye );
     // Six square RGBA faces in asset order; returns a cube handle for place().
     static int cube( const unsigned char* const* faces, int face );
     // Attach a material's authored shading constants to a placement.

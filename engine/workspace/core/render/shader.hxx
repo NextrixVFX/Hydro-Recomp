@@ -9,7 +9,6 @@ public:
     bool create( );
     void bind_mesh( );
     void bind_textured( );
-    void bind_water( );
     void bind_blit( );
     void bind_fxaa( );
     void constants( const void* data, int bytes );
@@ -26,8 +25,6 @@ private:
     ID3D11VertexShader* m_textured_vs{};
     ID3D11PixelShader*  m_textured_ps{};
     ID3D11InputLayout*  m_textured_layout{};
-    ID3D11VertexShader* m_water_vs{};
-    ID3D11PixelShader*  m_water_ps{};
     ID3D11VertexShader* m_blit_vs{};
     ID3D11PixelShader*  m_blit_ps{};
     ID3D11PixelShader*  m_fxaa_ps{};
@@ -256,100 +253,6 @@ float4 main_ps(output_t input) : SV_Target
 }
 )";
 
-    const char* water_hlsl = R"(
-cbuffer constants : register(b0)
-{
-    float4x4 world;
-    float4x4 view;
-    float4x4 projection;
-    float4 light_dir;
-    float4 color;
-    float4 flags;
-    float4 eye;
-    float4 surface;
-};
-Texture2D mesh_tex : register(t0);
-Texture2D mesh_tex2 : register(t1);
-Texture2D scene_tex : register(t2);
-Texture2D scene_depth : register(t3);
-Texture2D foam_tex : register(t4);
-Texture2D reflect_tex : register(t5);
-SamplerState mesh_samp : register(s0);
-SamplerState scene_samp : register(s1);
-struct input_t
-{
-    float3 position : POSITION;
-    float3 normal : NORMAL;
-    float2 uv : TEXCOORD0;
-    float4 color : COLOR;
-};
-struct output_t
-{
-    float4 position : SV_Position;
-    float3 world : TEXCOORD0;
-    float2 uv : TEXCOORD1;
-    float4 tint : COLOR;
-    float3 normal : TEXCOORD2;
-    float4 flat : TEXCOORD3;
-};
-output_t main_vs(input_t input)
-{
-    output_t output;
-    float4 world_pos = mul(world, float4(input.position, 1));
-    output.position = mul(projection, mul(view, world_pos));
-    output.world = world_pos.xyz;
-    output.uv = input.uv;
-    output.tint = input.color;
-    output.normal = mul(world, float4(input.normal, 0)).xyz;
-    world_pos.z = 0;
-    output.flat = mul(projection, mul(view, world_pos));
-    return output;
-}
-float3 normal_octave(float2 uv)
-{
-    return mesh_tex2.Sample(mesh_samp, uv).rgb * 2 - 1;
-}
-float fresnel_factor(float cos_i)
-{
-    cos_i = clamp(cos_i, 0.02, 0.999);
-    float theta_i = acos(cos_i);
-    float theta_t = asin(saturate(sin(theta_i) * 0.7518797));
-    float rs = sin(theta_t - theta_i) / sin(theta_t + theta_i);
-    float rp = tan(theta_t - theta_i) / tan(theta_t + theta_i);
-    return saturate((rs * rs + rp * rp) * 0.45);
-}
-float4 main_ps(output_t input) : SV_Target
-{
-    float dist = length(eye.xyz - input.world);
-    float fog = saturate((dist - surface.x) / max(surface.y - surface.x, 1));
-    float normal_scale = flags.y > 0.01 ? flags.y : 1;
-    float2 foam_uv = input.world.xy / 14;
-    float3 detail = normal_octave(foam_uv * normal_scale);
-    float2 slope = detail.xy - input.normal.xy;
-    float3 nrm = float3(slope, 1);
-    float3 view_dir = input.world - eye.xyz;
-    float view_len = dot(view_dir, view_dir);
-    view_dir = view_len > 0.0001 ? view_dir * rsqrt(view_len) : float3(0, 0, -1);
-    float fresnel = fresnel_factor(saturate(-dot(view_dir, nrm)));
-    float2 ndc = input.flat.xy / input.flat.w;
-    float2 reflect_uv = ndc * float2(0.5, -0.5) + 0.5;
-    reflect_uv.x = 1.0 - reflect_uv.x;
-    float2 distort;
-    distort.x = view_dir.y * slope.x - view_dir.x * slope.y;
-    distort.y = min(dot(view_dir.xy, slope), 0);
-    reflect_uv += distort * float2(0.5, -0.5);
-    float3 reflection = reflect_tex.Sample(scene_samp, reflect_uv).rgb;
-    float3 lit = lerp(color.rgb, reflection, fresnel);
-    float alpha = lerp(color.a, 1, fresnel);
-    float froth = foam_tex.Sample(mesh_samp, foam_uv).a;
-    float foam = saturate(input.tint.a) * froth;
-    lit = lerp(lit, float3(1, 1, 1), foam);
-    alpha = lerp(alpha, 1, foam);
-    lit = lerp(lit, float3(flags.z, flags.w, eye.w), fog);
-    return float4(lit, alpha);
-}
-)";
-
     const char* blit_hlsl = R"(
 Texture2D scene_tex : register(t0);
 SamplerState scene_samp : register(s0);
@@ -423,8 +326,6 @@ void c_shader::release( )
     if ( m_fxaa_ps ) m_fxaa_ps->Release( );
     if ( m_blit_ps ) m_blit_ps->Release( );
     if ( m_blit_vs ) m_blit_vs->Release( );
-    if ( m_water_ps ) m_water_ps->Release( );
-    if ( m_water_vs ) m_water_vs->Release( );
     if ( m_textured_layout ) m_textured_layout->Release( );
     if ( m_textured_ps ) m_textured_ps->Release( );
     if ( m_textured_vs ) m_textured_vs->Release( );
@@ -437,8 +338,6 @@ void c_shader::release( )
     m_fxaa_ps = nullptr;
     m_blit_ps = nullptr;
     m_blit_vs = nullptr;
-    m_water_ps = nullptr;
-    m_water_vs = nullptr;
     m_textured_layout = nullptr;
     m_textured_ps = nullptr;
     m_textured_vs = nullptr;
@@ -524,14 +423,10 @@ bool c_shader::create( )
     ID3DBlob* fxaa_ps = nullptr;
     ID3DBlob* textured_vs = nullptr;
     ID3DBlob* textured_ps = nullptr;
-    ID3DBlob* water_vs = nullptr;
-    ID3DBlob* water_ps = nullptr;
     if ( !compile_shader( mesh_hlsl, "main_vs", "vs_4_0", &mesh_vs ) ||
          !compile_shader( mesh_hlsl, "main_ps", "ps_4_0", &mesh_ps ) ||
          !compile_shader( textured_hlsl, "main_vs", "vs_4_0", &textured_vs ) ||
          !compile_shader( textured_hlsl, "main_ps", "ps_4_0", &textured_ps ) ||
-         !compile_shader( water_hlsl, "main_vs", "vs_4_0", &water_vs ) ||
-         !compile_shader( water_hlsl, "main_ps", "ps_4_0", &water_ps ) ||
          !compile_shader( blit_hlsl, "main_vs", "vs_4_0", &blit_vs ) ||
          !compile_shader( blit_hlsl, "main_ps", "ps_4_0", &blit_ps ) ||
          !compile_shader( blit_hlsl, "fxaa_ps", "ps_4_0", &fxaa_ps ) )
@@ -540,8 +435,6 @@ bool c_shader::create( )
         if ( mesh_ps ) mesh_ps->Release( );
         if ( textured_vs ) textured_vs->Release( );
         if ( textured_ps ) textured_ps->Release( );
-        if ( water_vs ) water_vs->Release( );
-        if ( water_ps ) water_ps->Release( );
         if ( blit_vs ) blit_vs->Release( );
         if ( blit_ps ) blit_ps->Release( );
         if ( fxaa_ps ) fxaa_ps->Release( );
@@ -556,8 +449,6 @@ bool c_shader::create( )
     device->CreatePixelShader( fxaa_ps->GetBufferPointer( ), fxaa_ps->GetBufferSize( ), nullptr, &m_fxaa_ps );
     device->CreateVertexShader( textured_vs->GetBufferPointer( ), textured_vs->GetBufferSize( ), nullptr, &m_textured_vs );
     device->CreatePixelShader( textured_ps->GetBufferPointer( ), textured_ps->GetBufferSize( ), nullptr, &m_textured_ps );
-    device->CreateVertexShader( water_vs->GetBufferPointer( ), water_vs->GetBufferSize( ), nullptr, &m_water_vs );
-    device->CreatePixelShader( water_ps->GetBufferPointer( ), water_ps->GetBufferSize( ), nullptr, &m_water_ps );
 
     D3D11_INPUT_ELEMENT_DESC layout[ 2 ]{};
     layout[ 0 ].SemanticName = "POSITION";
@@ -591,8 +482,6 @@ bool c_shader::create( )
     mesh_ps->Release( );
     textured_vs->Release( );
     textured_ps->Release( );
-    water_vs->Release( );
-    water_ps->Release( );
     blit_vs->Release( );
     blit_ps->Release( );
     fxaa_ps->Release( );
@@ -619,7 +508,7 @@ bool c_shader::create( )
     device->CreateSamplerState( &sampler, &m_wrap );
 
     LOG_SUCCESS( "shaders mesh, textured, water, blit" );
-    return m_mesh_vs && m_mesh_ps && m_textured_vs && m_textured_ps && m_textured_layout && m_water_vs && m_water_ps && m_blit_vs && m_blit_ps && m_fxaa_ps && m_layout && m_constants && m_sampler && m_wrap;
+    return m_mesh_vs && m_mesh_ps && m_textured_vs && m_textured_ps && m_textured_layout && m_blit_vs && m_blit_ps && m_fxaa_ps && m_layout && m_constants && m_sampler && m_wrap;
 #else
     return false;
 #endif
@@ -649,21 +538,6 @@ void c_shader::bind_textured( )
     context->VSSetConstantBuffers( 0, 1, &m_constants );
     context->PSSetConstantBuffers( 0, 1, &m_constants );
     context->PSSetSamplers( 0, 1, &m_wrap );
-#endif
-}
-
-void c_shader::bind_water( )
-{
-#if HYDRO_HOST_WINDOWS
-    ID3D11DeviceContext* context = g_device( ).context( );
-    context->IASetInputLayout( m_textured_layout );
-    context->IASetPrimitiveTopology( D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST );
-    context->VSSetShader( m_water_vs, nullptr, 0 );
-    context->PSSetShader( m_water_ps, nullptr, 0 );
-    context->VSSetConstantBuffers( 0, 1, &m_constants );
-    context->PSSetConstantBuffers( 0, 1, &m_constants );
-    context->PSSetSamplers( 0, 1, &m_wrap );
-    context->PSSetSamplers( 1, 1, &m_sampler );
 #endif
 }
 

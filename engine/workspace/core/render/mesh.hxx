@@ -28,6 +28,9 @@ public:
     void clock( float seconds );
     void fog( float start, float end, float red, float green, float blue );
     void reflecting( bool enabled );
+    // The water surfaces' pass (hydro world/waterpass.hxx): runs inside draw( ), the scene bound, the transparent pass's blend and depth set up.
+    void water_pass( void ( *pass )( void* ), void* user ) { m_water_pass = pass; m_water_user = user; }
+    void* view_of( int texture ) const;
     void draw( );
     void release( );
 
@@ -113,6 +116,8 @@ private:
     float m_fog_end = 900.0f;
     float m_fog_color[ 3 ] = { 156.0f / 255.0f, 196.0f / 255.0f, 215.0f / 255.0f };
     bool m_reflecting = false;
+    void ( *m_water_pass )( void* ) = nullptr;
+    void* m_water_user = nullptr;
     bool m_ready = false;
 #if HYDRO_HOST_WINDOWS
     ID3D11BlendState* m_blend = nullptr;
@@ -614,6 +619,15 @@ bool c_geometry::ensure( )
 #endif
 }
 
+void* c_geometry::view_of( int texture ) const
+{
+#if HYDRO_HOST_WINDOWS
+    if ( texture >= 0 && texture < static_cast< int >( m_textures.size( ) ) )
+        return m_textures[ static_cast< std::size_t >( texture ) ].view;
+#endif
+    return nullptr;
+}
+
 void c_geometry::reflecting( bool enabled )
 {
     m_reflecting = enabled;
@@ -865,22 +879,21 @@ void c_geometry::draw( )
         context->OMSetDepthStencilState( m_depth, 0 );
         g_target( ).snapshot( );
         g_target( ).bind_scene( );
-        g_target( ).sample_mirror( );
-        g_shader( ).bind_water( );
+        ID3D11RasterizerState* previous_raster = nullptr;
+        context->RSGetState( &previous_raster );
+        if ( m_water_pass != nullptr )
+            m_water_pass( m_water_user );
+        context->RSSetState( previous_raster );
+        if ( previous_raster ) previous_raster->Release( );
         bound_geometry = -1;
         bound_texture = -2;
-        for ( const placement_t& item : m_placements )
-        {
-            if ( item.alpha_test == 2 )
-                submit( item );
-        }
         context->OMSetBlendState( previous_blend, previous_factor, previous_mask );
         context->OMSetDepthStencilState( previous_depth, previous_stencil );
         if ( previous_blend ) previous_blend->Release( );
         if ( previous_depth ) previous_depth->Release( );
         g_shader( ).bind_textured( );
-        ID3D11ShaderResourceView* clear_scene[ 4 ] = { nullptr, nullptr, nullptr, nullptr };
-        context->PSSetShaderResources( 2, 4, clear_scene );
+        ID3D11ShaderResourceView* clear_scene[ 6 ] = { nullptr, nullptr, nullptr, nullptr, nullptr, nullptr };
+        context->PSSetShaderResources( 0, 6, clear_scene );
     }
 
     if ( !m_reflecting && m_blend != nullptr && m_depth_spray != nullptr )
@@ -972,6 +985,32 @@ bool c_engine::shade( int placement, int cube, const float* specular, float spec
 int c_engine::texture( const unsigned char* rgba, int width, int height )
 {
     return g_geometry( ).texture( rgba, width, height );
+}
+
+void c_engine::water_pass( void ( *pass )( void* ), void* user )
+{
+    g_geometry( ).water_pass( pass, user );
+}
+
+void* c_engine::texture_view( int texture )
+{
+    return g_geometry( ).view_of( texture );
+}
+
+void c_engine::device( void*& device, void*& context, void*& mirror )
+{
+#if HYDRO_HOST_WINDOWS
+    device = g_device( ).device( );
+    context = g_device( ).context( );
+    mirror = g_target( ).mirror_view( );
+#endif
+}
+
+void c_engine::matrices( float* view, float* projection, float* eye )
+{
+    std::memcpy( view, g_viewport( ).view( ), 64 );
+    std::memcpy( projection, g_viewport( ).projection( ), 64 );
+    std::memcpy( eye, g_viewport( ).eye( ), 12 );
 }
 
 int c_engine::place( int geometry, int texture, int index_start, int index_count, const float* world, const float* color, int alpha_test, const float* surface, int detail, float scroll, const float* bias )

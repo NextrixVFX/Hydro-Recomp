@@ -223,3 +223,62 @@ private:
     std::map< const gfx_program_t*, gfx_handle_t > m_layouts;
     gfx_handle_t m_declaration_of( const water_shader_t& s ) const { return m_layouts.at( s.m_program ); }
 };
+
+// THE RUNNING GAME'S SIDE: one object the world owns. attach( ) at the level's load, frame( ) where water_draw built the grid, the engine calls engine_pass inside its transparent stage.
+#if HYDRO_HOST_WINDOWS
+struct water_stage_t
+{
+    gfx_direct_t m_api;
+    std::unique_ptr< water_pass_t > m_pass;
+    int m_shader = -1;
+    gfx_handle_t m_mirror = 0;
+    const water_grid_frame_t* m_frame = nullptr;
+    water_pass_view_t m_view;
+
+    void attach( const water_pass_source_t& source, std::uint8_t fog )
+    {
+        void* device = nullptr;
+        void* context = nullptr;
+        void* mirror = nullptr;
+        c_engine::device( device, context, mirror );
+        m_api.m_device = static_cast< ID3D11Device* >( device );
+        m_api.m_context = static_cast< ID3D11DeviceContext* >( context );
+        m_pass = std::make_unique< water_pass_t >( m_api );
+        m_pass->create( source );
+        m_shader = m_pass->add_shader( water_pass_t::default_desc( fog ) );
+        c_engine::water_pass( &water_stage_t::engine_pass, this );
+    }
+
+    void frame( float dt, const water_grid_frame_t& grid, const water_pass_view_t& view )
+    {
+        m_frame = &grid;
+        m_view = view;
+        if ( m_pass )
+            m_pass->tick( dt );
+    }
+
+    static void engine_pass( void* self )
+    {
+        water_stage_t& s = *static_cast< water_stage_t* >( self );
+        if ( !s.m_pass || s.m_frame == nullptr )
+            return;
+        float view[ 16 ], projection[ 16 ];
+        c_engine::matrices( view, projection, s.m_view.m_eye );
+        // Our matrices are memory-compatible with retail's rows: view then projection, row vectors.
+        for ( int r = 0; r < 4; ++r )
+            for ( int c = 0; c < 4; ++c )
+            {
+                float v = 0.0f;
+                for ( int k = 0; k < 4; ++k )
+                    v += view[ r * 4 + k ] * projection[ k * 4 + c ];
+                s.m_view.m_view_proj[ r * 4 + c ] = v;
+            }
+        void* device = nullptr;
+        void* context = nullptr;
+        void* mirror = nullptr;
+        c_engine::device( device, context, mirror );
+        const int shader = s.m_shader;
+        s.m_pass->draw( *s.m_frame, s.m_view, reinterpret_cast< gfx_handle_t >( mirror ), [ shader ]( int ) { return shader; } );
+    }
+};
+#endif
