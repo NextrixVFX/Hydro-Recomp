@@ -158,6 +158,7 @@
     <ClInclude Include="workspace\core\game\game.hxx" />
     <ClInclude Include="workspace\core\game\identity.hxx" />
     <ClInclude Include="workspace\core\game\input.hxx" />
+    <ClInclude Include="workspace\core\game\language.hxx" />
     <ClInclude Include="workspace\core\game\packages.hxx" />
     <ClInclude Include="workspace\core\game\plugs.hxx" />
     <ClInclude Include="workspace\core\game\scripted.hxx" />
@@ -177,6 +178,7 @@
     <ClInclude Include="workspace\core\ui\chooser.hxx" />
     <ClInclude Include="workspace\core\ui\combo.hxx" />
     <ClInclude Include="workspace\core\ui\common.hxx" />
+    <ClInclude Include="workspace\core\ui\completion.hxx" />
     <ClInclude Include="workspace\core\ui\compose.hxx" />
     <ClInclude Include="workspace\core\ui\config.hxx" />
     <ClInclude Include="workspace\core\ui\controls.hxx" />
@@ -187,6 +189,7 @@
     <ClInclude Include="workspace\core\ui\expand.hxx" />
     <ClInclude Include="workspace\core\ui\fade.hxx" />
     <ClInclude Include="workspace\core\ui\flow.hxx" />
+    <ClInclude Include="workspace\core\ui\footer.hxx" />
     <ClInclude Include="workspace\core\ui\frame.hxx" />
     <ClInclude Include="workspace\core\ui\fsm.hxx" />
     <ClInclude Include="workspace\core\ui\gauge.hxx" />
@@ -233,6 +236,7 @@
     <ClInclude Include="workspace\core\world\control.hxx" />
     <ClInclude Include="workspace\core\world\corona.hxx" />
     <ClInclude Include="workspace\core\world\dbrt.hxx" />
+    <ClInclude Include="workspace\core\world\debris.hxx" />
     <ClInclude Include="workspace\core\world\drawer.hxx" />
     <ClInclude Include="workspace\core\world\drawing.hxx" />
     <ClInclude Include="workspace\core\world\drive.hxx" />

@@ -284,7 +284,7 @@ inline void c_world::race_broadcast_hash( std::uint32_t hash, const char* name, 
 // VuGame's Results enter 0x484110 / exit 0x484250 / tick 0x484280 / draw 0x4842F0 on the UI agent's VuCommonScreen. The
 // project load is 0x4B4360 through the UI's world (ui_hud_load, as the HUDs). A screen's broadcasts reach the race's bus
 // ("OnUserNext" 0x483170) and the live HUDs; no HUD is its origin (-1). m_frame stays null: the results leaf 0x46A500 has
-// no render pass yet. g 0x758FD4 +0x34 (the game's paused word): nothing writes it, so false.
+// no render pass yet. g 0x758FD4 +0x34: the box up (world/msgbox.hxx).
 inline void c_world::bind_game_screens( )
 {
     ui_game_screens_t& g = m_race.screens;
@@ -337,7 +337,7 @@ inline void c_world::bind_game_screens( )
     m_race.rules.screen_hooks.award.award_open = [ this ]( const char* project, std::int32_t tier, const std::string& boat_class, std::int32_t value, const std::vector< std::string >& names ) {
         return m_race.screens.award_open( project, tier, boat_class, value, names );
     };
-    m_race.rules.screen_hooks.paused = [ ] { return false; };
+    m_race.rules.screen_hooks.paused = [ this ] { return m_boxes.drawing( ); };
     pause_bind( );
 #if HYDRO_UI_PASS
     g.m_frame = [ this ]( const entity_t& root, c_ui_binding& binding ) {
@@ -350,7 +350,7 @@ inline void c_world::bind_game_screens( )
 }
 
 // The pause menu: ui/paused.hxx's object over the race. Its project is a screen as Results' (g.m_load, a c_ui_binding); its broadcasts reach the bus, where
-// 0x4BAE80's event map stands. Hooks: FMOD's "game" category (no audio device), the analytics (a platform service), the touch device (none), g 0x758FD4 +0x34 (nothing sets it).
+// 0x4BAE80's event map stands. Hooks: FMOD's "game" category (no audio device), the analytics (a platform service), the touch device (none).
 inline void c_world::pause_bind( )
 {
     ui_pause_hooks_t h;
@@ -363,6 +363,7 @@ inline void c_world::pause_bind( )
     h.m_delta = [ this ] { return m_race.ticks.dt; };
     h.m_input = [ this ]( const char* name ) { return m_race.input && m_race.input->manager.pressed( 0, name ); };
     h.m_touches = [ ] { return 0; };
+    h.m_popup = [ this ] { return m_boxes.drawing( ); };
     h.m_input_type = [ this ] { return m_race.world.control_method; };
     h.m_open = [ this ]( const std::string& name ) {
         ui_game_screens_t& g = m_race.screens;
@@ -491,7 +492,7 @@ inline ui_screen_env_t c_world::ui_screen_environment( )
 #if HYDRO_UI_TEXT
     env.m_font_asset = [ this ]( const std::string& asset ) { return m_ui_pass->font_asset( asset ); };
 #endif
-    env.m_root = m_menu ? &m_menu_util : &m_race.util;
+    env.m_root = m_menu || !m_race.active ? &m_menu_util : &m_race.util;   // no game yet: the loading screen reads the front end's GameData
     m_difficulty_env.m_root = env.m_root;
     env.m_difficulty = &m_difficulty_env;
     env.m_champ = &m_champ_env;
@@ -545,6 +546,54 @@ inline ui_screen_env_t c_world::ui_screen_environment( )
 }
 #endif
 
+#if HYDRO_UI_PASS
+// The ghost's draw 0x422590's tail, with the params' +0x18 byte clear (not the reflection): its driver's name over the boat, the font "HUD_PlayerName" (0x422310's +0x52C; its params the boat's
+// +0x54C), 0x536C10 with flags 0x66 and alpha 1. FLAGGED: drawn on the UI pass with the sort key it holds there, retail's draw runs in the 3D view's submit.
+inline void c_world::ghost_labels( )
+{
+    if ( !m_race.active )
+        return;
+    for ( std::size_t k = 0; k < m_race.boats.size( ) && k < m_race.start_boats.size( ); ++k )
+    {
+        race_session_boat_t& b = *m_race.boats[ k ];
+        const std::uint8_t* transform = m_race.start_boats[ k ].transform;
+        if ( !b.ghost || !transform || !b.driver )
+            continue;
+        std::uint8_t* boat = b.graph.objects[ 0 ].image.data( );
+        const ui_frame_inputs_t in = ui_inputs( );
+        std::uint8_t params[ 60 ] = { };
+        std::string asset;
+        ui_font_params( m_font_db, "HUD_PlayerName", params, asset );
+        std::memcpy( boat + 0x54C, params, 60 );
+        ghost_label_t label;
+        if ( !ghost_boat_label( boat, transform, m_race.viewport_camera, label ) )
+            continue;
+        const std::uint32_t font = asset.empty( ) ? 0u : m_ui_pass->font_asset( asset );
+        const auto name = b.driver->strings.find( 0x60 );
+        if ( font == 0u || name == b.driver->strings.end( ) )
+            continue;
+        const float rect[ 4 ] = { label.x, label.y, 0.0f, 0.0f };
+        const float offset[ 2 ] = { 0.0f, 0.0f };
+        ui_font_draw( m_ui_pass->m_sort, in.m_env, font, name->second.c_str( ), label.params, rect, 0x66u, 1.0f, offset, label.depth );
+    }
+}
+
+// VuFadeManager's draw 0x4AEF70 (render hook g 0x759024, ctor 0x4AED60), while its value > 0: the sort key's layer 4 and bits 0xB, a colour ( 0, 0, 0, value ) (0x4AECF0: fistp of x 255),
+// 0x507830 over ( 0, 0, 1, 1 ) at depth 0. The race's manager is m_fade, the menus' and the title's m_menu_engine.m_fade: one object in retail, g 0x758FC4.
+inline void c_world::fade_draw( )
+{
+    const action_fade_t& f = m_action ? m_fade : m_menu_engine.m_fade;
+    if ( !f.draws( ) )
+        return;
+    std::uint32_t& key = m_ui_pass->m_sort.key_high( );
+    key = ( key & 0x07FFFFFFu ) | ( 4u << 27 );
+    key = ( key & 0xFFC3FFFFu ) | ( 0xBu << 18 );
+    const std::uint32_t alpha = static_cast< std::uint32_t >( ui_fistp32( f.m_value * ui_f32( 0x437F0000u ) ) ) & 0xFFu;
+    static constexpr float rect[ 4 ] = { 0.0f, 0.0f, 1.0f, 1.0f };
+    ui_solid_draw( m_ui_pass->m_sort, ui_inputs( ).m_env, alpha << 24, rect, 0.0f );
+}
+#endif
+
 // The frame's UI (world/hudpass.hxx): after the composer, before the present. The action mode's draw slot 5 0x4B9B60: its current state's
 // draw, which for Begin / Run / End is 0x4B9C10 (hook `draw`), then the sort's flip.
 inline void c_world::ui_frame( )
@@ -559,6 +608,9 @@ inline void c_world::ui_frame( )
     m_ui_pass->m_impl.m_aspect = 1.5f;   // boot 0x4023DE stores 0x3FC00000 over the ctor's 16 / 9: the screens are authored 1080 x 720
     ui_crop_update( m_ui_pass->m_impl, m_race.world.display_w, m_race.world.display_h );   // 0x4CC0F0's first call
     m_modes.draw( );
+    ghost_labels( );
+    boxes_draw( );
+    fade_draw( );
     m_ui_pass->end( );
 #endif
 }

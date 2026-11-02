@@ -276,6 +276,8 @@ public:
         return box;
     }
 
+    const std::deque< msgbox_ref_t >& queue( ) const { return m_queue; }
+
     // 0x4B14D0 "Decision", dt = the tick manager's real dt (vt+0x3C).
     void tick( float dt )
     {
@@ -391,4 +393,35 @@ inline void msgbox_entity_destroy( msgbox_entity_t& e )
         e.m_box->m_destroyed = true;
         e.m_box.reset( );
     }
+}
+
+// VuControlMethodManager's message box (g 0x758FC0; ctor 0x4AE6E0 registers the event, boat batch 36, case gamepad_box).
+// "OnGamePadDisconnected" 0x4AEA00: the params' int (0x4237B0: read only behind an int tag 0; any other tag answers 0) zero, no box
+// open and the method (+0x18) the pad's 0: the box, its callback slot 0 0x4AEC30 clearing +0x1C, +0x1C = 1 and "OnPauseActionGame".
+// NOT WIRED: the event bus delivers the event, and it comes from the platform's device (a pad lost).
+struct control_method_box_t
+{
+    std::uint8_t m_open = 0;    // +0x1C
+};
+
+inline void control_method_pad_lost( control_method_box_t& e, const std::uint8_t* params, std::uint32_t size, std::int32_t method, c_msgbox_manager& m,
+                                     const std::function< void( const char* ) >& broadcast )
+{
+    std::int32_t value = 0, tag = -1;
+    if ( static_cast< std::int32_t >( size ) > 0 )
+    {
+        std::memcpy( &tag, params, 4 );
+        if ( tag == 0 )
+            std::memcpy( &value, params + 4, 4 );
+    }
+    if ( e.m_open || value != 0 || method != 0 )
+        return;
+    msgbox_params_t p;
+    p.m_heading = "GamePadDisconnected_Heading";
+    p.m_body = "GamePadDisconnected_Body";
+    p.m_text_a = "MessageBox_OK";
+    msgbox_ref_t box = m.create( p );
+    box->m_callback = [ &e ]( msgbox_t& ) { e.m_open = 0; };
+    e.m_open = 1;
+    broadcast( "OnPauseActionGame" );
 }

@@ -2139,6 +2139,15 @@ public:
         for ( auto& child : m_bound.front( )->m_entity->m_children )
             m_bound[ static_cast< std::size_t >( m_index[ child.get( ) ] ) ]->m_map.handle( h, p );
     }
+    // 0x5011A0 "OnUIEvent" [ name, int 0 ] to the DIRECT children (the message box's 0x466C60 / 0x466D80).
+    void hud_event( const char* name )
+    {
+        ui_params_t p;
+        p.add_string( name );
+        const std::uint32_t h = fsm_hash( "OnUIEvent" );
+        for ( auto& child : m_bound.front( )->m_entity->m_children )
+            m_bound[ static_cast< std::size_t >( m_index[ child.get( ) ] ) ]->m_map.handle( h, p );
+    }
     // VuEventManager_broadcast 0x505690 from outside (the race's events).
     void post( std::uint32_t hash, const ui_params_t& p ) { broadcast( hash, p ); }
     ui_ret_t input( entity_t& owner, const char* plug, const ui_params_t& p ) { return run_input( owner, plug, p ); }

@@ -7,7 +7,7 @@
 //   - 0x595520 submits one command per surface in sort layer 0xA; its state is k_gfx_layers[ 10 ] (blend on, depth on, depth write off, 4 / 5).
 //     The command's callback is 0x594D70 -> 0x595790: water_shader_t::patch. SUBSTITUTION until the gfx sort is wired: draw( ) walks the surfaces
 //     itself, in the frame's order, sets the layer's state once and sets the program's frame constants as 0x53B0F0 does.
-//   - VuWater +0x44 and +0x46 are 1 from its ctor 0x528050: reflection on, complex on, wave texture rebuilt. 0x5DB8C9's gates are therefore not read.
+//   - VuWater +0x44 and +0x46 (1 from its ctor 0x528050, then 0x4B50A0's fidelity: Low 0 0, Medium 1 0, High 1 1): water_stage_t::surface applies 0x5DB800's gates, tick( ) 0x607D20's, the engine 0x558C00's.
 //   - The texture build is the render thread's 0x607D20 -> 0x607F10, the tick 0x607D00 in the "Build" phase: tick( ) is both, once per game frame.
 // Not recreated: the depth pass 0x595AA0 (only with renderer +0x2AC: the ctor's byte argument, its caller not read).
 
@@ -43,6 +43,7 @@ struct water_pass_view_t
 struct water_pass_source_t
 {
     std::function< bool( const std::string& entry, std::vector< std::uint8_t >& out ) > m_read;
+    std::function< const gfx_texture_t*( const std::string& name ) > m_cube;   // 0x5941E0 + 0x541D20: null back = absent
 };
 
 struct water_pass_t final : water_shader_assets_t, water_reflection_source_t
@@ -106,7 +107,7 @@ struct water_pass_t final : water_shader_assets_t, water_reflection_source_t
         return d;
     }
 
-    // 0x5DBB80 on the entity's desc (+0xA4, its properties registered by the ctor 0x5DA4F0), then 0x5DB800's gates: VuWater +0x44 and +0x46 are 1, so reflect and complex stay as authored.
+    // 0x5DBB80 on the entity's desc (+0xA4, its properties registered by the ctor 0x5DA4F0); 0x5DB800's gates follow in water_stage_t::surface.
     // The names, their desc fields: OverrideGlobalSettings +0x18, AmbientColor +0x19, DiffuseColor +0x1D, FoamAmbientColor +0x21, FoamDiffuseColor +0x25, FogEnabled +0x29, FoamTextureSize +0x2C,
     // FoamTextureAsset +0x30, ProceduralReflection +0x48, NormalMapEnabled +0x49 (Complex against Simple), ReflectionCubeTextureAsset +0x4C. The decal fields have no property.
     static water_shader_desc_t read_desc( const value_t& properties, const water_shader_desc_t& base = default_desc( 0u ) )
@@ -166,9 +167,11 @@ struct water_pass_t final : water_shader_assets_t, water_reflection_source_t
     }
 
     // The "Build" tick 0x607D00, then the render thread's 0x607F10.
-    void tick( float dt )
+    void tick( float dt, bool build = true )
     {
-        water_texture_tick( m_wave, dt );
+        water_texture_tick( m_wave, dt );   // 0x607D00, the "Build" tick: always
+        if ( !build )
+            return;                         // 0x607D20: no command while VuWater +0x46 is clear
         water_texture_hooks_t h;
         h.user = this;
         h.upload = []( void* user, int texture, int level, const std::uint8_t* bytes, std::uint32_t )
@@ -255,8 +258,8 @@ struct water_pass_t final : water_shader_assets_t, water_reflection_source_t
         }
         return slot;
     }
-    bool cube_exists( const std::string& ) override { return false; }                         // a reflecting shader never asks
-    const gfx_texture_t* cube( const std::string& ) override { return nullptr; }
+    bool cube_exists( const std::string& name ) override { return m_source.m_cube && m_source.m_cube( name ) != nullptr; }   // only a shader with reflect 0 asks
+    const gfx_texture_t* cube( const std::string& name ) override { return m_source.m_cube( name ); }
     std::uint32_t material( const gfx_program_t& program, gfx_declaration_t& d ) override
     {
         ++d.m_refs;
@@ -292,11 +295,15 @@ struct water_stage_t
     water_pass_view_t m_view;
 
     // After attach: surface `index`'s shader, 0x5DB800 on the desc read from the surface entity's loads.
-    void surface( int index, const std::vector< value_t >& loads )
+    void surface( int index, const std::vector< value_t >& loads, const std::uint8_t* flags )
     {
         water_shader_desc_t d = water_pass_t::default_desc( 0u );
         for ( const value_t& properties : loads )
             d = water_pass_t::read_desc( properties, d );
+        if ( flags[ 0 ] == 0u )     // 0x5DB89C: cmove on VuWater +0x44
+            d.m_reflect = 0u;
+        if ( flags[ 2 ] == 0u )     // 0x5DB8AD: cmove on VuWater +0x46
+            d.m_complex = 0u;
         if ( static_cast< int >( m_surface_shader.size( ) ) <= index )
             m_surface_shader.resize( static_cast< std::size_t >( index ) + 1u, -1 );
         m_surface_shader[ static_cast< std::size_t >( index ) ] = m_pass->shared_shader( d );
@@ -321,12 +328,12 @@ struct water_stage_t
         std::memcpy( m_pass->m_wave.live, words, sizeof( m_pass->m_wave.live ) );
     }
 
-    void frame( float dt, const water_grid_frame_t& grid, const water_pass_view_t& view )
+    void frame( float dt, const water_grid_frame_t& grid, const water_pass_view_t& view, bool build )
     {
         m_frame = &grid;
         m_view = view;
         if ( m_pass )
-            m_pass->tick( dt );
+            m_pass->tick( dt, build );
     }
 
     static void engine_pass( void* self )

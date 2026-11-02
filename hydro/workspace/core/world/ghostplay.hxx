@@ -264,7 +264,7 @@ inline void race_session_ghost_bind( race_session_t& s )
         fsm_state_t* state = st.get( );
         if ( state->m_name == "GetLeaderboard" )
         {
-            // Enter 0x485890, exit 0x485AA0, tick 0x485AF0: vt+0x1C's answer is 1, "Success"; the VuMessageBox "Ghost_Leaderboard" +0x758 is the UI's.
+            // Enter 0x485890, exit 0x485AA0, tick 0x485AF0: vt+0x1C's answer is 1, "Success"; the box "Ghost_Leaderboard" +0x758 is made here and destroyed at the exit in retail; this answers in one frame, and 0x4B15A0 drops a box destroyed while queued, so it never shows.
             state->m_enter = [ &s ] { race_rules_hold( s.rules, 1 ); };
             state->m_exit = [ &s ] { race_rules_hold( s.rules, -1 ); };
             state->m_tick = [ &s ]( float ) { s.rules.fsm.pulse_condition( "Success" ); };
@@ -369,13 +369,27 @@ inline void race_session_ghost_bind( race_session_t& s )
         }
         else if ( state->m_name == "ShowError" )
         {
-            // 0x4873D0: the tick manager's vt+0x2C, every game boat's +0x308 += 1, the "Ghost_Heading" box (the UI's), exit 0x487560 undoes it.
+            // 0x4873D0: the tick manager's vt+0x2C, every game boat's +0x308 += 1, the "Ghost_Heading" box with the error (+0x740) and "MessageBox_OK"; its callback +0x6FC 0x485840 sets
+            // "MessageBoxClosed". Exit 0x487560 is the vt+0x30 alone: +0x308 stays held on the way to Exit.
             state->m_enter = [ &s ] {
+                s.ticks.pause_count += 1;
                 race_rules_hold( s.rules, 1 );
-                race_unwired( s, "VuGhostGame ShowError: the \"Ghost_Heading\" VuMessageBox (UI, not recreated): " + s.ghost_loads.message );
+                msgbox_ref_t box = s.world.message_box ? s.world.message_box( "Ghost_Heading", s.ghost_loads.message, "MessageBox_OK" ) : nullptr;
+                if ( box )
+                    box->m_callback = [ &s ]( msgbox_t& ) { s.rules.fsm.pulse_condition( "MessageBoxClosed" ); };
+                else
+                    race_unwired( s, "VuGhostGame ShowError: no message box: " + s.ghost_loads.message );
             };
-            state->m_exit = [ &s ] { race_rules_hold( s.rules, -1 ); };
+            state->m_exit = [ &s ] { s.ticks.pause_count -= 1; };
         }
     }
-    s.rules.hooks.gates = nullptr;   // slot 7 0x485380's copy over the +0x75C list's boats: NOT DONE, the ghost's own Game enter copy stands
+    // Slot 7 0x485380, after race_rules_tick's body: each loaded ghost's boat +0x4DC = its transform's world (+0x50).
+    s.rules.hooks.gates = [ &s ] {
+        for ( const std::unique_ptr< ghost_record_t >& g : s.ghost_records )
+        {
+            race_session_boat_t& b = *static_cast< race_session_boat_t* >( g->boat );
+            if ( const std::uint8_t* transform = race_session_image( b, 0, 0x50 ) )
+                std::memcpy( b.graph.objects[ 0 ].image.data( ) + 0x4DC, transform + 0x50, 64 );
+        }
+    };
 }

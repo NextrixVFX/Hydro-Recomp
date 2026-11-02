@@ -254,7 +254,7 @@ inline pfx_static_ops_t pfx_static_runtime_ops( pfx_manager_binding_t& b )
 }
 
 // VuOneShotPfxEntity (vtables 0x755C88 / 0x755C98, create 0x5EA030, ctor 0x5EA0B0; boat batch 34, case oneshot_pfx): +0x68 Effect Name, +0x80 Pfx Scale, +0x84 Pfx Color (bytes),
-// +0x88 Enable Reflection, +0x8C the handle. The motion watcher 0x5EA740 (the transform's euler back from the matrix, then the same setMatrix) is NOT recreated.
+// +0x88 Enable Reflection, +0x8C the handle. The motion watcher 0x5EA740 is pfx_oneshot_watch (case oneshot_watch). Was NOT recreated.
 struct pfx_oneshot_t
 {
     std::string effect_name;
@@ -271,6 +271,17 @@ struct pfx_oneshot_ops_t
     int ( *create )( void* user, const char* name ) = nullptr;                    // 0x52BCD0: the entry, -1 none
     void ( *duration )( void* user, std::uint32_t instance ) = nullptr;           // slot 10, its answer discarded
 };
+
+// The motion watcher 0x5EA740: the transform takes the motion's matrix (+0x50, its euler, 0x534830, 0x534C00( 0 ): `set_world`, the caller's
+// transform_set_world), then a live instance's slot 2 the same matrix.
+template < typename set_world_fn >
+inline void pfx_oneshot_watch( const pfx_oneshot_t& e, const pfx_manager_t& m, const pfx_oneshot_ops_t& o, const float* matrix, set_world_fn set_world )
+{
+    set_world( matrix );
+    const int x = pfx_manager_lookup( m, e.handle );
+    if ( x >= 0 )
+        o.instance.set_matrix( o.instance.user, m.entries[ static_cast< std::size_t >( x ) ].instance, matrix );
+}
 
 // "Start" 0x5EA540: a fresh effect (a handle, 0 with none), its entry's reflect byte, slots 4 5 2 11.
 inline void pfx_oneshot_start( pfx_oneshot_t& e, pfx_manager_t& m, const pfx_oneshot_ops_t& o )

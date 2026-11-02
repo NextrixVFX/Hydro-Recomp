@@ -95,15 +95,28 @@ inline void c_world::load_background( )
 // whose enter 0x4BA060 is `level` (the load) - before the first frame. From
 // then on scene_frame hands the session's Decision tick to the mode (Begin ->
 // Run once the fade is over: only then does VuGame's tick 0x482F10 run).
-// HOOKS (each named): the loading screen's project (0x4D3690 + 0x4B4360) and
-// SnapMode - not loaded here (the UI's); the asset preload list +0xE8 (the asset
+// From the menus the loading screen's project is loaded (0x4D3690 + 0x4B4360) and the mode stays at LoadingScreen for scene_frame to tick: its first frame draws
+// the screen, the next one's LoadLevel blocks with that frame on the display. A race from the command line goes straight to LoadLevel, as before (ours, the tests).
+// HOOKS (each named): SnapMode - not loaded here (the UI's); the asset preload list +0xE8 (the asset
 // manager: our assets load on demand from the pack - an empty list, so
-// LoadingScreen is done on its first tick); OnLoadProgress (its subscriber is the
-// loading screen: none); the tutorial check (g 0x758FB8 +0x28 / the profile
+// LoadingScreen is done on its first tick, FLAGGED: the bar goes straight to 1); the tutorial check (g 0x758FB8 +0x28 / the profile
 // "TutorialShown": profiles are re-made for the platform - nothing); 0x4D2DE0,
 // 0x530BB0, the pause menu tick 0x4BB540 (UI), the snap pause (platform), the
 // music channel (FMOD). The two pre-frame ticks pass dt 0 (ours: retail's are the
 // loading frames' own; the FSM time they add is zeroed by the moves).
+// 0x4D3690: "Screens/Loading" + ( GameData IsChampionship true ? "Champ" : "Event" ) + "Slalom" / "Ghost" when the event type (0x4D31D0) is exactly that word.
+inline std::string c_world::loading_screen_name( ) const
+{
+    const value_t& data = member( m_menu_util, "GameData" );
+    const value_t& champ = member( data, "IsChampionship" );
+    std::string name = "Screens/Loading";
+    name += champ.tag == 3 && champ.integer != 0 ? "Champ" : "Event";
+    const std::string type = race_game_data_text( m_menu_util, nullptr, "GameType" );
+    if ( type == "Slalom" || type == "Ghost" )
+        name += type;
+    return name;
+}
+
 inline void c_world::action_start( value_t& game_data, const race_session_dbs_t& dbs, const std::function< void( ) >& level )
 {
     m_fade = action_fade_t::created( );
@@ -145,12 +158,37 @@ inline void c_world::action_start( value_t& game_data, const race_session_dbs_t&
         hh = m_race.world.display_h;
     };
     h.draw = [ this ]( const char* which ) {
+        if ( std::strcmp( which, "0x4B9FE0" ) == 0 && m_loading_project && m_menu_engine.m_screen_draw )
+            m_menu_engine.m_screen_draw( m_loading_project, 1.0f );
         if ( std::strcmp( which, "0x4B9C10" ) == 0 && m_race.active )
             race_game_draw( m_race.rules );
         if ( std::strcmp( which, "0x4B9C10" ) == 0 && m_pause_menu )
             m_pause_menu->draw( );   // 0x4B9C8B
     };
-    h.broadcast_float = [ ]( const char* name, float v ) { LOG_VERBOSE( "action mode: %s %.3f (no subscriber: the loading screen is not loaded)", name, v ); };
+    h.broadcast_float = [ this ]( const char* name, float v ) {
+        const auto at = m_menu_projects.find( m_loading_project );
+        if ( at == m_menu_projects.end( ) )
+            return;
+        ui_params_t p;
+        std::uint32_t bits;
+        std::memcpy( &bits, &v, 4 );
+        ui_params_add( p, 2, bits );
+        at->second.binding->post( fsm_hash( name ), p );
+    };
+    const bool from_menu = m_has_chosen;
+    m_loading_project = 0;
+    if ( from_menu )
+    {
+        h.load_loading_screen = [ this ] {
+            m_loading_project = m_menu_engine.m_load_project( loading_screen_name( ) );
+            return m_loading_project != 0;
+        };
+        h.loading_init = [ this ] { m_menu_engine.m_init_project( m_loading_project ); };
+        h.loading_release = [ this ] {
+            m_menu_engine.m_release_project( m_loading_project );
+            m_loading_project = 0;
+        };
+    }
     m_action = std::make_unique< c_action_mode >( m_fade, dev.tag == 3 && dev.integer != 0, h );
     if ( !m_modes.m_mode )   // a race from the command line: the manager takes it as the current mode
     {
@@ -158,6 +196,12 @@ inline void c_world::action_start( value_t& game_data, const race_session_dbs_t&
         m_modes.m_current = "Action";
     }
     m_action->enter( );
+    if ( from_menu )
+    {
+        m_action_reported.clear( );
+        LOG_INFO( "action mode: VuActionGameMode in %s (the screen %s)", m_action->state( ), m_loading_project ? loading_screen_name( ).c_str( ) : "none" );
+        return;
+    }
     for ( int k = 0; k < 4 && std::string( m_action->state( ) ) != "LoadLevel"; ++k )
         m_action->tick( 0.0f );
     m_action_level = nullptr;   // LoadLevel is never entered again (no transition leads back to it)

@@ -4,10 +4,12 @@
 // 0x435800) keeps a whole VuBoatEntity at the dock, VuPosterEntity (vtable 0x73ABD0) the selected track's poster. Both read their state from gameutil +0x50.
 // HOOKS, the caller's: the boat's creation 0x436230 (new 0x520 VuBoatEntity, the document, placed at this entity's transform: the same steps as ghost.hxx's make_boat),
 // its removal 0x500B80 + the release, the Skin property's set (0x500630 "Skin", vt+0x10( value, 1 )), its DB 0x41D500, +0x466 the Locked byte, the voice event, the model
-// reload 0x43AF50, the asset test 0x43B080. NOT RECREATED: the dock's "Build" tick 0x436450. The properties (Position X, Position Y, Rotation Z at +0x5C +0x60 +0x64) are
+// reload 0x43AF50, the asset test 0x43B080. The properties (Position X, Position Y, Rotation Z at +0x5C +0x60 +0x64) are
 // schema.hxx's.
 
+#include <workspace/core/world/bodies.hxx>
 #include <workspace/core/world/logic.hxx>
+#include <workspace/core/world/transform.hxx>
 
 struct docked_hooks_t
 {
@@ -172,4 +174,31 @@ inline std::uint32_t poster_color( const value_t& game_data )
 {
     const value_t& v = member( member( game_data, "Poster" ), "Locked" );
     return v.tag == 3u && static_cast< std::uint8_t >( v.integer ) != 0u ? 0x80FFFFFFu : 0xFFFFFFFFu;
+}
+
+// The dock's "Build" tick 0x436450 (boat batch 36, case dock_tick): the boat keeps its own roll and pitch and height, the dock
+// gives x, y and heading. M = translation( -com ) x the body's world (+0x21C +0x10, com = boat +0x290); the euler of M with z =
+// Rotation Z (+0x64); identity x fromEuler; row 3 = Position X, Position Y (+0x5C, +0x60), M's own z; translation( +com ) x that goes to
+// setCenterOfMassTransform 0x50E660 (`out`, the caller's). SUBSTITUTION: transform_euler's atan2 / asinf.
+inline void docked_build_tick( const float* body_bt, const float* com, const float* spot, float* out )
+{
+    float world[ 16 ], shift[ 16 ], m[ 16 ], e[ 3 ], turn[ 16 ], one[ 16 ], placed[ 16 ], last[ 16 ];
+    hull_vu_from_bt( world, body_bt );
+    vu_identity( shift );
+    for ( int k = 0; k < 3; ++k )
+        shift[ 12 + k ] = -com[ k ];
+    hull_multiply( shift, m, world );
+    const float z = m[ 14 ];
+    transform_euler( m, e );
+    e[ 2 ] = spot[ 2 ];
+    vu_identity( one );
+    vu_matrix_from_euler( turn, e );
+    hull_multiply( one, placed, turn );
+    placed[ 12 ] = spot[ 0 ];
+    placed[ 13 ] = spot[ 1 ];
+    placed[ 14 ] = z;
+    for ( int k = 0; k < 3; ++k )
+        shift[ 12 + k ] = com[ k ];
+    hull_multiply( shift, last, placed );
+    bodies_bt_from_vu( last, out );
 }

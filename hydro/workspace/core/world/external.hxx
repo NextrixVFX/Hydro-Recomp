@@ -192,6 +192,8 @@ inline ui_ret_t c_world::screen_external( screen_state_t& state, c_ui_binding& b
         ui_play( ui_json_text( member( member( ui_db_entry( &m_boat_db, boat ), "Audio" ), "Announcer" ) ).c_str( ) );
         return out;
     }
+    if ( boxes_entity( state, binding, e, plug ) )
+        return out;
     if ( logic_entity_t* l = screen_logic( state, e ) )
     {
         screen_logic_context_t ctx{ &binding, &e, { } };
@@ -243,6 +245,7 @@ inline void c_world::award_busy( const ui_params_t& p )
     };
     walk( walk, *award->m_root );
 }
+
 
 // VuPosterEntity's two listeners (ctor 0x43A8F0: 0x43AC50, 0x43ADA0) on gameutil +0x50: the document half. Its model reload 0x43AF50 and draw are the background
 // scene's (Screens/Background's entity is not drawn yet): hook `reload` answers nothing.

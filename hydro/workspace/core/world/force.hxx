@@ -4,6 +4,7 @@
 // cylinder volume that pushes rigid bodies along its z axis. Not authored by Hydroelectric (game reach).
 // Verified against retail: hydro checks/logic.hxx verify_force_affector (case force_affector).
 //
+// 0x439DD0 is this class's transform watcher (the ctor's only reference, 0x439498): force_affector_watch.
 // The ctor: +0x5C a VuDynamicsStepCallback (vtable 0x73A88C: slot 1 0x439970 = the step), +0x60 the script component,
 // +0x64 a Vu3dLayoutComponent (0x50B8D0), +0x68 "Initially Active" (1), +0x6C "Acceleration" (98.06, 0x42C41EB8), +0x70
 // "Max Speed" (20); a btBoxShape at +0x80 (0x547D80, half extents from 0x6F7B00), a btPairCachingGhostObject at +0xD0
@@ -52,6 +53,7 @@ struct force_affector_hooks_t
     void ( *remove_object )( void* user ) = nullptr;                              // world vt+0x20 ( ghost )
     void ( *step_callback )( void* user, bool add ) = nullptr;                    // dynamics vt+0x2C / vt+0x30
     void ( *tick_register )( void* user, bool on ) = nullptr;                     // "Build" vt+0x20 / vt+0x28
+    void ( *update_aabb )( void* user ) = nullptr;                                // updateSingleAabb 0x54C370 ( the world vt+0x6C, the ghost )
     int* unrecreated = nullptr;
 };
 
@@ -106,6 +108,17 @@ inline void force_affector_activate( force_affector_t& e, const float* transform
 }
 
 // "Deactivate" 0x439C60 (and slot 7's tail): when active: the ghost removed, the step callback removed, inactive.
+// The transform watcher 0x439DD0: active, the ghost follows the world (0x410C30), the box the scale, then the ghost's aabb.
+inline void force_affector_watch( force_affector_t& e, const float* transform, const float* scale, const force_affector_hooks_t& h )
+{
+    if ( !e.active )
+        return;
+    force_bt_from_vu( e.ghost, transform );
+    const float s[ 4 ] = { scale[ 0 ], scale[ 1 ], scale[ 2 ], 0.0f };
+    h.set_scaling( h.user, s );
+    h.update_aabb( h.user );
+}
+
 inline void force_affector_deactivate( force_affector_t& e, const force_affector_hooks_t& h )
 {
     if ( !e.active )

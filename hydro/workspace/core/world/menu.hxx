@@ -70,6 +70,7 @@ inline void c_world::action_exit( )
     m_pause_root.reset( );
     if ( m_race.active )
         race_session_end( m_race );
+    boxes_release( m_game_screen_state );
     m_game_screen_state = screen_state_t{ };
     m_action.reset( );
 }
@@ -188,20 +189,7 @@ inline void c_world::menu_bind( )
     m_menu_engine.m_fade = action_fade_t::created( );
     m_menu_engine.m_display = [ this ]( int& w, int& h ) { w = m_race.world.display_w; h = m_race.world.display_h; };
     m_menu_engine.m_load_project = [ this ]( const std::string& name ) -> int {
-        const std::string asset = "VuProjectAsset/" + name;
-        std::vector< std::uint8_t > bytes;
-        if ( !m_archive.read( asset.c_str( ), bytes ) )
-        {
-            LOG_WARNING( "front end: %s not in the pack", asset.c_str( ) );
-            return 0;
-        }
-        const value_t document = c_reader( bytes ).parse( );
-        const value_t* project = find( document, "VuProject" );
-        if ( !project )
-            return 0;
-        const entity_registry_t registry = build_entity_registry( m_archive.names( "VuTemplateAsset/" ) );
-        std::unique_ptr< entity_t > root = ui_hud_load( *project, race_project_file( m_archive, asset.c_str( ) ), registry,
-                                                        [ this ]( const std::string& n ) { return template_document( n ); } );
+        std::unique_ptr< entity_t > root = menu_load_root( name );
         if ( !root )
             return 0;
         const int id = ++m_menu_serial;
@@ -218,6 +206,7 @@ inline void c_world::menu_bind( )
     m_menu_engine.m_release_project = [ this ]( int id ) {
         menu_project_t& p = m_menu_projects[ id ];
         p.binding->project_release( );
+        boxes_release( p.state );
         for ( auto& held : p.state.sounds )   // VuAudioEventEntity's dtor 0x5F4220: the emitter's holder release
         {
             audio_emitter_t emitter;
@@ -243,6 +232,24 @@ inline void c_world::menu_bind( )
     };
 }
 
+// 0x4B4360 through the UI's world: a project by name, its root.
+inline std::unique_ptr< entity_t > c_world::menu_load_root( const std::string& name )
+{
+    const std::string asset = "VuProjectAsset/" + name;
+    std::vector< std::uint8_t > bytes;
+    if ( !m_archive.read( asset.c_str( ), bytes ) )
+    {
+        LOG_WARNING( "front end: %s not in the pack", asset.c_str( ) );
+        return nullptr;
+    }
+    const value_t document = c_reader( bytes ).parse( );
+    const value_t* project = find( document, "VuProject" );
+    if ( !project )
+        return nullptr;
+    const entity_registry_t registry = build_entity_registry( m_archive.names( "VuTemplateAsset/" ) );
+    return ui_hud_load( *project, race_project_file( m_archive, asset.c_str( ) ), registry, [ this ]( const std::string& n ) { return template_document( n ); } );
+}
+
 // Slot 3: 0x4BF9B0, its data step over gameutil +0x50; the GameData the Action mode's load takes.
 inline void c_world::menu_exit( )
 {
@@ -252,6 +259,7 @@ inline void c_world::menu_exit( )
     env.track_db = dbs.track_db;
     env.random = &m_vurandom;
     env.player_name = platform_gamer_tag( );
+    env.championship_now = [ this ] { return &ui_progress_champ_state( m_cloud.data ); };   // 0x4C2300's progress vt+0x6C, after the screen's unload saved it
     env.string_db = [ this ]( const char* id ) { return string_db_get( m_string_db, id ? id : "" ); };
     const ui_game_config_t config = m_menu->exit( m_menu_util, env );
     LOG_INFO( "front end: exit to %s, GameData builder 0x%X %s", m_menu->m_mode.c_str( ), config.builder, config.built ? "built" : "not built" );
@@ -311,6 +319,7 @@ inline const std::string& c_world::menu_tick( float dt )
         m_menu_engine.m_control_method = static_cast< std::uint32_t >( m_menu_input->device.control_method( ) );
     }
     ++m_menu_frames;
+    m_menu_engine.m_message_box = m_boxes.drawing( );
     // Decision, in registration order: the mode manager 0x4CBFD0 (boot) before the screen's 0x423650 (its slot 6), so a key that sets the next
     // screen is not read again by that screen in the same frame.
     const std::string& next = m_menu->tick( dt );

@@ -198,6 +198,9 @@
     <ClInclude Include="workspace\core\game\input.hxx">
       <Filter>workspace\core\game</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\core\game\language.hxx">
+      <Filter>workspace\core\game</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\core\game\packages.hxx">
       <Filter>workspace\core\game</Filter>
     </ClInclude>
@@ -255,6 +258,9 @@
     <ClInclude Include="workspace\core\ui\common.hxx">
       <Filter>workspace\core\ui</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\core\ui\completion.hxx">
+      <Filter>workspace\core\ui</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\core\ui\compose.hxx">
       <Filter>workspace\core\ui</Filter>
     </ClInclude>
@@ -283,6 +289,9 @@
       <Filter>workspace\core\ui</Filter>
     </ClInclude>
     <ClInclude Include="workspace\core\ui\flow.hxx">
+      <Filter>workspace\core\ui</Filter>
+    </ClInclude>
+    <ClInclude Include="workspace\core\ui\footer.hxx">
       <Filter>workspace\core\ui</Filter>
     </ClInclude>
     <ClInclude Include="workspace\core\ui\frame.hxx">
@@ -421,6 +430,9 @@
       <Filter>workspace\core\world</Filter>
     </ClInclude>
     <ClInclude Include="workspace\core\world\dbrt.hxx">
+      <Filter>workspace\core\world</Filter>
+    </ClInclude>
+    <ClInclude Include="workspace\core\world\debris.hxx">
       <Filter>workspace\core\world</Filter>
     </ClInclude>
     <ClInclude Include="workspace\core\world\drawer.hxx">

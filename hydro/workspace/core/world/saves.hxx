@@ -39,7 +39,7 @@ inline void c_world::saves_start( )
     }
     m_saves_on = true;
     m_profile.load( );
-    m_cloud.hooks.corrupt_box = [ ] { LOG_WARNING( "saves: the game save is corrupt (SaveGame_Corrupt_Heading's box: the UI's, not shown)" ); };
+    m_cloud.hooks.corrupt_box = [ this ] { boxes_show( k_ui_save_corrupt_box[ 0 ], k_ui_save_corrupt_box[ 1 ], k_ui_save_corrupt_box[ 2 ] ); };   // 0x4AC57B
     m_cloud.hooks.broadcast = [ this ]( const char* name ) {
         if ( std::strcmp( name, "OnCloudSavePreSave" ) == 0 )                // 0x4B6A90
             m_unlock.save( json_member( m_cloud.data, "Unlock" ) );
@@ -129,6 +129,8 @@ inline void c_world::water_fidelity( )
     m_water.render_flags[ 0 ] = m_settings_platform.m_water_44;
     m_water.render_flags[ 1 ] = m_settings_platform.m_water_45;
     m_water.render_flags[ 2 ] = m_settings_platform.m_water_46;
+    m_stage_bound = false;                                       // "OnWaterSettingsChanged" 0x5DB3F0: 0x5DB800 on every surface
+    c_engine::reflection_enabled( m_water.render_flags[ 0 ] != 0u );   // 0x558C00's test of +0x44
 }
 
 // The award screen's and the championship's slots over the managers (ui/award.hxx, ui/standings.hxx). The unlock row (0x47F790's VuJsonContainer) reaches

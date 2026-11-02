@@ -137,11 +137,11 @@ private:
         }
     }
 
-    // 0x4C7330: the screen's slot 12 unless the game is paused (g 0x758FD4 +0x34: nothing sets it here); WaitTime up: "Expired".
+    // 0x4C7330: the screen's slot 12 unless a box is up (g 0x758FD4 +0x34); WaitTime up: "Expired".
     void wait( float dt )
     {
         front_end_engine_t& e = m_world.title_engine( );
-        if ( m_project && e.m_is_screen && e.m_is_screen( m_project ) && e.m_screen_tick )
+        if ( m_project && e.m_is_screen && e.m_is_screen( m_project ) && !m_world.m_boxes.drawing( ) && e.m_screen_tick )
             e.m_screen_tick( m_project, dt, true );
         if ( m_fsm.m_time >= m_wait_time )
             m_fsm.pulse_condition( "Expired" );
