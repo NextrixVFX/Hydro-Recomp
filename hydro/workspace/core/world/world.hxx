@@ -763,6 +763,7 @@ private:
         m_sky.clear( );
         m_animated.clear( );
         m_static_draws.clear( );
+        m_gate_models.clear( );
         m_play.clear( );
         m_triggers.clear( );
         m_filters.clear( );
@@ -1565,6 +1566,15 @@ public:
             m_retail->m_plane = m_reflection_plane.m_plane;
             m_retail->m_blur = m_race.active ? m_race.viewport_blur : 0.0f;
         }
+        if ( m_retail && m_race.active && m_race.slalom_draw )
+            for ( const slalom_gate_t& g : m_race.slalom_gates )   // the gates' instances +0xA8 / +0xC8: their Model Asset watchers, at the load in retail
+                for ( const std::string* name : { &g.model, &g.reflection } )
+                    if ( m_gate_models.find( *name ) == m_gate_models.end( ) )
+                    {
+                        gfx_static_model_t& model = m_gate_models[ *name ];
+                        if ( const gfx_scene_view_t* v = name->empty( ) ? nullptr : m_retail->model( *name ) )
+                            gfx_scene_view_attach( model, *v );
+                    }
         if ( m_retail )
             m_retail->frame( dt, record, m_far, m_lights );
     }
@@ -1614,6 +1624,17 @@ public:
             }
             if ( m_race.active )
                 race_session_debris_draw( m_race, sort, p );
+            if ( m_race.active && m_race.slalom_draw )   // VuSlalomGame +0x744's draw 0x48E680: 0x440050's +0xC0 / +0xE0 = -1, then 0x520130
+            {
+                slalom_gate_draw_t gates[ 8 ];
+                const int n = slalom_draw_gates( m_race.slalom, p.m_reflecting != 0, gates );
+                for ( int k = 0; k < n; ++k )
+                {
+                    gfx_static_model_t& model = m_gate_models[ *gates[ k ].model ];
+                    model.m_colour = 0xFFFFFFFFu;
+                    model.draw( sort, gates[ k ].matrix, p );
+                }
+            }
             if ( !p.m_reflecting )
                 for ( retail_geom_t& g : m_retail_geoms )
                 {
@@ -2056,6 +2077,7 @@ private:
     float m_dock_spot[ 3 ] = { };           // VuDockedBoatEntity +0x5C +0x60 +0x64
     entity_t* m_poster_entity = nullptr;
     gfx_static_model_t m_poster_model{ };
+    std::map< std::string, gfx_static_model_t > m_gate_models;   // the slalom gates' instances, by asset (ours: one per asset)
     float m_poster_matrix[ 16 ] = { };
     std::uint32_t m_poster_colour = 0xFFFFFFFFu;
     bool m_poster_on = false;
