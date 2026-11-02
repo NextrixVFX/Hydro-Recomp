@@ -275,6 +275,7 @@
     <ClInclude Include="workspace\core\world\wave.hxx" />
     <ClInclude Include="workspace\core\world\wavemap.hxx" />
     <ClInclude Include="workspace\core\world\world.hxx" />
+    <ClInclude Include="workspace\core\world\wrap.hxx" />
     <ClInclude Include="workspace\utility\checks\boat.hxx" />
     <ClInclude Include="workspace\utility\checks\game.hxx" />
     <ClInclude Include="workspace\utility\checks\leaves.hxx" />

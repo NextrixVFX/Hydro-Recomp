@@ -4816,8 +4816,8 @@ address,size,ida_name,classes,vtable_slots,subsystem,status,cited_in,thunk,libra
 0x50C670,61,sub_50C670,,,unattributed,verified,hydro/workspace/core/world/primitive.hxx,False,False,race
 0x50C6B0,946,sub_50C6B0,,,unattributed,verified,hydro/workspace/core/world/primitive.hxx; hydro/workspace/utility/checks/render.hxx,False,False,race
 0x50CA70,883,VuMatrix_lookAtBasis,,,unattributed,verified,hydro/workspace/core/boat/camera.hxx; hydro/workspace/core/boat/effects.hxx; hydro/workspace/core/boat/state.hxx,False,False,race
-0x50CDF0,36,sub_50CDF0,VuDynamicsRayTest::RayTestWrapper,VuDynamicsRayTest::RayTestWrapper+1,physics (Bullet),verified,hydro/workspace/core/boat/ai.hxx; hydro/workspace/core/boat/camera.hxx; hydro/workspace/core/boat/rays.hxx,False,False,race
-0x50CE20,326,sub_50CE20,VuDynamicsRayTest::RayTestWrapper,VuDynamicsRayTest::RayTestWrapper+2,physics (Bullet),verified,hydro/workspace/core/boat/ai.hxx; hydro/workspace/core/boat/camera.hxx; hydro/workspace/core/boat/rays.hxx,False,False,race
+0x50CDF0,36,sub_50CDF0,VuDynamicsRayTest::RayTestWrapper,VuDynamicsRayTest::RayTestWrapper+1,physics (Bullet),verified,hydro/workspace/core/boat/ai.hxx; hydro/workspace/core/boat/camera.hxx; hydro/workspace/core/boat/rays.hxx; hydro/workspace/core/world/corona.hxx; hydro/workspace/utility/checks/render.hxx,False,False,race
+0x50CE20,326,sub_50CE20,VuDynamicsRayTest::RayTestWrapper,VuDynamicsRayTest::RayTestWrapper+2,physics (Bullet),verified,hydro/workspace/core/boat/ai.hxx; hydro/workspace/core/boat/camera.hxx; hydro/workspace/core/boat/rays.hxx; hydro/workspace/core/world/corona.hxx; hydro/workspace/utility/checks/render.hxx,False,False,race
 0x50CF70,35,sub_50CF70,PBVbtCollisionShape::0PAVbtCollisionObject::SAXABVbtTransform::btCollisionWorld::??rayTestSingle::?BP::.?AULocalInfoAdder2; VuDynamicsRayTest::RayTestWrapper; btCollisionWorld::RayResultCallback,VuDynamicsRayTest::RayTestWrapper+0; btCollisionWorld::RayResultCallback+0; PBVbtCollisionShape::0PAVbtCollisionObject::SAXABVbtTransform::btCollisionWorld::??rayTestSingle::?BP::.?AULocalInfoAdder2+0,physics (Bullet),verified,engine/workspace/core/collision/leaves.hxx,False,False,race
 0x50CFB0,257,sub_50CFB0,,,physics (Bullet) (by address),verified,engine/workspace/core/collision/raytest.hxx; hydro/workspace/core/boat/camera.hxx; hydro/workspace/core/boat/rays.hxx; hydro/workspace/core/world/corona.hxx; hydro/workspace/utility/checks/rays.hxx,False,False,race
 0x50D0C0,38,sub_50D0C0,btCollisionWorld::RayResultCallback,btCollisionWorld::RayResultCallback+1,physics (Bullet),cited,engine/workspace/core/collision/raytest.hxx,False,False,race
@@ -5341,8 +5341,8 @@ address,size,ida_name,classes,vtable_slots,subsystem,status,cited_in,thunk,libra
 0x537600,1231,sub_537600,,,unattributed,cited,hydro/workspace/core/ui/draw.hxx,False,False,race
 0x537AD0,649,sub_537AD0,,,unattributed,absent,,False,False,race
 0x537D60,75,sub_537D60,,,unattributed,absent,,False,False,race
-0x537DB0,305,sub_537DB0,,,unattributed,absent,,False,False,race
-0x537EF0,164,sub_537EF0,,,unattributed,absent,,False,False,race
+0x537DB0,305,sub_537DB0,,,unattributed,cited,hydro/workspace/core/world/wrap.hxx,False,False,race
+0x537EF0,164,sub_537EF0,,,unattributed,cited,hydro/workspace/core/world/wrap.hxx,False,False,race
 0x537FA0,264,sub_537FA0,,,unattributed,absent,,False,False,race
 0x5380B0,93,sub_5380B0,,,unattributed,absent,,False,False,race
 0x538110,1377,sub_538110,,,unattributed,absent,,False,False,race
@@ -6678,13 +6678,13 @@ address,size,ida_name,classes,vtable_slots,subsystem,status,cited_in,thunk,libra
 0x5A84E0,55,sub_5A84E0,VuAnimatedModelAsset,VuAnimatedModelAsset+6,rendering / gfx,absent,,False,False,race
 0x5A8520,95,sub_5A8520,,,rendering / gfx (by address),verified,engine/workspace/core/collision/compound.hxx,False,False,race
 0x5A8580,124,sub_5A8580,,,rendering / gfx (by address),verified,hydro/workspace/core/world/instance.hxx; hydro/workspace/utility/checks/render.hxx,False,False,race
-0x5A8600,88,sub_5A8600,,,rendering / gfx (by address),absent,,False,False,race
-0x5A8660,88,sub_5A8660,,,rendering / gfx (by address),absent,,False,False,race
-0x5A86C0,151,sub_5A86C0,,,rendering / gfx (by address),absent,,False,False,race
-0x5A8760,268,sub_5A8760,,,rendering / gfx (by address),absent,,False,False,race
-0x5A8870,51,sub_5A8870,,,rendering / gfx (by address),absent,,False,False,race
-0x5A88B0,62,sub_5A88B0,,,rendering / gfx (by address),absent,,False,False,race
-0x5A88F0,332,sub_5A88F0,,,rendering / gfx (by address),absent,,False,False,race
+0x5A8600,88,sub_5A8600,,,rendering / gfx (by address),verified,hydro/workspace/core/world/wrap.hxx; hydro/workspace/utility/checks/render.hxx,False,False,race
+0x5A8660,88,sub_5A8660,,,rendering / gfx (by address),verified,hydro/workspace/core/world/wrap.hxx; hydro/workspace/utility/checks/render.hxx,False,False,race
+0x5A86C0,151,sub_5A86C0,,,rendering / gfx (by address),verified,hydro/workspace/core/world/wrap.hxx; hydro/workspace/utility/checks/render.hxx,False,False,race
+0x5A8760,268,sub_5A8760,,,rendering / gfx (by address),verified,hydro/workspace/core/world/wrap.hxx; hydro/workspace/utility/checks/render.hxx,False,False,race
+0x5A8870,51,sub_5A8870,,,rendering / gfx (by address),verified,hydro/workspace/core/world/wrap.hxx; hydro/workspace/utility/checks/render.hxx,False,False,race
+0x5A88B0,62,sub_5A88B0,,,rendering / gfx (by address),verified,hydro/workspace/core/world/wrap.hxx; hydro/workspace/utility/checks/render.hxx,False,False,race
+0x5A88F0,332,sub_5A88F0,,,rendering / gfx (by address),verified,hydro/workspace/core/world/wrap.hxx; hydro/workspace/utility/checks/render.hxx,False,False,race
 0x5A8A40,6,sub_5A8A40,VuMetroD3d11CubeTexture,VuMetroD3d11CubeTexture+1,HUD / UI / fonts,absent,,False,False,race
 0x5A8A50,127,sub_5A8A50,,,HUD / UI / fonts (by address),absent,,False,False,race
 0x5A8AD0,11,sub_5A8AD0,VuGfxComposer,VuGfxComposer+4,rendering / gfx,absent,,False,False,game
@@ -7719,8 +7719,8 @@ address,size,ida_name,classes,vtable_slots,subsystem,status,cited_in,thunk,libra
 0x5E9980,139,VuCoronaEntity_refreshBounds,VuCoronaEntity,VuCoronaEntity+2; VuCoronaEntity+3,rendering / gfx,verified,engine/workspace/core/entity/light.hxx,False,False,race
 0x5E9A10,271,VuCoronaEntity_onLoad,VuCoronaEntity,VuCoronaEntity+6,rendering / gfx,cited,engine/workspace/core/entity/light.hxx,False,False,race
 0x5E9B20,60,VuCoronaEntity_onUnload,VuCoronaEntity,VuCoronaEntity+7,rendering / gfx,cited,engine/workspace/core/entity/light.hxx,False,False,race
-0x5E9B60,99,sub_5E9B60,,,rendering / gfx (by address),cited,engine/workspace/core/entity/light.hxx,False,False,race
-0x5E9BD0,109,sub_5E9BD0,,,rendering / gfx (by address),absent,,False,False,race
+0x5E9B60,99,sub_5E9B60,,,rendering / gfx (by address),verified,engine/workspace/core/entity/light.hxx; hydro/workspace/core/world/corona.hxx; hydro/workspace/utility/checks/render.hxx,False,False,race
+0x5E9BD0,109,sub_5E9BD0,,,rendering / gfx (by address),verified,hydro/workspace/core/world/corona.hxx; hydro/workspace/utility/checks/render.hxx,False,False,race
 0x5E9C40,16,sub_5E9C40,,,rendering / gfx (by address),absent,,False,False,race
 0x5E9C50,293,sub_5E9C50,,,rendering / gfx (by address),verified,engine/workspace/core/entity/light.hxx,False,False,race
 0x5E9D80,93,sub_5E9D80,,,rendering / gfx (by address),absent,,False,False,race
@@ -8239,10 +8239,10 @@ address,size,ida_name,classes,vtable_slots,subsystem,status,cited_in,thunk,libra
 0x61CCB0,102,VuTriggerEntity_onActivate,,,entity / component / script framework (by address),cited,engine/workspace/core/entity/trigger.hxx; hydro/workspace/core/world/graph.hxx,False,False,race
 0x61CD20,98,VuTriggerEntity_onDeactivate,,,entity / component / script framework (by address),cited,engine/workspace/core/entity/trigger.hxx; hydro/workspace/core/world/graph.hxx,False,False,race
 0x61CD90,150,VuScriptInputPlug_create,,,entity / component / script framework (by address),verified,hydro/workspace/core/world/graph.hxx,False,False,race
-0x61CE30,38,sub_61CE30,VuCoronaRayTestResult,VuCoronaRayTestResult+0,rendering / gfx,absent,,False,False,race
+0x61CE30,38,sub_61CE30,VuCoronaRayTestResult,VuCoronaRayTestResult+0,rendering / gfx,verified,hydro/workspace/core/world/corona.hxx; hydro/workspace/utility/checks/render.hxx,False,False,race
 0x61CE60,129,sub_61CE60,,,rendering / gfx (by address),verified,engine/workspace/core/entity/corona.hxx; engine/workspace/core/entity/light.hxx,False,False,race
 0x61CF00,249,sub_61CF00,,,rendering / gfx (by address),cited,engine/workspace/core/entity/corona.hxx; engine/workspace/core/entity/light.hxx; engine/workspace/core/entity/property.hxx,False,False,race
-0x61D000,406,sub_61D000,,,rendering / gfx (by address),cited,engine/workspace/core/entity/light.hxx,False,False,race
+0x61D000,406,sub_61D000,,,rendering / gfx (by address),verified,engine/workspace/core/entity/light.hxx; hydro/workspace/core/world/corona.hxx; hydro/workspace/utility/checks/render.hxx,False,False,race
 0x61D1A0,868,sub_61D1A0,,,rendering / gfx (by address),cited,engine/workspace/core/entity/light.hxx; hydro/workspace/core/world/pfxclass.hxx,False,False,race
 0x61D510,6,sub_61D510,Vu3dDrawAnimatedModelComponent,Vu3dDrawAnimatedModelComponent+1,rendering / gfx,absent,,False,False,race
 0x61D520,6,sub_61D520,Vu3dDrawAnimatedModelComponent,Vu3dDrawAnimatedModelComponent+0,rendering / gfx,callee,,False,False,race

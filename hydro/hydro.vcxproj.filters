@@ -549,6 +549,9 @@
     <ClInclude Include="workspace\core\world\world.hxx">
       <Filter>workspace\core\world</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\core\world\wrap.hxx">
+      <Filter>workspace\core\world</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\utility\checks\boat.hxx">
       <Filter>workspace\utility\checks</Filter>
     </ClInclude>
