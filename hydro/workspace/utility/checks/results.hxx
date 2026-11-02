@@ -8,6 +8,7 @@
 #include <workspace/core/ui/standings.hxx>
 #include <workspace/core/ui/typeset.hxx>
 #include <workspace/core/ui/savefile.hxx>
+#include <workspace/core/ui/progress.hxx>
 #include <workspace/core/assets/archive.hxx>
 
 #include <cstdio>
@@ -2054,6 +2055,66 @@ inline bool verify_ui_save_file( )
     return failed == 0;
 }
 
+// core/ui/progress.hxx against retail's VuProgressManagerImpl on its own vtable (oracle case progress_champ): a seeded op script on five
+// starting documents, each op's answers and the whole document's hash.
+inline bool verify_ui_progress_champ( )
+{
+    int failed = 0, ops = 0;
+    const auto hash = [ ]( const value_t& v ) { std::string d; vujb_dump( v, d ); return ui_chl_hash( d ); };
+    const auto short_hash = [ & ]( const value_t& v ) { char at[ 32 ]; std::snprintf( at, sizeof( at ), "%016llx", static_cast< unsigned long long >( hash( v ) ) ); at[ 7 ] = 0; return static_cast< int >( std::strtoul( at, nullptr, 16 ) ); };
+    for ( std::size_t k = 0; k < g_golden_pgc_runs_count; ++k )
+    {
+        const golden_pgc_run_t& run = g_golden_pgc_runs[ k ];
+        value_t document;
+        if ( run.m_doc[ 0 ] )
+            document = c_reader( ui_fnd_bytes( run.m_doc ) ).parse( );
+        for ( int t = 0; t < run.m_steps; ++t )
+        {
+            const golden_pgc_step_t& g = g_golden_pgc_steps[ run.m_first + t ];
+            const std::string op = g.m_op;
+            int ret = 0;
+            std::int32_t a = 0x11111111, b = 0x22222222, c = 0x33333333;
+            if ( op == "result" )
+                ui_progress_champ_result( document, g.m_name, g.m_arg );
+            else if ( op == "place" )
+                ret = ui_progress_champ_place( document, g.m_name, a ) ? 1 : 0;
+            else if ( op == "count" )
+                ret = ui_progress_champ_count( document );
+            else if ( op == "medals" )
+                ui_progress_champ_medals( document, a, b, c );
+            else if ( op == "save" )
+            {
+                value_t state;
+                if ( g_golden_pgc_states[ g.m_arg ][ 0 ] )
+                    state = c_reader( ui_fnd_bytes( g_golden_pgc_states[ g.m_arg ] ) ).parse( );
+                ui_progress_champ_save( document, state );
+            }
+            else if ( op == "load" )
+            {
+                value_t out;
+                ui_progress_champ_load( document, out );
+                ret = short_hash( out );
+            }
+            else if ( op == "state" )
+                ret = short_hash( ui_progress_champ_state( document ) );
+            else if ( op == "active" )
+                ret = ui_progress_champ_active( document ) ? 1 : 0;
+            else if ( op == "used" )
+                ui_progress_boat_used( document, g.m_name );
+            else if ( op == "was" )
+                ret = ui_progress_boat_was_used( document, g.m_name ) ? 1 : 0;
+            ++ops;
+            if ( ( ret != g.m_ret || a != g.m_a || b != g.m_b || c != g.m_c || hash( document ) != g.m_doc ) && ++failed <= 6 )
+                LOG_ERROR( "ui progress: run %d step %d %s %s %d differs: %d %d %d %d, want %d %d %d %d", static_cast< int >( k ), t, g.m_op, g.m_name, g.m_arg, ret, a, b, c, g.m_ret, g.m_a, g.m_b, g.m_c );
+        }
+    }
+    if ( failed == 0 )
+        LOG_SUCCESS( "ui_progress_* match retail's VuProgressManagerImpl slots 22 .. 29, 32, 33 (0x4B3980 0x4B3A30 0x4B3C40 0x4B3C80 0x4B3D60 0x4B3D90 0x4B3DC0 0x4B3DE0 0x4B4040 0x4B4090) on %d ops", ops );
+    else
+        LOG_ERROR( "ui progress: %d ops differ from retail", failed );
+    return failed == 0;
+}
+
 inline bool verify_ui_results_all( )
 {
     bool ok = true;
@@ -2069,5 +2130,6 @@ inline bool verify_ui_results_all( )
     ok = verify_ui_championship_load( ) && ok;
     ok = verify_ui_font_draw( ) && ok;
     ok = verify_ui_save_file( ) && ok;
+    ok = verify_ui_progress_champ( ) && ok;
     return ok;
 }
