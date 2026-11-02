@@ -571,7 +571,7 @@ address,size,ida_name,classes,vtable_slots,subsystem,status,cited_in,thunk,libra
 0x426110,6,sub_426110,VuHUDPauseButtonEntity,VuHUDPauseButtonEntity+1,HUD / UI / fonts,absent,,False,False,race
 0x426120,132,sub_426120,,,HUD / UI / fonts (by address),verified,hydro/workspace/core/game/types.hxx; hydro/workspace/core/ui/controls.hxx,False,False,race
 0x4261B0,235,sub_4261B0,VuHUDPauseButtonEntity,VuHUDPauseButtonEntity+13,HUD / UI / fonts,verified,hydro/workspace/core/ui/bind.hxx; hydro/workspace/core/ui/controls.hxx; hydro/workspace/utility/checks/update.hxx,False,False,race
-0x4262A0,131,sub_4262A0,VuHUDPauseButtonEntity,VuHUDPauseButtonEntity+14,HUD / UI / fonts,verified,hydro/workspace/core/ui/bind.hxx; hydro/workspace/core/ui/controls.hxx; hydro/workspace/utility/checks/update.hxx,False,False,race
+0x4262A0,131,sub_4262A0,VuHUDPauseButtonEntity,VuHUDPauseButtonEntity+14,HUD / UI / fonts,verified,hydro/workspace/core/ui/bind.hxx; hydro/workspace/core/ui/controls.hxx; hydro/workspace/core/world/msgbox.hxx; hydro/workspace/utility/checks/update.hxx,False,False,race
 0x426330,21,sub_426330,VuHUDPauseButtonEntity,VuHUDPauseButtonEntity+15,HUD / UI / fonts,verified,hydro/workspace/core/ui/bind.hxx; hydro/workspace/core/ui/controls.hxx; hydro/workspace/core/world/huds.hxx; hydro/workspace/utility/checks/widgets.hxx,False,False,race
 0x426350,54,sub_426350,,,HUD / UI / fonts (by address),verified,hydro/workspace/core/ui/remap.hxx,False,False,race
 0x426390,6,sub_426390,VuBasicProperty<...>,VuBasicProperty<...>+1,entity / component / script framework,verified,engine/workspace/core/entity/values.hxx,False,False,race
@@ -3269,11 +3269,11 @@ address,size,ida_name,classes,vtable_slots,subsystem,status,cited_in,thunk,libra
 0x4BB900,113,sub_4BB900,,,unattributed,verified,hydro/workspace/core/ui/paused.hxx; hydro/workspace/core/world/pause.hxx; hydro/workspace/core/world/session.hxx; hydro/workspace/utility/checks/session.hxx,False,False,race
 0x4BB980,343,sub_4BB980,,,unattributed,verified,hydro/workspace/core/ui/paused.hxx; hydro/workspace/core/world/huds.hxx; hydro/workspace/core/world/pause.hxx,False,False,race
 0x4BBAE0,305,sub_4BBAE0,,,unattributed,verified,hydro/workspace/core/ui/paused.hxx,False,False,race
-0x4BBC20,148,sub_4BBC20,,,unattributed,verified,hydro/workspace/core/ui/paused.hxx,False,False,race
+0x4BBC20,148,sub_4BBC20,,,unattributed,verified,hydro/workspace/core/ui/paused.hxx; hydro/workspace/core/world/world.hxx,False,False,race
 0x4BBCC0,72,sub_4BBCC0,,,unattributed,verified,hydro/workspace/core/ui/paused.hxx,False,False,race
 0x4BBD10,123,sub_4BBD10,,,unattributed,verified,hydro/workspace/core/ui/paused.hxx; hydro/workspace/core/world/pause.hxx,False,False,race
 0x4BBD90,147,sub_4BBD90,,,unattributed,verified,hydro/workspace/core/ui/paused.hxx; hydro/workspace/core/world/pause.hxx,False,False,race
-0x4BBE30,166,sub_4BBE30,,,unattributed,verified,hydro/workspace/core/ui/paused.hxx; hydro/workspace/core/world/pause.hxx,False,False,race
+0x4BBE30,166,sub_4BBE30,,,unattributed,verified,hydro/workspace/core/ui/paused.hxx; hydro/workspace/core/world/msgbox.hxx; hydro/workspace/core/world/pause.hxx,False,False,race
 0x4BBEE0,42,sub_4BBEE0,,,unattributed,verified,hydro/workspace/core/ui/paused.hxx; hydro/workspace/core/world/pause.hxx,False,False,race
 0x4BBF10,78,sub_4BBF10,,,unattributed,verified,hydro/workspace/core/ui/paused.hxx,False,False,race
 0x4BBF60,109,sub_4BBF60,,,unattributed,verified,hydro/workspace/core/ui/paused.hxx,False,False,race
