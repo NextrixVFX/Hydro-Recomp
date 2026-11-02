@@ -1523,6 +1523,9 @@ public:
             m_foliage.flush( sort, tint );
             if ( !p.m_reflecting && c_engine::option( "no-pfx" ) == nullptr )   // VuPfxEntity's Reflect 0, the boats' 0x419CE0 draws nothing there
                 m_pfx.submit( sort, *p.m_camera, m_retail->m_pfx_materials, m_retail->m_pfx_trail_material );
+            if ( !p.m_reflecting )
+                for ( const retail_corona_t& c : m_retail_coronas )
+                    m_retail->corona_submit( sort, c.position, c.colour, c.size, c.rotation, c.amount, c.material );
         };
         if ( m_retail->pfx_programs( ) )
         {
@@ -1554,6 +1557,19 @@ public:
             g.colour = colour;
             m_retail_geoms.push_back( g );
             return true;
+        };
+        m_coronas.m_sink = [ this ]( const float* position, std::uint32_t colour, float size, float rotation, float amount, const std::string& texture ) {
+            const std::uint32_t material = m_retail->corona_material( texture );
+            if ( material == 0u )
+                return;
+            retail_corona_t c;
+            std::memcpy( c.position, position, 12 );
+            c.colour = colour;
+            c.size = size;
+            c.rotation = rotation;
+            c.amount = amount;
+            c.material = material;
+            m_retail_coronas.push_back( c );
         };
         c_engine::stage_pass( &gfx_retail_t::engine_pass, m_retail.get( ) );
     }
@@ -1761,6 +1777,19 @@ public:
             c_engine::drop( 14 );
         }
         m_coronas.tick( dt );
+        // VuCoronaEntity's occlusion 0x61D000, the race's collision world. SUBSTITUTION: the triangle's material byte +0x29 (0x5E7650) is not loaded: every triangle stops the ray. No world (the front end): visible.
+        if ( m_race.active && m_race.dynamics )
+        {
+            gfx_corona_collision_ray_t ray;
+            ray.m_world = &m_race.dynamics->collision;
+            ray.m_image = []( void*, const collision_object_t& o ) { return reinterpret_cast< const std::uint8_t* >( o.body.object ); };
+            ray.m_surface = []( void*, const collision_object_t&, int ) { return -1; };
+            m_coronas.occlusion( m_eye, [ & ]( const float* from, const float* to ) { return static_cast< gfx_corona_entity_ray_t& >( ray ).blocked( from, to, 0xFFFFFFFFu ); } );
+        }
+        if ( m_retail )
+            if ( m_retail->m_projection[ 0 ] != 0.0f )
+                m_coronas.projection( m_retail->m_projection[ 0 ], m_retail->m_projection[ 5 ] );
+        m_retail_coronas.clear( );
         m_coronas.draw( m_eye, m_target, [ this ]( const std::string& path ) { return texture_for( path ); } );
         trace::frame( ).pfx += trace::now( ) - pfx_start;
     }
@@ -1896,6 +1925,14 @@ private:
     }
     bool m_stage_attached = false, m_stage_bound = false;
     std::unique_ptr< gfx_retail_t > m_retail;
+    struct retail_corona_t
+    {
+        float position[ 3 ];
+        std::uint32_t colour;
+        float size, rotation, amount;
+        std::uint32_t material;
+    };
+    std::vector< retail_corona_t > m_retail_coronas;
     std::vector< std::unique_ptr< gfx_retail_boat_t > > m_retail_boats;
     // VuPfxGeomPattern's particles this frame: 0x5903A0's tail, the model's draw 0x520130 at the particle's matrix and colour.
     struct retail_geom_t

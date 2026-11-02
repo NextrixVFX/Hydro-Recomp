@@ -686,7 +686,7 @@ void c_geometry::reflecting( bool enabled )
 void c_geometry::draw( )
 {
     const double ensure_start = trace::now( );
-    if ( m_placements.empty( ) || !ensure( ) )
+    if ( ( m_placements.empty( ) && m_stage_pass == nullptr ) || !ensure( ) )   // the retail stage draws with no engine placement at all
         return;
     trace::frame( ).ensure += trace::now( ) - ensure_start;
 

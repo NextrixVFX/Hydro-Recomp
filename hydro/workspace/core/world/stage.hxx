@@ -17,6 +17,7 @@
 #include <workspace/core/render/program.hxx>
 #include <workspace/core/render/resource.hxx>
 #include <workspace/core/world/backend.hxx>
+#include <workspace/core/world/corona.hxx>
 #include <workspace/core/world/drawing.hxx>
 #include <workspace/core/world/foliage.hxx>
 #include <workspace/core/world/gfxsort.hxx>
@@ -91,6 +92,7 @@ struct gfx_retail_t
             m_device.draw_indexed( 3u, part.m_start, part.m_triangles );
         };
         m_backend.m_callbacks[ k_gfx_cb_foliage ] = [ this ]( std::uint8_t* r ) { foliage_record( r ); };
+        m_backend.m_callbacks[ k_gfx_cb_sun ] = [ this ]( std::uint8_t* r ) { corona_record( r ); };
         m_backend.m_callbacks[ k_gfx_cb_pfx_quad ] = [ this ]( std::uint8_t* r ) { pfx_quad_record( r ); };
         m_backend.m_callbacks[ k_gfx_cb_pfx_trail ] = [ this ]( std::uint8_t* r ) { pfx_trail_record( r ); };
     }
@@ -141,6 +143,10 @@ struct gfx_retail_t
     std::int32_t m_pfx_trail_sampler = -1;
     std::vector< std::uint8_t > m_pfx_vertices;    // the static 0x799898
     const gfx_texture_t* m_white = nullptr;
+    gfx_program_t* m_corona_program = nullptr;
+    std::uint32_t m_corona_layout = 0;
+    std::map< std::string, std::uint32_t > m_corona_materials;
+    float m_projection[ 16 ] = { };
     float m_right[ 3 ] = { }, m_up[ 3 ] = { };
     std::function< const std::uint8_t*( std::uint32_t ) > m_pfx_node;
     std::function< void( std::uint32_t, std::uint32_t&, std::uint32_t& ) > m_pfx_assets;
@@ -430,6 +436,81 @@ struct gfx_retail_t
         return true;
     }
 
+    // A corona's material (0x5E7ED0): VuGfxUtil's shader set entry 5 (+0x3C, +0x44: 0x5421C0's Basic/3dXyzUv), tex0 = the texture.
+    std::uint32_t corona_material( const std::string& name )
+    {
+        const auto found = m_corona_materials.find( name );
+        if ( found != m_corona_materials.end( ) )
+            return found->second;
+        if ( m_corona_program == nullptr )
+        {
+            std::vector< std::uint8_t > blob;
+            if ( !m_read( "VuCompiledShaderAsset/Basic/3dXyzUv", blob ) )
+                return 0u;
+            m_corona_program = m_programs.load( blob.data( ) );
+            gfx_vertex_element_t xyz, uv;
+            xyz.m_type = 2u;
+            uv.m_offset = 12u;
+            uv.m_type = 1u;
+            uv.m_usage = 6u;
+            gfx_declaration_t* declaration = m_declarations.create( { xyz, uv }, *m_corona_program );
+            const gfx_handle_t layout = declaration->m_layout;
+            m_corona_layout = id_of( declaration, [ & ] { return m_backend.add_layout( layout ); } );
+        }
+        gfx_program_t* program = m_corona_program;
+        const std::uint32_t program_id = id_of( program, [ & ] { return m_backend.add_program( program ); } );
+        gfx_material_desc_t desc;
+        gfx_material_desc_t::texture_t t;
+        t.m_name = "tex0";
+        t.m_asset = name;
+        desc.m_textures.push_back( t );
+        const gfx_material_t* material = m_sort.material_create( program_id, m_corona_layout, desc );
+        const std::uint32_t id = id_of( material, [ & ] { return m_backend.add_material( material ); } );
+        m_corona_materials.emplace( name, id );
+        return id;
+    }
+
+    // The record 0x61D1A0 / 0x5E82D0 write.
+    void corona_submit( gfx_sort_t& sort, const float* position, std::uint32_t colour, float size, float rotation, float amount, std::uint32_t material )
+    {
+        std::uint8_t* r = sort.allocate( 0x20 );
+        std::memcpy( r, position, 12 );
+        std::memcpy( r + 0x10, &colour, 4 );
+        std::memcpy( r + 0x14, &size, 4 );
+        std::memcpy( r + 0x18, &rotation, 4 );
+        std::memcpy( r + 0x1C, &amount, 4 );
+        sort.submit_keyed( 0x12, material, 0, k_gfx_cb_sun, 0.0f );
+    }
+
+    // 0x5E8410: the camera-facing card. The roll is the view-space x over z through the projection, scaled and offset. M = rotationY( roll ) x ( scale( s, 1, s ) x the camera's world at the position ).
+    void corona_record( const std::uint8_t* r )
+    {
+        float p[ 3 ], size, offset, amount;
+        std::memcpy( p, r, 12 );
+        std::memcpy( &size, r + 0x14, 4 );
+        std::memcpy( &offset, r + 0x18, 4 );
+        std::memcpy( &amount, r + 0x1C, 4 );
+        const float* v = m_view;
+        const float vx = ( ( p[ 0 ] * v[ 0 ] + p[ 1 ] * v[ 4 ] ) + p[ 2 ] * v[ 8 ] ) + v[ 12 ];
+        const float vz = ( ( p[ 0 ] * v[ 2 ] + p[ 1 ] * v[ 6 ] ) + p[ 2 ] * v[ 10 ] ) + v[ 14 ];
+        float m[ 16 ] = { m_right[ 0 ], m_right[ 1 ], m_right[ 2 ], 0.0f, m_camera.m_direction[ 0 ], m_camera.m_direction[ 1 ], m_camera.m_direction[ 2 ], 0.0f, m_up[ 0 ], m_up[ 1 ], m_up[ 2 ], 0.0f, p[ 0 ], p[ 1 ], p[ 2 ], 1.0f };
+        const float scale[ 16 ] = { size, 0, 0, 0, 0, 1.0f, 0, 0, 0, 0, size, 0, 0, 0, 0, 1.0f };
+        float a[ 16 ], b[ 16 ], mvp[ 16 ];
+        hull_multiply( scale, a, m );
+        const float u = 0.5f - ( ( m_projection[ 0 ] * vx ) / vz ) * 0.5f;
+        const float angle = ( 0.5f - u ) * amount + offset;
+        const float c = wave_x87_cos( angle ), s = wave_x87_sin( angle );
+        const float rotate[ 16 ] = { c, 0, -s, 0, 0, 1.0f, 0, 0, s, 0, c, 0, 0, 0, 0, 1.0f };
+        hull_multiply( rotate, b, a );
+        hull_multiply( b, mvp, m_view_proj );
+        gfx_programs_t::set_colour4( m_api, *m_corona_program, *m_corona_program->constant( "gColor" ), r + 0x10 );
+        gfx_programs_t::set_matrix( m_api, *m_corona_program, *m_corona_program->constant( "gModelViewProjMatrix" ), mvp );
+        const float strip[ 20 ] = { -0.5f, 0.0f, -0.5f, 0.0f, 1.0f, 0.5f, 0.0f, -0.5f, 1.0f, 1.0f, -0.5f, 0.0f, 0.5f, 0.0f, 0.0f, 0.5f, 0.0f, 0.5f, 1.0f, 0.0f };
+        m_device.depth_enable( 0u );
+        m_device.draw_dynamic( 4u, 2u, strip, 0x14u );
+        m_device.depth_enable( 1u );
+    }
+
     const gfx_texture_t* pfx_texture( std::uint32_t id ) const { return id ? m_backend.m_texture_table[ id - 1u ] : nullptr; }
 
     // 0x58C340: the clip threshold when the program has one, the colour texture, the tile when the program has a sampler, the fill, the quads.
@@ -556,7 +637,7 @@ struct gfx_retail_t
     {
         if ( !m_draw )
             return;
-        float projection[ 16 ];
+        float* projection = m_projection;
         c_engine::matrices( m_view, projection, m_eye );
         for ( int r = 0; r < 4; ++r )
             for ( int c = 0; c < 4; ++c )
