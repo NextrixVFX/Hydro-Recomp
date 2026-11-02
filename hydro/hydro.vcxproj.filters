@@ -390,6 +390,9 @@
     <ClInclude Include="workspace\core\world\action.hxx">
       <Filter>workspace\core\world</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\core\world\affector.hxx">
+      <Filter>workspace\core\world</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\core\world\animate.hxx">
       <Filter>workspace\core\world</Filter>
     </ClInclude>
@@ -439,6 +442,9 @@
       <Filter>workspace\core\world</Filter>
     </ClInclude>
     <ClInclude Include="workspace\core\world\debris.hxx">
+      <Filter>workspace\core\world</Filter>
+    </ClInclude>
+    <ClInclude Include="workspace\core\world\dock.hxx">
       <Filter>workspace\core\world</Filter>
     </ClInclude>
     <ClInclude Include="workspace\core\world\drawer.hxx">

@@ -222,6 +222,7 @@
     <ClInclude Include="workspace\core\ui\wired.hxx" />
     <ClInclude Include="workspace\core\ui\wiring.hxx" />
     <ClInclude Include="workspace\core\world\action.hxx" />
+    <ClInclude Include="workspace\core\world\affector.hxx" />
     <ClInclude Include="workspace\core\world\animate.hxx" />
     <ClInclude Include="workspace\core\world\attach.hxx" />
     <ClInclude Include="workspace\core\world\autopilot.hxx" />
@@ -239,6 +240,7 @@
     <ClInclude Include="workspace\core\world\corona.hxx" />
     <ClInclude Include="workspace\core\world\dbrt.hxx" />
     <ClInclude Include="workspace\core\world\debris.hxx" />
+    <ClInclude Include="workspace\core\world\dock.hxx" />
     <ClInclude Include="workspace\core\world\drawer.hxx" />
     <ClInclude Include="workspace\core\world\drawing.hxx" />
     <ClInclude Include="workspace\core\world\drive.hxx" />
