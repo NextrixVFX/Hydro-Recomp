@@ -828,7 +828,11 @@ struct gfx_retail_t final : gfx_composer_hooks_t
         std::memcpy( m_image + 0x30, projection, 64 );
         camera_view( m_image, eye, target, up );
         m_palettes.clear( );
-        m_composer.frame( m_image, m_plane, m_blur, reflection );
+        {
+            const spikes::scope_t spike( spikes::k_commands );
+            m_composer.frame( m_image, m_plane, m_blur, reflection );
+        }
+        const spikes::scope_t spike( spikes::k_flip );
         m_sort.flip( );
         if ( ++m_passes == 300 )
         {

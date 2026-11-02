@@ -64,6 +64,14 @@ namespace drawstats
             g_session.by_second.reserve( 4096 );
     }
 
+    inline std::uint32_t total_draws( )
+    {
+        std::uint32_t total = 0;
+        for ( const counts_t& c : g_state.now )
+            total += c.draws;
+        return total;
+    }
+
     // After present.
     inline void frame_end( )
     {

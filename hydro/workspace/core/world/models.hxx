@@ -36,6 +36,8 @@ inline int c_world::texture_for( const std::string& path )
     if ( existing != m_textures.end( ) )
         return existing->second;
 
+    const spikes::scope_t spike( spikes::k_texture_load );
+    spikes::count( spikes::c_textures );
     std::vector< std::uint8_t > bytes;
     image_t image{};
     const std::string name = "VuTextureAsset/" + path;

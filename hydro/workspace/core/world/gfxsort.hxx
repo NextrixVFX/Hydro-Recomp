@@ -412,7 +412,10 @@ struct gfx_sort_t : ui_gfx_sort_t
             return;
         if ( m_hooks.m_has_profile )
             m_hooks.profile( 0x20 );
-        sort( );
+        {
+            const spikes::scope_t spike( spikes::k_sort );
+            sort( );
+        }
         walk( );
         if ( m_hooks.m_has_profile )
             m_hooks.profile( 0x24 );
@@ -452,6 +455,7 @@ struct gfx_sort_t : ui_gfx_sort_t
     // - and each command's callback runs with its record. A null material or chunk binds nothing but does count as the previous.
     void walk( )
     {
+        spikes::scope_t spike( m_stat_passes ? spikes::k_walk_other : spikes::k_walk_ui );
         default_state( );
         std::memcpy( m_stats_last, m_stats, sizeof( m_stats ) );
         std::memset( m_stats, 0, sizeof( m_stats ) );
@@ -462,7 +466,11 @@ struct gfx_sort_t : ui_gfx_sort_t
         {
             const ui_gfx_command_t& c = list[ at ];
             if ( m_stat_passes )   // ours: drawstats' pass from the key (0x800000 clear = the reflection's view) and the callback
-                drawstats::set( stat_pass( c.m_words[ 1 ], c.m_words[ 2 ] ) );
+            {
+                const drawstats::pass_t pass = stat_pass( c.m_words[ 1 ], c.m_words[ 2 ] );
+                drawstats::set( pass );
+                spike.retarget( spikes::k_walk_other + pass );
+            }
             const std::uint32_t material = c.m_words[ 4 ], chunk = c.m_words[ 5 ];
             if ( material != last_material )
             {

@@ -614,6 +614,7 @@ inline void c_world::ui_frame( )
     ghost_labels( );
     boxes_draw( );
     fade_draw( );
+    const spikes::scope_t spike( spikes::k_ui_end );
     m_ui_pass->end( );
 #endif
 }

@@ -49,6 +49,7 @@ public:
                 c_engine::option( "mode" ), c_engine::option( "course" ) );
         }
 
+        const spikes::scope_t spike( spikes::k_game_rest );
         m_world.scene_frame( dt );
         c_engine::camera( m_world.eye( ), m_world.target( ), m_world.far_plane( ) );
     }

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <workspace/utility/spikes.hxx>
+
 #include <workspace/utility/logger.hxx>
 
 #include <cstdint>
@@ -102,6 +104,8 @@ public:
 
     bool read( const char* name, std::vector< std::uint8_t >& out ) const
     {
+        const spikes::scope_t spike( spikes::k_read );
+        const double spike_start = spikes::g_state.on ? trace::now( ) : 0.0;
         out.clear( );
         const entry_t* entry = find( name );
         if ( entry == nullptr )
@@ -115,6 +119,8 @@ public:
         const std::uint32_t stored = entry->packed ? entry->compressed : entry->raw;
         if ( stored < 8 )
             return false;
+        spikes::count( spikes::c_reads );
+        spikes::count( spikes::c_read_bytes, stored );
 
         std::ifstream file( m_path, std::ios::binary );
         if ( !file )
@@ -151,6 +157,7 @@ public:
         }
 
         LOG_VERBOSE( "asset %s  %u bytes", name, static_cast< unsigned >( dest_len ) );
+        spikes::note( name, stored, trace::now( ) - spike_start );
         return true;
     }
 

@@ -1,5 +1,28 @@
 #include <impl/includes.hxx>
 
+// Ours (a measurement build only, off by default): operator new counted for --spike-log (utility/spikes.hxx).
+#if defined( HYDRO_SPIKE_ALLOC )
+#include <new>
+static inline void spike_alloc( std::size_t n )
+{
+    spikes::state_t& s = spikes::g_state;
+    if ( !s.on )
+        return;
+    ++s.now.count[ spikes::c_allocs ];
+    s.now.count[ spikes::c_alloc_bytes ] += static_cast< std::uint32_t >( n );
+    if ( n >= 65536u )
+        ++s.now.count[ spikes::c_alloc_big ];
+    if ( s.current < spikes::k_slots )
+        ++s.now.allocs[ s.current ];
+}
+void* operator new( std::size_t n ) { spike_alloc( n ); void* p = std::malloc( n ? n : 1 ); if ( !p ) throw std::bad_alloc( ); return p; }
+void* operator new[]( std::size_t n ) { spike_alloc( n ); void* p = std::malloc( n ? n : 1 ); if ( !p ) throw std::bad_alloc( ); return p; }
+void operator delete( void* p ) noexcept { std::free( p ); }
+void operator delete[]( void* p ) noexcept { std::free( p ); }
+void operator delete( void* p, std::size_t ) noexcept { std::free( p ); }
+void operator delete[]( void* p, std::size_t ) noexcept { std::free( p ); }
+#endif
+
 int main( int argc, char** argv )
 {
     c_engine::arguments( argc, argv );

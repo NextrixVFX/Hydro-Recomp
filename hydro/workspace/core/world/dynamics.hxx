@@ -238,7 +238,7 @@ inline void race_dynamics_kick( race_dynamics_t& d, float dt )
     d.impl.pending = 1;
     if ( d.dt > 0.0f )
     {
-        world_step_simulation( d.world, d.dt, d.max_sub_steps, d.fixed_time_step );
+        spikes::count( spikes::c_substeps, static_cast< std::uint32_t >( world_step_simulation( d.world, d.dt, d.max_sub_steps, d.fixed_time_step ) ) );
         ++d.steps;
         if ( d.world.refused )
             d.stopped = "the world step reached a Bullet path not recreated (world_t::refused)";

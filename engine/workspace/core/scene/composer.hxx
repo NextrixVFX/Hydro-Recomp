@@ -2,6 +2,7 @@
 
 #include <impl/engine.hxx>
 #include <workspace/utility/drawstats.hxx>
+#include <workspace/utility/spikes.hxx>
 
 class c_composer : public c_draw
 {
@@ -98,6 +99,7 @@ void c_composer::blit( )
 {
 #if HYDRO_HOST_WINDOWS
     const drawstats::scope_t pass( drawstats::k_post );
+    const spikes::scope_t spike( spikes::k_blit );
     ++drawstats::at( ).draws;
     ID3D11ShaderResourceView* unbound = nullptr;
     g_swap( ).bind( g_device( ) );
