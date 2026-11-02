@@ -1,5 +1,7 @@
 #pragma once
 
+#include <workspace/core/entity/persist.hxx>
+#include <workspace/core/save/cloud.hxx>
 #include <workspace/core/save/ghost.hxx>
 #include <workspace/core/save/profile.hxx>
 #include <workspace/core/save/seam.hxx>
@@ -442,11 +444,154 @@ inline bool verify_save_ghost( )
     return bad == 0;
 }
 
+// cloud.hxx through the seam against retail's 0x4AC6C0 0x4ABD60 0x4AC5C0 0x4AC480 (case save_cloud): the file's bytes - zlib's
+// deflate included - from every document, nothing written when nothing changed; every damaged file's status, document and box.
+inline bool verify_save_cloud( )
+{
+    save_words_t c{ g_golden_save_cloud_words };
+    const unsigned n = c.next( );
+    save_check_dir_t dir;
+    int bad = 0;
+    std::size_t bytes = 0;
+    for ( unsigned v = 0; v < n; ++v )
+    {
+        const unsigned op = c.next( ), status = c.next( ), events = c.next( ), puts = c.next( ), boxes = c.next( );
+        const bool had = c.next( ) != 0;
+        const std::string before = c.str( );
+        const bool has = c.next( ) != 0;
+        const std::string after = c.str( ), doc = c.str( ), blob = c.str( ), dump = c.str( );
+        ( void )puts;
+        dir.reset( );
+        if ( had )
+            dir.put( "cloudsave", before );
+        c_cloud_save cloud;
+        unsigned got_events = 0, got_boxes = 0;
+        cloud.hooks.broadcast = [ & ]( const char* ) { ++got_events; };
+        cloud.hooks.corrupt_box = [ & ]( ) { ++got_boxes; };
+        if ( op <= 3 )
+        {
+            const std::vector< std::uint8_t > bytes_in( doc.begin( ), doc.end( ) );
+            c_reader::read_at_start( bytes_in, cloud.data );
+            if ( op == 3 )
+                std::filesystem::create_directories( dir.path / "cloudsave" );
+            if ( op == 2 )
+                cloud.save( );
+            else
+                cloud.store( );
+            if ( op == 1 )
+            {
+                std::filesystem::remove( dir.path / "cloudsave" );
+                cloud.store( );
+            }
+        }
+        else if ( op == 4 )
+        {
+            json_set_int( cloud.data, 5 );
+            cloud.status = 7;
+            cloud.load( );
+        }
+        else
+        {
+            json_set_int( cloud.data, 5 );
+            cloud.status = 7;
+            cloud.change_file( "cloudsave" );
+        }
+        std::string got_file, got_dump;
+        const bool got_has = !std::filesystem::is_directory( dir.path / "cloudsave" ) && dir.get( "cloudsave", got_file );
+        vujb_dump( cloud.data, got_dump );
+        const std::string got_blob( cloud.blob.begin( ), cloud.blob.end( ) );
+        // Retail's status word starts at the case's 0 for the store vectors; ours too. The document's dump is compared on loads only.
+        const bool same = got_has == has && got_file == after && got_blob == blob && got_events == events && got_boxes == boxes &&
+                          ( op < 4 || ( static_cast< unsigned >( cloud.status ) == status && got_dump == dump ) );
+        bytes += got_file.size( );
+        if ( !same && bad++ < 8 )
+            LOG_ERROR( "save_cloud vector %u op %u: file %zu / %zu bytes (%s), +0x10 %s, status %d / %u, dump %s, events %u / %u, boxes %u / %u", v, op, got_file.size( ), after.size( ),
+                       got_file == after ? "same" : "differs", got_blob == blob ? "same" : "differs", cloud.status, status, got_dump == dump ? "same" : "differs", got_events, events, got_boxes, boxes );
+    }
+    if ( bad == 0 )
+        LOG_SUCCESS( "cloud save file matches retail's 0x4AC6C0 0x4ACAB0 0x5BD730 0x4AC5C0 0x4AC930 0x4AC480 0x4ABD60 through the seam: %u vectors, %zu bytes of files", n, bytes );
+    else
+        LOG_ERROR( "save_cloud FAILED %d", bad );
+    return bad == 0;
+}
+
+// entity/persist.hxx against retail's VuScriptComponent slots 6 0x503EC0 and 7 0x504450 (+ 0x502720 0x504CC0, case save_script).
+inline bool verify_save_script( )
+{
+    save_words_t c{ g_golden_save_script_words };
+    const unsigned n = c.next( );
+    int bad = 0;
+    const auto word_float = [ & ]( ) {
+        const unsigned u = c.next( );
+        float f;
+        std::memcpy( &f, &u, 4 );
+        return f;
+    };
+    for ( unsigned v = 0; v < n; ++v )
+    {
+        const unsigned slot = c.next( );
+        const std::string doc = c.str( );
+        persist_component_t s;
+        s.plugs.resize( c.next( ) );
+        for ( persist_plug_t& p : s.plugs )
+        {
+            p.name = c.str( );
+            p.baseline = static_cast< std::int32_t >( c.next( ) );
+            p.links.resize( c.next( ) );
+            for ( persist_link_t& l : p.links )
+            {
+                l.entity = c.str( );
+                l.name = c.str( );
+            }
+        }
+        s.refs.resize( c.next( ) );
+        for ( persist_ref_t& r : s.refs )
+        {
+            r.name = c.str( );
+            r.bound = c.next( ) != 0;
+            r.baseline = c.next( ) != 0;
+            r.entity = c.str( );
+        }
+        s.ref_links.resize( c.next( ) );
+        for ( persist_link_t& l : s.ref_links )
+        {
+            l.entity = c.str( );
+            l.name = c.str( );
+        }
+        s.ref_baseline = static_cast< std::int32_t >( c.next( ) );
+        s.x = word_float( );
+        s.y = word_float( );
+        s.base_x = word_float( );
+        s.base_y = word_float( );
+        s.base_width = static_cast< std::int32_t >( c.next( ) );
+        s.width = static_cast< std::int32_t >( c.next( ) );
+        const std::string want = c.str( );
+        const std::vector< std::uint8_t > blob( doc.begin( ), doc.end( ) );
+        value_t out;
+        c_reader::read_at_start( blob, out );
+        if ( slot == 6 )
+            persist_save_all( s, out );
+        else
+            persist_save_changes( s, out );
+        std::string got;
+        vujb_dump( out, got );
+        if ( got != want && bad++ < 6 )
+            LOG_ERROR( "save_script vector %u (slot %u) differs:\n%s\n%s", v, slot, got.c_str( ), want.c_str( ) );
+    }
+    if ( bad == 0 )
+        LOG_SUCCESS( "persist_save_all / _changes match retail's VuScriptComponent slots 0x503EC0 0x504450 (0x502720 0x504CC0): %u vectors", n );
+    else
+        LOG_ERROR( "save_script FAILED %d", bad );
+    return bad == 0;
+}
+
 inline bool verify_save_all( )
 {
     bool ok = verify_save_vujb( );
     ok = verify_save_profile( ) && ok;
     ok = verify_save_input( ) && ok;
     ok = verify_save_ghost( ) && ok;
+    ok = verify_save_cloud( ) && ok;
+    ok = verify_save_script( ) && ok;
     return ok;
 }
