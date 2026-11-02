@@ -1900,6 +1900,9 @@ inline void race_session_level_bodies( race_session_t& s, entity_t& tree, const 
             c.flags_d8 |= 0x10u;
             body_word( bp->body, 0x2D0 ) = c.flags_d8;
         }
+        if ( ramp )    // Ours (a log line, no retail function): a ramp that got no body is the failure race_unwired names above.
+            LOG_INFO( "race: ramp '%s' (%s, %s): body %s", e.m_name.c_str( ), c.mesh_asset.c_str( ), asset ? "asset loaded" : "NO ASSET",
+                      !ok ? "NOT made" : bp->in_world ? "made, in the world" : bp->built ? "made, not in the world (Initially Visible off)" : "not built" );
         if ( bp->in_world )
             ++added;
         // VuBreakablePropEntity's slot 6 0x434620: 0x546910 above, then the "Decision" tick 0x434A20 and the "Build" tick
