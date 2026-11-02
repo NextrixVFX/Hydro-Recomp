@@ -295,9 +295,12 @@ inline void c_world::load_entity_tree( const char* asset, const value_t& project
         {
             const gfx_settings_t& g = static_cast< const gfx_settings_state_t* >( e.m_state.get( ) )->value;
             m_authored_far = g.camera_far_plane;
-            m_water_ambient = g.water_ambient_color;   // world.hxx water_draw
             m_foliage_tint = g.foliage_tint;           // models.hxx foliage_frame
-            m_water_diffuse = g.water_diffuse_color;
+            {
+                std::uint32_t words[ 26 ];
+                gfx_settings_words( g, words );
+                std::memcpy( m_gfx_record, words + 4, sizeof( m_gfx_record ) );   // world.hxx water_stage_frame
+            }
             const float red = static_cast< float >( g.fog_color & 0xFF ) / 255.0f;
             const float green = static_cast< float >( ( g.fog_color >> 8 ) & 0xFF ) / 255.0f;
             const float blue = static_cast< float >( ( g.fog_color >> 16 ) & 0xFF ) / 255.0f;
@@ -455,24 +458,10 @@ inline void c_world::load_entity_tree( const char* asset, const value_t& project
     LOG_INFO( "water: %d of %u surfaces name a water map, %d named but not loaded", maps_named,
         static_cast< unsigned >( m_water.map_names.size( ) ), maps_missing );
     water_view_build( m_water, m_water_view );
-    // The water renderer's templates (its ctor's 0x595D40) and our draw's geometry: k_water_draw_vertices
-    // degenerate vertices with the indices 0 .. n-1, placed once per scene (world.hxx water_draw).
+    // The water renderer's templates (its ctor's 0x595D40). The new level's surfaces take their shaders at the next water_draw; last level's frame is not drawn again.
     water_templates( m_grid.templates );
-    m_grid_overflow = 0;
-    if ( m_grid_geometry < 0 )
-    {
-        std::vector< mesh_vertex_t > blank( static_cast< std::size_t >( k_water_draw_vertices ) );
-        std::vector< unsigned short > order( static_cast< std::size_t >( k_water_draw_vertices ) );
-        for ( int i = 0; i < k_water_draw_vertices; ++i )
-            order[ static_cast< std::size_t >( i ) ] = static_cast< unsigned short >( i );
-        m_grid_geometry = c_engine::geometry( blank.data( ), k_water_draw_vertices, order.data( ), k_water_draw_vertices );
-    }
-    if ( m_grid_geometry >= 0 && !m_water.surfaces.empty( ) )
-    {
-        static const float identity[ 16 ] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
-        static const float white[ 4 ] = { 1, 1, 1, 1 };
-        m_grid_placement = c_engine::place( m_grid_geometry, -1, 0, k_water_draw_vertices, identity, white, 7 );
-    }
+    m_grid_frame = water_grid_frame_t{ };
+    m_stage_bound = false;
     // The point waves' descriptors (VuPointWaveEntity_tick 0x5D4C50: transform +0x80, then the entity's seven
     // properties), emitted when the graph reaches their Emit plug. An entity without a known world is skipped.
     m_point_waves.clear( );

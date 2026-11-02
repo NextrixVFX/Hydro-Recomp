@@ -213,6 +213,9 @@ struct water_entity_state_t
     // it - so an instance of a template keeps the template's WaterMap unless it
     // authors its own.
     std::string water_map_default;
+    // Each load's "Properties", in order (a template's, then the instance's): the desc +0xA4's nodes, whose default after the template mark is the template's value, as water_map_default.
+    // waterpass.hxx read_desc walks them when the surface's shader is made (0x5DB800).
+    std::vector< value_t > shader_loads;
 };
 
 inline void water_props_rows( water_kind_t kind, const water_prop_row_t* rows[ 3 ] )
@@ -271,7 +274,10 @@ inline std::shared_ptr< water_entity_state_t > water_entity_state_for( const std
 inline void water_entity_load( water_entity_state_t& s, const value_t& properties )
 {
     if ( s.kind == water_kind_surface || s.kind == water_kind_ramp )
+    {
         property_string( properties, "WaterMap", s.water_map, s.water_map_default );   // 0x406C20: reset to the default, then read
+        s.shader_loads.push_back( properties );
+    }
     const water_prop_row_t* rows[ 3 ];
     water_props_rows( s.kind, rows );
     for ( const water_prop_row_t* table : rows )

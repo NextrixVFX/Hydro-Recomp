@@ -61,11 +61,14 @@
 // Screens/Background. Static models keep the transforms from their
 // VuTransformComponent, and the front-end camera is the one stored on
 // VuSetFrontEndCameraEntity.
+#include <workspace/core/world/waterpass.hxx>
+
 class c_world
 {
 public:
     c_world( )
     {
+        gfx_record_default( m_gfx_record );
         m_eye[ 0 ] = 0.0f;
         m_eye[ 1 ] = -40.0f;
         m_eye[ 2 ] = 18.0f;
@@ -1347,15 +1350,10 @@ public:
     // The water surfaces on screen: 0x5979C0's body for our one viewport (grid.hxx water_grid_frame), then our
     // draw. The frustum block is 0x50C550's, fed from OUR camera (the dev vantage: eye / target, the
     // viewport's fov_y 1.05, near 0.5, the 1280x720 aspect; retail's +384 is tanf of the horizontal half
-    // angle). SUBSTITUTED / NOT RECREATED in the draw (the platform draw of the 15-word records is unread):
-    // the retail Water shader's colour is lerp( gAmbientColor, gDiffuseColor, record +0x18 ) per vertex -
-    // computed here on the CPU from the gfx settings colours (whether the surface entity's own AmbientColor /
-    // DiffuseColor override them is unread); the foam term (gFoam* colours, gFoamTexture, record +0x14), the
-    // normal map, the planar reflection and the Fresnel LUT are absent; the pass is the engine's class 7
-    // (unlit, fogged, blended, alpha x 0.55 - divided out here).
-    void water_draw( )
+    // angle).
+    void water_draw( float dt )
     {
-        if ( m_grid_geometry < 0 )
+        if ( m_water.surfaces.empty( ) )
             return;
         float fw[ 3 ] = { m_target[ 0 ] - m_eye[ 0 ], m_target[ 1 ] - m_eye[ 1 ], m_target[ 2 ] - m_eye[ 2 ] };
         const float fl = std::sqrt( fw[ 0 ] * fw[ 0 ] + fw[ 1 ] * fw[ 1 ] + fw[ 2 ] * fw[ 2 ] );
@@ -1376,39 +1374,47 @@ public:
         const float aspect = 1280.0f / 720.0f;
         const water_frustum_t cam = water_frustum_build( m_eye, rt, fw, up, aspect, 0.5f, m_far, std::tan( 1.05f * 0.5f ) * aspect );
         water_grid_frame( m_grid, cam, m_water, &m_water_view, m_grid_frame );
-        int count = 0;
-        mesh_vertex_t* out = c_engine::edit( m_grid_geometry, count );
-        if ( !out )
-            return;
-        auto channel = []( std::uint32_t c, int k ) { return static_cast< float >( ( c >> ( 8 * k ) ) & 0xFF ) / 255.0f; };
-        int n = 0;
-        for ( const water_grid_draw_t& d : m_grid_frame.draws )
-            for ( int i = 0; i < d.index_count; ++i )
-            {
-                if ( n >= count )
-                {
-                    ++m_grid_overflow;
-                    break;
-                }
-                const water_grid_record_t& r = m_grid_frame.vertices[ static_cast< std::size_t >( d.vertex_start + m_grid_frame.indices[ static_cast< std::size_t >( d.index_start + i ) ] ) ];
-                mesh_vertex_t& v = out[ n++ ];
-                v = mesh_vertex_t{};
-                v.position[ 0 ] = r.x;
-                v.position[ 1 ] = r.y;
-                v.position[ 2 ] = r.height;
-                v.normal[ 2 ] = 1.0f;
-                for ( int k = 0; k < 4; ++k )
-                {
-                    const float a = channel( m_water_ambient, k );
-                    v.color[ k ] = a + ( channel( m_water_diffuse, k ) - a ) * r.shade;
-                }
-                v.color[ 3 ] = v.color[ 3 ] / 0.55f > 1.0f ? 1.0f : v.color[ 3 ] / 0.55f;
-            }
-        for ( int i = n; i < count; ++i )
-            out[ i ] = mesh_vertex_t{};
-        c_engine::stream( m_grid_geometry );
-        if ( m_grid_overflow == 1 )
-            LOG_WARNING( "water draw: more than %d expanded vertices in a frame - the tail is not drawn (our capacity)", count );
+        water_stage_frame( dt );
+    }
+    // The frame's water on retail's programs (world/waterpass.hxx). The record is 0x53ABA0's statics 0x7596E0: 0x52F690 at the camera's eye (0x5588B0 runs it each view), the blender when a race
+    // owns one; without a race the settings entity applied at load stands for it.
+    void water_stage_frame( float dt )
+    {
+        if ( !m_stage_attached )
+        {
+            water_pass_source_t source;
+            source.m_read = [ this ]( const std::string& entry, std::vector< std::uint8_t >& out ) { return m_archive.read( entry.c_str( ), out ); };
+            m_stage.attach( source );
+            m_stage_attached = true;
+        }
+        if ( !m_stage_bound )
+        {
+            for ( const water_built_t::entity_ref_t& ref : m_water.entities )
+                if ( ref.surface >= 0 )
+                    m_stage.surface( ref.surface, static_cast< const water_entity_state_t* >( static_cast< const entity_t* >( ref.entity )->m_state.get( ) )->shader_loads );
+            m_stage_bound = true;
+            LOG_INFO( "water: %d surfaces on %d retail shaders", static_cast< int >( m_stage.m_surface_shader.size( ) ), static_cast< int >( m_stage.m_pass->m_shaders.size( ) ) );
+        }
+        std::uint32_t record[ 22 ];
+        std::memcpy( record, m_gfx_record, sizeof( record ) );
+        if ( m_race.active )
+        {
+            const float eye[ 4 ] = { m_eye[ 0 ], m_eye[ 1 ], m_eye[ 2 ], 0.0f };
+            gfx_blend( m_race.blender, eye, record );
+        }
+        water_pass_view_t view{ };
+        std::memcpy( view.m_light, m_lights.direction, 12 );
+        std::memcpy( &view.m_fog_start, &record[ 2 ], 4 );
+        std::memcpy( &view.m_fog_end, &record[ 3 ], 4 );
+        std::memcpy( view.m_fog_colour, &record[ 4 ], 4 );
+        std::memcpy( view.m_statics.m_ambient, &record[ 10 ], 4 );
+        std::memcpy( view.m_statics.m_diffuse, &record[ 11 ], 4 );
+        std::memcpy( view.m_statics.m_foam_ambient, &record[ 12 ], 4 );
+        std::memcpy( view.m_statics.m_foam_diffuse, &record[ 13 ], 4 );
+        std::memcpy( &view.m_statics.m_foam_size, &record[ 14 ], 4 );
+        std::memcpy( view.m_statics.m_decal_ambient, &record[ 15 ], 4 );
+        std::memcpy( view.m_statics.m_decal_diffuse, &record[ 16 ], 4 );
+        m_stage.frame( dt, m_grid_frame, view );
     }
     const track_manager_t* track( ) const
     {
@@ -1572,7 +1578,7 @@ public:
     {
         race_draw( );
         foliage_frame( );
-        water_draw( );
+        water_draw( dt );
         // The crossing test wants the position of whatever the plane's Trigger
         // Type accepts. With no boat in the scene the dev vantage stands in,
         // so flying the orbit through a plane still exercises the real test.
@@ -1729,18 +1735,12 @@ private:
     race_session_t m_race{};
     bool m_defer_project_initialized = false, m_project_initialized = false;
     value_t m_boat_db, m_track_db, m_constant_db, m_skin_db;
-    // The water renderer (world/grid.hxx): its templates, this frame's records, and OUR draw of them - one
-    // geometry holding the records expanded per index (a triangle list, capacity k_water_draw_vertices,
-    // unused tail degenerate) drawn through the engine's class-7 blended pass. m_water_ambient / _diffuse:
-    // VuGlobalGfxSettingsEntity's Water Ambient / Diffuse Color (memory water.md: gAmbientColor / gDiffuseColor).
+    // The water renderer (world/grid.hxx): its templates and this frame's records; m_stage draws them (world/waterpass.hxx).
     water_grid_t m_grid{};
     water_grid_frame_t m_grid_frame{};
-    int m_grid_geometry = -1;
-    int m_grid_placement = -1;
-    int m_grid_overflow = 0;
-    std::uint32_t m_water_ambient = 0xC0423C2Du;
-    std::uint32_t m_water_diffuse = 0xC05A503Cu;
-    static constexpr int k_water_draw_vertices = 60000;
+    water_stage_t m_stage{};
+    bool m_stage_attached = false, m_stage_bound = false;
+    std::uint32_t m_gfx_record[ 22 ] = { };   // the settings entity applied at load, its +0x70 record (0x41B400's order)
     // Loaded VuTimedEventAssets, keyed by asset name. A control points into
     // this, so entries are only ever added.
     std::map< std::string, std::vector< timed_event_t > > m_timed;
