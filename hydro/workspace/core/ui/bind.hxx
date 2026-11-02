@@ -773,6 +773,8 @@ private:
             b.m_element = std::make_unique< c_ui_hud_element >( m_hud_hooks );
             if ( const ui_slot_t* s = ui_bind_slot( e, "Type" ) )
                 std::memcpy( &b.m_element->m_type, s->m_bits, 4 );
+            if ( e.m_name == "BenchmarkFps" || e.m_name == "BenchmarkLevel" )   // ours: world/benchmark.hxx
+                b.m_element->m_type = e.m_name == "BenchmarkFps" ? 100 : 101;
             return true;
         }
         if ( vt == k_ui_text_vtable || vt == k_ui_image_vtable )

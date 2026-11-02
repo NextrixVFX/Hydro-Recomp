@@ -253,7 +253,7 @@ inline void c_world::saves_profile_listeners( )
 
 inline void c_world::saves_commit( )
 {
-    if ( !m_saves_on )
+    if ( !m_saves_on || m_benchmark.active )   // ours: a Benchmark run writes nothing
         return;
     m_profile.save( [ this ] { saves_profile_listeners( ); } );
     m_cloud.save( );
@@ -269,7 +269,7 @@ inline void c_world::saves_exit( )
 
 inline void c_world::saves_game( )
 {
-    if ( m_saves_on )
+    if ( m_saves_on && !m_benchmark.active )
         m_cloud.save( );
 }
 
@@ -281,8 +281,8 @@ inline void c_world::saves_input( platform_input_t& in )
 
 inline void c_world::saves_bind( )
 {
-    m_race.world.save_doc = m_saves_on ? &m_cloud.data : nullptr;
-    m_race.world.hidden = m_saves_on ? &m_hidden : nullptr;
+    m_race.world.save_doc = m_saves_on && !m_benchmark.active ? &m_cloud.data : nullptr;   // ours: a Benchmark run has no save document
+    m_race.world.hidden = m_saves_on && !m_benchmark.active ? &m_hidden : nullptr;
     m_race.world.settings = &m_settings;
     m_race.world.unlock = &m_unlock;
     m_race.world.save_game = [ this ] { saves_game( ); };
