@@ -270,6 +270,9 @@
     <ClInclude Include="workspace\core\ui\controls.hxx">
       <Filter>workspace\core\ui</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\core\ui\crop.hxx">
+      <Filter>workspace\core\ui</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\core\ui\difficulty.hxx">
       <Filter>workspace\core\ui</Filter>
     </ClInclude>
