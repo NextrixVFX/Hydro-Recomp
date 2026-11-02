@@ -3243,6 +3243,7 @@ inline bool verify_race_all( )
     ok = verify_save_all( ) && ok;
     ok = verify_settings_profile( ) && ok;
     ok = verify_hidden_packages( ) && ok;
+    ok = verify_unlock_rewards( ) && ok;
     ok = verify_subtitle( ) && ok;
     ok = verify_asset_xml_load( ) && ok;
     ok = verify_asset_loads( ) && ok;

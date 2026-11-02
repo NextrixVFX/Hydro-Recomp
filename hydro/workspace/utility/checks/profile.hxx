@@ -269,3 +269,78 @@ inline bool verify_hidden_packages( )
         LOG_ERROR( "hidden_packages FAILED %d", bad );
     return bad == 0;
 }
+
+// Rewards slots, init, release, the accessors and the package manager's slot 5 against retail (case unlock_rewards, cases/rewards.py).
+inline bool verify_unlock_rewards( )
+{
+    save_words_t c{ g_golden_unlock_rewards_words };
+    const unsigned runs = c.next( );
+    int bad = 0, reads = 0;
+    static const char* const keys[ ] = { "Race", "Championship", "Slalom", "TimeTrial", nullptr, "Ghost" };
+    const auto fail = [ & ]( const char* what, unsigned v ) {
+        if ( bad++ < 8 )
+            LOG_ERROR( "unlock_rewards %s run %u differs from retail", what, v );
+    };
+    for ( unsigned v = 0; v < runs; ++v )
+    {
+        const auto read = [ & ]( const std::string& bytes, value_t& out ) {
+            out = value_t{ };
+            c_reader::read_at_start( std::vector< std::uint8_t >( bytes.begin( ), bytes.end( ) ), out );
+        };
+        value_t doc, cloud;
+        read( c.str( ), doc );
+        read( c.str( ), cloud );
+        value_t dev;
+        dev.tag = c.next( );
+        dev.integer = static_cast< std::int32_t >( c.next( ) );
+        const bool found = c.next( ) != 0;
+        c_unlock_manager u;
+        const unsigned want_r = c.next( ), want_ready = c.next( ), want_all = c.next( );
+        const bool r = u.init( found ? &doc : nullptr, dev, cloud );
+        const unsigned state[ 5 ] = { static_cast< unsigned >( u.total ), static_cast< unsigned >( u.local ), static_cast< unsigned >( u.online ),
+                                      static_cast< unsigned >( u.feats ), static_cast< unsigned >( u.feats >> 32 ) };
+        bool same = ( r ? 1u : 0u ) == want_r && static_cast< unsigned >( u.ready ) == want_ready && u.unlock_all == want_all;
+        for ( unsigned k = 0; k < 5; ++k )
+            same = c.next( ) == state[ k ] && same;
+        if ( !same )
+            fail( "init", v );
+        c_hidden_packages p;
+        const unsigned hp_r = c.next( ), hp_stored = c.next( );
+        if ( ( p.init( found ? &doc : nullptr ) ? 1u : 0u ) != hp_r || ( p.db != nullptr ? 1u : 0u ) != hp_stored )
+            fail( "packages", v );
+        const unsigned rel_asset = c.next( ), rel_ready = c.next( ), rel_log = c.next( ), count = c.next( );
+        for ( unsigned k = 0; k < count; ++k )
+        {
+            const unsigned slot = c.next( );
+            const std::string cls = c.str( );
+            const auto tier = static_cast< std::int32_t >( c.next( ) );
+            const unsigned want = c.next( );
+            const std::int32_t got = slot == 4 ? u.reward_ducky( tier ) : u.reward( keys[ slot ], cls, tier );
+            ++reads;
+            if ( static_cast< unsigned >( got ) != want )
+                fail( "read", v * 1000u + k );
+        }
+        const unsigned acc = c.next( );
+        if ( acc != 0 )
+        {
+            u.unlock_all = 0;
+            u.set_unlock_all( static_cast< std::uint8_t >( 1 + ( v & 2 ) ) );
+            u.set_feats( ( static_cast< std::uint64_t >( 0x7654u + v ) << 32 ) | ( 0x12345678u + v ) );
+            const std::uint64_t f = u.get_feats( );
+            u.all_feats( );
+            const unsigned w0 = c.next( ), w1 = c.next( ), w2 = c.next( ), w3 = c.next( ), w4 = c.next( );
+            if ( u.unlock_all != w0 || static_cast< unsigned >( f ) != w1 || static_cast< unsigned >( f >> 32 ) != w2 || static_cast< unsigned >( u.feats ) != w3 ||
+                 static_cast< unsigned >( u.feats >> 32 ) != w4 )
+                fail( "accessors", v );
+        }
+        const bool had = u.db != nullptr;
+        u.release( );
+        if ( ( had ? 1u : 0u ) != rel_log || ( u.db != nullptr ? 1u : 0u ) != rel_asset || static_cast< unsigned >( u.ready ) != rel_ready )
+            fail( "release", v );
+    }
+    if ( bad == 0 )
+        LOG_SUCCESS( "VuUnlockManagerImpl slots 3, 5 - 11, 20, 21, 28, 29 and VuHiddenPackageManagerImpl slot 5 match retail: %u runs, %d reward reads", runs, reads );
+    else
+        LOG_ERROR( "unlock_rewards FAILED %d", bad );
+    return bad == 0;
+}
