@@ -156,6 +156,7 @@
     <ClInclude Include="workspace\core\game\boxes.hxx" />
     <ClInclude Include="workspace\core\game\docked.hxx" />
     <ClInclude Include="workspace\core\game\game.hxx" />
+    <ClInclude Include="workspace\core\game\identity.hxx" />
     <ClInclude Include="workspace\core\game\input.hxx" />
     <ClInclude Include="workspace\core\game\packages.hxx" />
     <ClInclude Include="workspace\core\game\plugs.hxx" />
@@ -240,6 +241,7 @@
     <ClInclude Include="workspace\core\world\effects.hxx" />
     <ClInclude Include="workspace\core\world\emitters.hxx" />
     <ClInclude Include="workspace\core\world\entities.hxx" />
+    <ClInclude Include="workspace\core\world\external.hxx" />
     <ClInclude Include="workspace\core\world\field.hxx" />
     <ClInclude Include="workspace\core\world\foliage.hxx" />
     <ClInclude Include="workspace\core\world\force.hxx" />
@@ -281,6 +283,7 @@
     <ClInclude Include="workspace\core\world\pfxstatic.hxx" />
     <ClInclude Include="workspace\core\world\pickups.hxx" />
     <ClInclude Include="workspace\core\world\primitive.hxx" />
+    <ClInclude Include="workspace\core\world\profile.hxx" />
     <ClInclude Include="workspace\core\world\query.hxx" />
     <ClInclude Include="workspace\core\world\race.hxx" />
     <ClInclude Include="workspace\core\world\rig.hxx" />
