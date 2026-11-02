@@ -473,10 +473,27 @@ inline ui_screen_env_t c_world::ui_screen_environment( )
 #if HYDRO_UI_TEXT
     env.m_font_asset = [ this ]( const std::string& asset ) { return m_ui_pass->font_asset( asset ); };
 #endif
-    env.m_root = m_menu ? &m_menu_util : &m_race.util;
+    env.m_root = m_menu || !m_race.active ? &m_menu_util : &m_race.util;   // no game yet: the loading screen reads the front end's GameData
     m_difficulty_env.m_root = env.m_root;
     env.m_difficulty = &m_difficulty_env;
     return env;
+}
+#endif
+
+#if HYDRO_UI_PASS
+// VuFadeManager's draw 0x4AEF70 (render hook g 0x759024, ctor 0x4AED60), while its value > 0: the sort key's layer 4 and bits 0xB, a colour ( 0, 0, 0, value ) (0x4AECF0: fistp of x 255),
+// 0x507830 over ( 0, 0, 1, 1 ) at depth 0. The race's manager is m_fade, the menus' and the title's m_menu_engine.m_fade: one object in retail, g 0x758FC4.
+inline void c_world::fade_draw( )
+{
+    const action_fade_t& f = m_action ? m_fade : m_menu_engine.m_fade;
+    if ( !f.draws( ) )
+        return;
+    std::uint32_t& key = m_ui_pass->m_sort.key_high( );
+    key = ( key & 0x07FFFFFFu ) | ( 4u << 27 );
+    key = ( key & 0xFFC3FFFFu ) | ( 0xBu << 18 );
+    const std::uint32_t alpha = static_cast< std::uint32_t >( ui_fistp32( f.m_value * ui_f32( 0x437F0000u ) ) ) & 0xFFu;
+    static constexpr float rect[ 4 ] = { 0.0f, 0.0f, 1.0f, 1.0f };
+    ui_solid_draw( m_ui_pass->m_sort, ui_inputs( ).m_env, alpha << 24, rect, 0.0f );
 }
 #endif
 
@@ -490,6 +507,7 @@ inline void c_world::ui_frame( )
     m_ui_pass->begin( m_race.world.display_w, m_race.world.display_h );
     m_modes.draw( );
     boxes_draw( );
+    fade_draw( );
     m_ui_pass->end( );
 #endif
 }

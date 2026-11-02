@@ -650,6 +650,7 @@ private:
     void boxes_start( );
     void boxes_tick( float dt );
     void boxes_draw( );
+    void fade_draw( );
     msgbox_ref_t boxes_show( const std::string& heading, const std::string& body, const std::string& text_a, const std::string& text_b = std::string( ) );
     void boxes_release( screen_state_t& state );
     bool boxes_entity( screen_state_t& state, c_ui_binding& binding, entity_t& e, const char* plug );
@@ -1090,6 +1091,8 @@ public:
             path = path.empty( ) ? e->m_name : e->m_name + "/" + path;
         return path;
     }
+    int m_loading_project = 0;                          // VuActionGameMode +0x38: the id in m_menu_projects
+    std::string loading_screen_name( ) const;
     void action_start( value_t& game_data, const race_session_dbs_t& dbs, const std::function< void( ) >& level );
 
     void load_scene( const char* track, const char* mode, const char* course = nullptr )
@@ -1144,7 +1147,8 @@ public:
         const auto text = []( const char* v ) { return std::string( v ? v : "" ); };
         const bool defaults = c_engine::option( "front-end-defaults" ) != nullptr;
         const bool race = m_has_chosen || defaults || c_engine::option( "boat" ) != nullptr || c_engine::option( "skin" ) != nullptr;
-        value_t util;
+        const std::shared_ptr< value_t > keep = std::make_shared< value_t >( );   // `level` may run frames later (action_start)
+        value_t& util = *keep;
         value_t& game_data = ui_json_child( util, "GameData" );
         bool front_end = false;
         if ( m_has_chosen )   // the mode change's: 0x4BF9B0 built it
@@ -1170,8 +1174,10 @@ public:
         }
         // VuActionGameMode 0x4BA060 (LoadLevel's enter): the body below. A front-end race runs it through the action mode
         // (world/action.hxx); every other path (the scaffold, --front-end-defaults to a non-race) calls it directly.
-        const auto level = [ & ]( )
+        const auto level = [ this, keep, dbs, race, front_end ]( )
         {
+        value_t& util = *keep;
+        value_t& game_data = ui_json_child( util, "GameData" );
         const std::string name = race_project_name( util, nullptr, [ this ]( const std::string& type, const std::string& n ) {
             for ( const std::string& rest : m_archive.names( type + "/" + n ) )   // names() strips the prefix: exact = ""
                 if ( rest.empty( ) )
@@ -1649,6 +1655,17 @@ public:
     void scene_frame( float dt )
     {
         boxes_tick( dt );
+        // A race from the menus: VuActionGameMode's LoadingScreen before LoadLevel (front.hxx action_start). Slot 4 alone: the level is not there yet.
+        if ( m_action && m_action_level )
+        {
+            m_action->tick( dt );
+            if ( std::string( m_action->state( ) ) == "LoadLevel" )
+            {
+                m_action_level = nullptr;
+                LOG_INFO( "action mode: LoadLevel done" );
+            }
+            return;
+        }
         if ( m_title )   // the title sequence runs no scene: the mode manager's tick alone
         {
             m_modes.tick( dt );
