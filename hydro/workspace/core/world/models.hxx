@@ -229,6 +229,11 @@ inline const std::vector< c_world::cached_part_t >& c_world::model_for( const st
         item.index_count = part.index_count;
         item.alpha_test = part.alpha_test;
         item.shader = part.shader;
+        item.layer = part.layer;
+        item.shading = part.shading;
+        item.diffuse_alpha = part.diffuse_alpha;
+        item.has_box = part.has_box;
+        std::memcpy( item.box, part.box, sizeof( item.box ) );
         std::memcpy( item.node, part.node, sizeof( item.node ) );
         item.specular[ 0 ] = part.specular[ 0 ];
         item.specular[ 1 ] = part.specular[ 1 ];
@@ -324,6 +329,8 @@ inline void c_world::place_model( const std::string& asset, const float* world, 
         math_multiply( placed_node, world, part.node );
         const int handle = c_engine::place( geometry_override >= 0 ? geometry_override : part.geometry,
             texture, part.index_start, part.index_count, placed_node, color, alpha, nullptr, part.detail );
+        if ( part.layer >= 0 )
+            c_engine::layer( handle, part.layer, part.shading, part.diffuse_alpha, part.has_box ? part.box : nullptr );
         // --no-reflect is the A/B switch for the cube term. DiffuseColor
         // tints every lit material, so a part whose diffuse is not white
         // needs its constants even with no cube and no specular.

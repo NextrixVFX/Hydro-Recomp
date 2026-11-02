@@ -33,6 +33,7 @@
 #include <workspace/core/world/background.hxx>
 #include <workspace/core/world/action.hxx>
 #include <workspace/core/world/settings.hxx>
+#include <workspace/core/world/sorted.hxx>
 #include <workspace/core/assets/texture.hxx>
 #include <workspace/utility/logger.hxx>
 #include <workspace/utility/trace.hxx>
@@ -97,6 +98,11 @@ private:
         int index_count = 0;
         int alpha_test = 0;
         int shader = -1;   // the part's material (model_part_t::shader) - a skin's index
+        int layer = -1;    // model_part_t's type, shading, DiffuseAlpha and aabb
+        int shading = 0;
+        float diffuse_alpha = 1.0f;
+        bool has_box = false;
+        float box[ 8 ]{};
         float node[ 16 ]{};
         // The authored shading constants, carried from the model's material
         // table through to c_engine::shade(). The cube is kept as a NAME and
@@ -962,6 +968,20 @@ public:
     {
         if ( !m_opened )
             load( );
+        if ( !m_sorted )
+        {
+            void* device = nullptr;
+            void* context = nullptr;
+            c_engine::api( device, context );
+            if ( device )
+            {
+                m_sorted = std::make_unique< gfx_sorted_t >( device, context );
+                c_engine::sorted( []( void* u, const sorted_pass_t& pass ) {
+                    c_world& w = *static_cast< c_world* >( u );
+                    w.m_sorted->run( pass, w.m_far );
+                }, this );
+            }
+        }
         if ( c_engine::option( "front-end" ) != nullptr )
         {
             load_background( );
@@ -1408,6 +1428,16 @@ public:
         }
         else
             dev_vantage( dt );
+        // Ours (a test driver): --look "ex ey ez tx ty tz" pins the view, to put a still on a chosen thing.
+        if ( const char* look = c_engine::option( "look" ) )
+        {
+            float v[ 6 ] = { };
+            std::istringstream in( look );
+            for ( float& x : v )
+                in >> x;
+            std::memcpy( m_eye, v, sizeof( m_eye ) );
+            std::memcpy( m_target, v + 3, sizeof( m_target ) );
+        }
         scene_frame_rest( dt );
     }
     // VuWater's tick 0x529E30 on the built water (surface.hxx water_built_tick), then the query's view rebuilt
@@ -1550,6 +1580,7 @@ private:
     float m_eye[ 3 ]{};
     float m_target[ 3 ]{};
     float m_far = 800.0f;
+    std::unique_ptr< gfx_sorted_t > m_sorted;   // the render seam (world/sorted.hxx)
 
     // VuWaterTextureSettingsEntity_ctor @0x5d2bd0, read in property order:
     // Gravity 9.801, WorldSize 10, WindSpeed 10, DirectionalPower 0,
