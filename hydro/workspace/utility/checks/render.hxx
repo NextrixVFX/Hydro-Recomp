@@ -2574,6 +2574,8 @@ inline bool verify_gfx_animated_model( )
     return false;
 }
 
+#include <workspace/utility/checks/device.hxx>
+
 inline bool verify_render_all( )
 {
     bool ok = true;
@@ -2592,5 +2594,6 @@ inline bool verify_render_all( )
     ok = verify_gfx_corona_entity( ) && ok;
     ok = verify_text_word_wrap( ) && ok;
     ok = verify_gfx_sort_life( ) && ok;
+    ok = verify_gfx_device( ) && ok;
     return ok;
 }
