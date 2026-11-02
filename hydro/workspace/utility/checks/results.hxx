@@ -5,6 +5,7 @@
 #include <workspace/core/ui/chooser.hxx>
 #include <workspace/core/ui/ladder.hxx>
 #include <workspace/core/ui/results.hxx>
+#include <workspace/core/ui/standings.hxx>
 
 #include <cstdio>
 #include <cstdlib>
@@ -1601,6 +1602,183 @@ inline bool verify_ui_button_touch( )
     return failed == 0;
 }
 
+// FNV-1a 64 of a text (the golden holds the dumps' hashes: the documents are large).
+inline std::uint64_t ui_chl_hash( const std::string& text )
+{
+    std::uint64_t h = 0xCBF29CE484222325ull;
+    for ( const char c : text )
+        h = ( h ^ static_cast< unsigned char >( c ) ) * 0x100000001B3ull;
+    return h;
+}
+
+inline value_t ui_chl_document( int index )
+{
+    const unsigned char* raw = reinterpret_cast< const unsigned char* >( g_golden_chl_words + g_golden_chl_at[ index ][ 0 ] );
+    return c_reader( std::vector< std::uint8_t >( raw, raw + g_golden_chl_at[ index ][ 1 ] ) ).parse( );
+}
+
+inline std::string ui_chl_hex( const std::uint8_t* bytes, int size )
+{
+    std::string out;
+    char at[ 4 ];
+    for ( int i = 0; i < size; ++i )
+    {
+        std::snprintf( at, sizeof( at ), "%02x", bytes[ i ] );
+        out += at;
+    }
+    return out;
+}
+
+// core/ui/standings.hxx against retail's VuChampionshipEntity (oracle case championship_load: 0x451370 0x451540 0x451560
+// 0x451660 0x451690 0x451720 and everything under them live on the real BoatDB / ChampDB; MSVCR110's own qsort): per op the hooks
+// in order with their params, the hash of the whole document, the standings and the game-data root, VuRandom's 34 words, +0x294.
+inline bool verify_ui_championship_load( )
+{
+    const value_t boat_db = ui_chl_document( 0 );
+    const value_t champ_db = ui_chl_document( 1 );
+    int failed = 0, ops = 0, ties = 0;
+    for ( std::size_t k = 0; k < g_golden_chl_runs_count; ++k )
+    {
+        const golden_chl_run_t& run = g_golden_chl_runs[ k ];
+        value_t root = ui_chl_document( run.m_root );
+        const value_t saved = run.m_load >= 0 ? ui_chl_document( run.m_load ) : value_t{ };
+        fleet_random_t rng;
+        const auto put_rng = [ & ]( const char* hex )
+        {
+            std::uint8_t bytes[ 136 ];
+            for ( int i = 0; i < 136; ++i )
+                bytes[ i ] = static_cast< std::uint8_t >( std::strtoul( std::string( hex + 2 * i, 2 ).c_str( ), nullptr, 16 ) );
+            std::memcpy( &rng.seed, bytes, 4 );
+            std::memcpy( &rng.last, bytes + 4, 4 );
+            std::memcpy( rng.table, bytes + 8, 128 );
+        };
+        const auto get_rng = [ & ]
+        {
+            std::uint8_t bytes[ 136 ];
+            std::memcpy( bytes, &rng.seed, 4 );
+            std::memcpy( bytes + 4, &rng.last, 4 );
+            std::memcpy( bytes + 8, rng.table, 128 );
+            return ui_chl_hex( bytes, 136 );
+        };
+        put_rng( run.m_rng );
+        std::string log;
+        const auto add = [ &log ]( const std::string& line )
+        {
+            if ( !log.empty( ) )
+                log += '\n';
+            log += line;
+        };
+        int done = 0;
+        ui_champ_env_t env;
+        env.m_root = &root;
+        env.m_boat_db = &boat_db;
+        env.m_champ_db = &champ_db;
+        env.m_random = &rng;
+        env.m_player_name = "Player One";
+        env.m_string = [ & ]( const char* id ) { add( std::string( "string:" ) + id ); return std::string( "S" ) + id; };
+        env.m_broadcast = [ & ]( const char* e, const ui_params_t& p ) { add( std::string( "event:" ) + e + ":" + ui_chl_hex( p.m_bytes, p.m_size ) ); };
+        env.m_plug = [ & ]( const char* e, const ui_params_t& p ) { add( std::string( "plug:" ) + e + ":" + ui_chl_hex( p.m_bytes, p.m_size ) ); };
+        env.m_load = [ & ]( value_t& data ) { add( "load" ); if ( run.m_load >= 0 ) data = saved; };
+        env.m_save = [ & ]( const value_t& data )
+        {
+            std::string dump;
+            vujb_dump( data, dump );
+            char at[ 32 ];
+            std::snprintf( at, sizeof( at ), "%016llx", static_cast< unsigned long long >( ui_chl_hash( dump ) ) );
+            add( std::string( "save:" ) + at );
+        };
+        env.m_commit = [ & ] { add( "commit" ); };
+        env.m_result = [ & ]( const std::string& n, std::int32_t place ) { add( "result:" + n + ":" + std::to_string( place ) ); };
+        env.m_value = [ & ]( const std::string& n, std::int32_t place ) { add( "value:" + n + ":" + std::to_string( place ) ); return run.m_value; };
+        env.m_names = [ & ]( std::int32_t value, std::vector< std::string >& names )
+        {
+            add( "names:" + std::to_string( value ) );
+            std::string held = run.m_names;
+            for ( std::size_t at = 0; !held.empty( ); )
+            {
+                at = held.find( '|' );
+                names.push_back( held.substr( 0, at ) );
+                held = at == std::string::npos ? std::string( ) : held.substr( at + 1 );
+            }
+            return run.m_answer != 0;
+        };
+        env.m_award_open = [ & ]( const char* project, std::int32_t place, const std::string& cls, std::int32_t value, const std::vector< std::string >& names )
+        {
+            add( std::string( "award new:" ) + project );
+            std::string joined;
+            for ( std::size_t i = 0; i < names.size( ); ++i )
+                joined += ( i ? "|" : "" ) + names[ i ];
+            add( "award start:" + std::to_string( place ) + ":" + cls + ":" + std::to_string( value ) + ":" + joined );
+        };
+        env.m_award_tick = [ & ]( float dt )
+        {
+            char at[ 32 ];
+            std::uint32_t bits;
+            std::memcpy( &bits, &dt, 4 );
+            std::snprintf( at, sizeof( at ), "award tick:%08x", bits );
+            add( at );
+        };
+        env.m_award_done = [ & ] { add( "award done" ); return done != 0; };
+        env.m_award_exit = [ & ] { add( "award exit" ); add( "award delete:1" ); };
+        ui_champ_state_t s;
+        for ( int t = 0; t < run.m_steps; ++t )
+        {
+            const golden_chl_step_t& g = g_golden_chl_steps[ run.m_first + t ];
+            log.clear( );
+            std::string arg;
+            const std::string op = g.m_op;
+            if ( op == "ai" )
+                ui_json_child( root, "GameResults" ) = ui_chl_document( g.m_doc );
+            else if ( op == "enter" )
+                ui_champ_load( s, env );
+            else if ( op == "leave" )
+                ui_champ_release( s, env );
+            else if ( op == "next" )
+                ui_champ_next( s, env );
+            else if ( op == "query" )
+                arg = std::string( "3:" ) + ( s.m_award ? "1" : "0" );
+            else if ( op == "start" )
+                ui_champ_start( s, env );
+            else if ( op == "tick" )
+            {
+                std::uint32_t bits = 0;
+                int paused = 0;
+                sscanf_s( g.m_arg, "%x:%d:%d", &bits, &paused, &done );
+                float dt;
+                std::memcpy( &dt, &bits, 4 );
+                env.m_paused = paused != 0;
+                ui_champ_tick( s, env, dt );
+                arg = g.m_arg;
+            }
+            std::string data, rows, whole;
+            vujb_dump( s.m_data, data );
+            if ( s.m_rows.tag == 5 )
+                vujb_dump( s.m_rows, rows );
+            else
+                rows = "5:0[]";
+            vujb_dump( root, whole );
+            if ( op == "tick" || op == "query" )
+                arg = arg == g.m_arg ? arg : "";
+            const bool same = log == g.m_log && ui_chl_hash( data ) == g.m_data && ui_chl_hash( rows ) == g.m_rows && ui_chl_hash( whole ) == g.m_root && get_rng( ) == g.m_rng &&
+                              ( s.m_award ? 1 : 0 ) == g.m_award && ( !g.m_arg || !*g.m_arg || arg == g.m_arg );
+            ++ops;
+            if ( op == "enter" )
+                for ( std::size_t i = 1; i < s.m_rows.list.size( ); ++i )
+                    ties += ui_champ_compare( s.m_rows.list[ i - 1 ], s.m_rows.list[ i ] ) == 0 ? 1 : 0;
+            if ( !same && ++failed <= 6 )
+                LOG_ERROR( "ui championship: run %s step %d %s differs (log %d data %d rows %d root %d rng %d award %d)\n  ours   %s\n  retail %s", run.m_label, t, g.m_op, log == g.m_log, ui_chl_hash( data ) == g.m_data,
+                           ui_chl_hash( rows ) == g.m_rows, ui_chl_hash( whole ) == g.m_root, get_rng( ) == g.m_rng, ( s.m_award ? 1 : 0 ) == g.m_award, log.substr( 0, 400 ).c_str( ), std::string( g.m_log ).substr( 0, 400 ).c_str( ) );
+        }
+    }
+    if ( failed == 0 )
+        LOG_SUCCESS( "ui_champ_load / _release / _tick / _next / _start match retail's VuChampionshipEntity 0x451370 0x451540 0x451560 0x451690 0x451720 (0x452E00 0x453590 0x453F40 0x4540D0 0x454EA0 0x452890 0x454410 0x454920 0x454E30 "
+                     "0x455210 0x455360 0x455490) on %d runs, %d ops: hooks in order, document, standings (%d equal-Points neighbours, MSVCR110's qsort as the reference), root, VuRandom",
+            static_cast< int >( g_golden_chl_runs_count ), ops, ties );
+    else
+        LOG_ERROR( "ui championship: %d ops differ from retail", failed );
+    return failed == 0;
+}
+
 inline bool verify_ui_results_all( )
 {
     bool ok = true;
@@ -1613,5 +1791,6 @@ inline bool verify_ui_results_all( )
     ok = verify_ui_touch_dispatch( ) && ok;
     ok = verify_ui_screen_game_init( ) && ok;
     ok = verify_ui_mini_board( ) && ok;
+    ok = verify_ui_championship_load( ) && ok;
     return ok;
 }
