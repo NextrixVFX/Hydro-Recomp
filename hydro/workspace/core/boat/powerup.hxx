@@ -626,3 +626,11 @@ inline std::uint32_t powerup_destroy( powerup_dtor_kind_t kind, const vu_words_t
         h.free_block( self );
     return self;
 }
+
+// VuPowerUpBoostEntity's motion interface slot 0 0x43BD90 (vtable 0x73AEBC; thiscall this = entity
+// + 0x60; plain ret): setWorldTransform 0x5344A0 ( [this - 0x10], [this + 8] + 0x18, 1 ) - a hook.
+template < typename F >
+inline void powerup_motion_update( std::uint32_t component, std::uint32_t motion, F&& set_world )
+{
+    set_world( component, motion + 0x18u, 1u );
+}
