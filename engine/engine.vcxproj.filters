@@ -31,6 +31,9 @@
     <Filter Include="workspace\core\render">
       <UniqueIdentifier>{a7116a4f-7175-50e6-9128-14b25f7c5da8}</UniqueIdentifier>
     </Filter>
+    <Filter Include="workspace\core\save">
+      <UniqueIdentifier>{89e7d654-308a-58a4-92da-c508dc78b2c6}</UniqueIdentifier>
+    </Filter>
     <Filter Include="workspace\core\scene">
       <UniqueIdentifier>{a6426778-30af-52c0-8d3a-49f3441dd454}</UniqueIdentifier>
     </Filter>
@@ -90,6 +93,9 @@
       <Filter>impl\inflate</Filter>
     </ClInclude>
     <ClInclude Include="workspace\core\bench.hxx">
+      <Filter>workspace\core</Filter>
+    </ClInclude>
+    <ClInclude Include="workspace\core\options.hxx">
       <Filter>workspace\core</Filter>
     </ClInclude>
     <ClInclude Include="workspace\core\runtime.hxx">
@@ -293,6 +299,9 @@
     <ClInclude Include="workspace\core\entity\object.hxx">
       <Filter>workspace\core\entity</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\core\entity\persist.hxx">
+      <Filter>workspace\core\entity</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\core\entity\pfx.hxx">
       <Filter>workspace\core\entity</Filter>
     </ClInclude>
@@ -355,6 +364,24 @@
     </ClInclude>
     <ClInclude Include="workspace\core\render\window.hxx">
       <Filter>workspace\core\render</Filter>
+    </ClInclude>
+    <ClInclude Include="workspace\core\save\cloud.hxx">
+      <Filter>workspace\core\save</Filter>
+    </ClInclude>
+    <ClInclude Include="workspace\core\save\deflate.hxx">
+      <Filter>workspace\core\save</Filter>
+    </ClInclude>
+    <ClInclude Include="workspace\core\save\ghost.hxx">
+      <Filter>workspace\core\save</Filter>
+    </ClInclude>
+    <ClInclude Include="workspace\core\save\profile.hxx">
+      <Filter>workspace\core\save</Filter>
+    </ClInclude>
+    <ClInclude Include="workspace\core\save\seam.hxx">
+      <Filter>workspace\core\save</Filter>
+    </ClInclude>
+    <ClInclude Include="workspace\core\save\writer.hxx">
+      <Filter>workspace\core\save</Filter>
     </ClInclude>
     <ClInclude Include="workspace\core\scene\composer.hxx">
       <Filter>workspace\core\scene</Filter>

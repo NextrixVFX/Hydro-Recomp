@@ -231,6 +231,7 @@
     <ClInclude Include="workspace\core\world\frontcam.hxx" />
     <ClInclude Include="workspace\core\world\gfxsort.hxx" />
     <ClInclude Include="workspace\core\world\ghost.hxx" />
+    <ClInclude Include="workspace\core\world\ghostgame.hxx" />
     <ClInclude Include="workspace\core\world\graph.hxx" />
     <ClInclude Include="workspace\core\world\grid.hxx" />
     <ClInclude Include="workspace\core\world\huds.hxx" />
@@ -302,6 +303,7 @@
     <ClInclude Include="workspace\utility\checks\render.hxx" />
     <ClInclude Include="workspace\utility\checks\results.hxx" />
     <ClInclude Include="workspace\utility\checks\rig.hxx" />
+    <ClInclude Include="workspace\utility\checks\save.hxx" />
     <ClInclude Include="workspace\utility\checks\session.hxx" />
     <ClInclude Include="workspace\utility\checks\ui.hxx" />
     <ClInclude Include="workspace\utility\checks\update.hxx" />

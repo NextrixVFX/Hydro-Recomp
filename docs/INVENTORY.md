@@ -18,10 +18,10 @@ Subsystems come from the RTTI class whose vtable holds the function (1253 classe
 
 | | functions | bytes of code |
 |---|---:|---:|
-| verified | 3297 | 1124126 |
-| callee | 724 | 156644 |
-| cited | 599 | 190466 |
-| absent | 4018 | 755024 |
+| verified | 3340 | 1145250 |
+| callee | 761 | 167716 |
+| cited | 613 | 192192 |
+| absent | 3924 | 721102 |
 | **all** | **8638** | **2226260** |
 
 ## By subsystem
@@ -30,22 +30,22 @@ Sorted by code size. Counts are functions; the last column is the share of that 
 
 | subsystem | functions | verified | callee | cited | absent | verified bytes |
 |---|---:|---:|---:|---:|---:|---:|
-| unattributed | 1845 | 725 | 268 | 155 | 697 | 367376 of 695394 |
+| unattributed | 1845 | 744 | 300 | 150 | 651 | 378083 of 695394 |
 | physics (Bullet) | 646 | 445 | 17 | 47 | 137 | 128786 of 256657 |
-| entity / component / script framework | 1094 | 522 | 116 | 57 | 399 | 119068 of 207438 |
+| entity / component / script framework | 1094 | 524 | 116 | 56 | 398 | 120837 of 207438 |
 | HUD / UI / fonts | 648 | 246 | 75 | 45 | 282 | 93512 of 184315 |
-| game modes / race | 766 | 180 | 42 | 67 | 477 | 92635 of 179957 |
+| game modes / race | 766 | 182 | 43 | 68 | 473 | 93335 of 179957 |
 | rendering / gfx | 552 | 214 | 36 | 54 | 248 | 59658 of 126915 |
 | water | 325 | 213 | 29 | 38 | 45 | 61251 of 96416 |
-| boat | 264 | 198 | 22 | 20 | 24 | 71290 of 87400 |
-| engine core / math / containers | 391 | 79 | 14 | 33 | 265 | 19916 of 76072 |
+| boat | 264 | 198 | 22 | 21 | 23 | 71290 of 87400 |
+| engine core / math / containers | 391 | 86 | 17 | 42 | 246 | 23718 of 76072 |
 | other classes | 731 | 12 | 5 | 5 | 709 | 6660 of 67698 |
-| assets | 286 | 123 | 31 | 18 | 114 | 18257 of 61239 |
+| assets | 286 | 123 | 31 | 19 | 113 | 18257 of 61239 |
 | particles | 215 | 185 | 5 | 14 | 11 | 39264 of 45495 |
 | audio | 163 | 40 | 20 | 15 | 88 | 6736 of 30823 |
-| input | 156 | 64 | 6 | 10 | 76 | 19658 of 30388 |
+| input | 156 | 66 | 6 | 8 | 76 | 20711 of 30388 |
 | C++ runtime / STL | 227 | 17 | 32 | 3 | 175 | 9615 of 30128 |
-| save / settings / profile | 199 | 1 | 0 | 5 | 193 | 8 of 25714 |
+| save / settings / profile | 199 | 12 | 1 | 15 | 171 | 3101 of 25714 |
 | AI | 42 | 29 | 3 | 8 | 2 | 8620 of 11304 |
 | network / online | 77 | 1 | 1 | 0 | 75 | 168 of 10476 |
 | camera | 11 | 3 | 2 | 5 | 1 | 1648 of 2431 |
@@ -58,10 +58,10 @@ Over-approximate (a referenced vtable brings every slot) and under-approximate (
 
 | tier | functions | verified | callee | cited | absent | runtime / STL / thunk | platform layer | game + engine logic not verified |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| race | 4905 | 2628 | 510 | 470 | 1297 | 68 | 610 | 1870 |
-| game | 2431 | 667 | 213 | 127 | 1424 | 77 | 313 | 1441 |
-| service | 452 | 0 | 0 | 0 | 452 | 45 | 98 | 309 |
-| dead | 850 | 2 | 1 | 2 | 845 | 61 | 126 | 661 |
+| race | 4905 | 2662 | 543 | 462 | 1238 | 68 | 610 | 1843 |
+| game | 2431 | 668 | 213 | 139 | 1411 | 77 | 313 | 1440 |
+| service | 452 | 8 | 2 | 10 | 432 | 45 | 98 | 307 |
+| dead | 850 | 2 | 3 | 2 | 843 | 61 | 126 | 661 |
 
 ## Where to look
 

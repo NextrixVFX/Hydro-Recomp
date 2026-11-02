@@ -118,6 +118,7 @@ copy /Y "$(ProjectDir)impl\engine.hxx" "$(ProjectDir)..\hydro\impl\engine\engine
     <ClInclude Include="impl\includes.hxx" />
     <ClInclude Include="impl\inflate\puff.h" />
     <ClInclude Include="workspace\core\bench.hxx" />
+    <ClInclude Include="workspace\core\options.hxx" />
     <ClInclude Include="workspace\core\runtime.hxx" />
     <ClInclude Include="workspace\utility\boat.hxx" />
     <ClInclude Include="workspace\utility\broad.hxx" />
@@ -185,6 +186,7 @@ copy /Y "$(ProjectDir)impl\engine.hxx" "$(ProjectDir)..\hydro\impl\engine\engine
     <ClInclude Include="workspace\core\entity\light.hxx" />
     <ClInclude Include="workspace\core\entity\node.hxx" />
     <ClInclude Include="workspace\core\entity\object.hxx" />
+    <ClInclude Include="workspace\core\entity\persist.hxx" />
     <ClInclude Include="workspace\core\entity\pfx.hxx" />
     <ClInclude Include="workspace\core\entity\property.hxx" />
     <ClInclude Include="workspace\core\entity\registry.hxx" />
@@ -206,6 +208,12 @@ copy /Y "$(ProjectDir)impl\engine.hxx" "$(ProjectDir)..\hydro\impl\engine\engine
     <ClInclude Include="workspace\core\render\swap.hxx" />
     <ClInclude Include="workspace\core\render\target.hxx" />
     <ClInclude Include="workspace\core\render\window.hxx" />
+    <ClInclude Include="workspace\core\save\cloud.hxx" />
+    <ClInclude Include="workspace\core\save\deflate.hxx" />
+    <ClInclude Include="workspace\core\save\ghost.hxx" />
+    <ClInclude Include="workspace\core\save\profile.hxx" />
+    <ClInclude Include="workspace\core\save\seam.hxx" />
+    <ClInclude Include="workspace\core\save\writer.hxx" />
     <ClInclude Include="workspace\core\scene\composer.hxx" />
     <ClInclude Include="workspace\core\scene\draw.hxx" />
     <ClInclude Include="workspace\core\scene\light.hxx" />
