@@ -249,7 +249,15 @@ inline ui_frame_inputs_t ui_screen_inputs( c_ui_binding& binding, ui_screen_env_
     in.m_remap = [ b, env ]( const entity_t& e, ui_gfx_sort_t& sort, const ui_font_draw_env_t& draw, float alpha )
     {
         const ui_remap_t* row = b->remap( e );
-        return row && env.m_remap && ui_remap_draw( sort, draw, env.m_db, *row, env.m_remap( e ), alpha );
+        if ( !row || !env.m_remap )
+            return false;
+        // The two VuUIFonts (0x626B80 on each). The row's six textures +0x208..+0x21C stay 0: the ctor 0x45FD30's asset creates are not read.
+        ui_remap_t r = *row;
+        r.m_label_font.m_asset_font = ui_screen_font( e, "Label Font", env );
+        r.m_label_font.m_asset = r.m_label_font.m_asset_font != 0u;
+        r.m_control_font.m_asset_font = ui_screen_font( e, "Control Font", env );
+        r.m_control_font.m_asset = r.m_control_font.m_asset_font != 0u;
+        return ui_remap_draw( sort, draw, env.m_db, r, env.m_remap( e ), alpha );
     };
     in.m_slider = [ b, env ]( const entity_t& e, ui_gfx_sort_t& sort, const ui_font_draw_env_t& draw, float alpha )
     {

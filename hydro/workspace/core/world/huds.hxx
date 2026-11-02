@@ -465,6 +465,53 @@ inline ui_screen_env_t c_world::ui_screen_environment( )
     env.m_font_asset = [ this ]( const std::string& asset ) { return m_ui_pass->font_asset( asset ); };
 #endif
     env.m_root = &m_race.util;
+    env.m_champ = &m_champ_env;
+#if HYDRO_UI_TEXT
+    // The pages' hooks (the Credits' load and draw).
+    env.m_page.m_string = [ this ]( const std::string& id ) { return string_db_get( m_string_db, id ); };
+    env.m_page.m_measure = [ this ]( std::uint32_t font, const std::string& text, const std::uint8_t params[ 60 ], float width, std::uint32_t flags, const float scale[ 2 ], float out[ 2 ] ) {
+        const ui_font_t* f = m_ui_pass ? m_ui_pass->font_of( font ) : nullptr;
+        if ( !f )
+            return false;
+        ui_font_measure( *f, text.c_str( ), params, width, flags, scale, out );
+        return true;
+    };
+    env.m_page.m_texture = [ this ]( const std::string& name ) { return m_ui_pass ? m_ui_pass->texture_asset( name ) : nullptr; };
+    env.m_page.m_font_asset = [ this ]( const std::string& asset, std::uint32_t& font ) {
+        font = m_ui_pass ? m_ui_pass->font_asset( asset ) : 0u;
+        return font != 0u;
+    };
+    env.m_page_env.m_draw = in.m_env;
+    env.m_page_env.m_crop = m_ui_pass->m_impl.m_crop;
+    env.m_page_env.m_default_font = m_ui_pass->font_asset( "Dev" );
+    env.m_page_env.m_default = env.m_page_env.m_default_font != 0u;
+#endif
+    // The remapping rows' 0x45FB90: the input manager's slots 10 / 11 / 12 on (pad 0, config, channel), the device's names, the settings' auto throttle.
+    env.m_remap = [ this ]( const entity_t& e ) {
+        ui_remap_inputs_t r;
+        platform_input_t* input = m_menu_input.get( );
+        r.m_input = input != nullptr;
+        r.m_throttle = e.m_ctor && e.m_ctor->m_vtable == 0x73D45Cu;
+        r.m_auto[ 0 ] = m_settings.auto_throttle_pad ? 1u : 0u;
+        r.m_auto[ 1 ] = m_settings.auto_throttle_keys ? 1u : 0u;
+        r.m_lookup = [ input ]( int slot, std::int32_t config, const std::string& channel, std::int32_t& type, std::int32_t& index ) {
+            input_binding_t b;
+            const bool found = slot == 12 ? input->manager.get_button( 0, config, channel.c_str( ), b )
+                               : slot == 10 ? input->manager.get_positive( 0, config, channel.c_str( ), b )
+                                            : input->manager.get_negative( 0, config, channel.c_str( ), b );
+            if ( found )
+            {
+                type = b.type;
+                index = b.index;
+            }
+        };
+        r.m_axis_name = [ ]( std::int32_t index ) { return index >= 0 && index < 6 ? std::string( g_input_axis_names[ index ].name ) : std::string( ); };
+        r.m_button_name = [ ]( std::int32_t index ) { return index >= 0 && index < 16 ? std::string( g_input_button_names[ index ] ) : std::string( ); };
+        r.m_string = [ this ]( const std::string& id ) { return string_db_get( m_string_db, id ); };
+        r.m_string_literal = [ this ]( const char* id ) { return string_db_get( m_string_db, id ); };
+        r.m_missing = [ this ] { return string_db_get( m_string_db, std::string( "\x01no such id" ) ); };   // VuStringDB slot 9: what a missing id answers
+        return r;
+    };
     return env;
 }
 #endif

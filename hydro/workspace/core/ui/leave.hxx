@@ -104,7 +104,7 @@ inline ui_profile_t ui_profile_all_unlocked( )
 {
     ui_profile_t p;
     p.unlock = []( int, const std::string&, const std::string&, const std::string& ) { return true; };
-    p.license = [] { return true; };
+    p.license = [] { return false; };   // the license manager's vt+0x18 "is trial" (0x42DE10): a full game
     p.progress = []( const std::string& ) { return true; };
     p.store_beta = [] { return false; };
     p.package = []( const std::string& ) { return true; };

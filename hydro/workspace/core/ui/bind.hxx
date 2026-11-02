@@ -1419,7 +1419,7 @@ private:
                 if ( std::strcmp( plug, name ) == 0 )
                     return true;
         if ( vt == k_ui_champ_vtable && m_hooks.m_champ )
-            for ( const char* name : { "IsBusy", "Exit", "PlayNext" } )
+            for ( const char* name : { "IsBusy", "Exit", "PlayNext", "Completed" } )
                 if ( std::strcmp( plug, name ) == 0 )
                     return true;
         if ( ( vt == k_ui_remap_vtable || vt == k_ui_throttle_remap_vtable ) && ( std::strcmp( plug, "SetFocus" ) == 0 || std::strcmp( plug, "Hide" ) == 0 ) )
@@ -2100,6 +2100,12 @@ private:
             {
                 out.m_words[ 0 ] = 3u;   // 0x451660: a VuRetVal bool: +0x294 set
                 out.m_words[ 1 ] = b.m_champ->m_award ? 1u : 0u;
+                return out;
+            }
+            if ( std::strcmp( plug, "Completed" ) == 0 )
+            {
+                out.m_words[ 0 ] = 3u;   // 0x44FEC0: a VuRetVal bool: 0x454E30
+                out.m_words[ 1 ] = ui_champ_done( *b.m_champ, *m_hooks.m_champ ) ? 1u : 0u;
                 return out;
             }
             if ( std::strcmp( plug, "Exit" ) == 0 )

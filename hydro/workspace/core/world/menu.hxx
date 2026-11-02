@@ -93,9 +93,82 @@ inline ui_bind_hooks_t c_world::menu_hooks( )
     };
     string_db_ready( );
     hooks.m_string_db = [ this ]( const char* key ) { return string_db_get( m_string_db, key ? key : "" ); };
-    hooks.m_external = [ this ]( entity_t& e, const char* plug, const ui_params_t& ) {
-        LOG_VERBOSE( "front end: the external input %s . %s (a platform hook) - not run", e.m_type.c_str( ), plug );
-        return ui_ret_t{ };
+    // The Screens' logic entities (world/logic.hxx, case logic_plugs): the race's dispatcher on a per-entity state built from the loaded properties
+    // (a Screens project's m_state is the UI's). The services are the saves'; the settings' defaults stay the world's (null: counted, nothing runs).
+    hooks.m_external = [ this ]( entity_t& e, const char* plug, const ui_params_t& params ) {
+        const std::uint32_t vt = logic_vtable_of( e.m_type.c_str( ) );
+        if ( vt == 0u )
+        {
+            LOG_VERBOSE( "front end: the external input %s . %s (a platform hook) - not run", e.m_type.c_str( ), plug );
+            return ui_ret_t{ };
+        }
+        static std::unordered_map< const entity_t*, logic_entity_t > states;
+        static value_t temp;   // the profile's +0x18: this run's
+        static logic_services_t services;
+        static std::string sku;
+        sku = m_archive.pack_sku( );
+        m_logic_game.sku = &sku;
+        m_logic_game.game_data = &m_menu_util;
+        m_logic_game.unrecreated = &m_logic_unrecreated;
+        services.broadcast = [ this ]( const char* event, const ui_params_t& p ) {
+            if ( m_menu )
+                m_menu->handle( fsm_hash( event ), p );
+        };
+        services.champ_data = [ this ] { return ui_progress_champ_active( m_cloud.data ); };
+        services.champ_clear = [ this ] { ui_progress_champ_save( m_cloud.data, value_t{ } ); };
+        services.save_profile = [ this ] {
+            if ( m_saves_on )
+                m_profile.save( [ this ] { saves_profile_listeners( ); } );
+        };
+        services.game_data = &m_menu_util;
+        services.cloud_data = &m_cloud.data;
+        services.profile_saved = &m_profile.data;
+        services.profile_temp = &temp;
+        auto at = states.find( &e );
+        if ( at == states.end( ) )
+        {
+            logic_entity_t s = logic_construct( vt );
+            for ( const char* name : { "SKU", "Name", "Achievement" } )
+                if ( const ui_slot_t* slot = ui_property_value( e, name ) )
+                    s.text = slot->m_text;
+            if ( const ui_slot_t* slot = ui_property_value( e, "Save" ) )
+                s.head[ 0 ] = slot->m_bits[ 0 ] & 0xFFu;
+            at = states.emplace( &e, std::move( s ) ).first;
+        }
+        c_ui_binding* binding = nullptr;
+        for ( auto& p : m_menu_projects )
+            if ( p.second.binding && p.second.binding->bound_index( e ) >= 0 )
+                binding = p.second.binding.get( );
+        struct context_t
+        {
+            c_ui_binding* binding;
+            entity_t* entity;
+        } ctx{ binding, &e };
+        logic_hooks_t h;
+        h.user = &ctx;
+        h.game = &m_logic_game;
+        h.services = &services;
+        h.fire = []( void* user, logic_entity_t&, const char* out_plug, const ui_params_t& p ) -> logic_retval_t {
+            context_t& c = *static_cast< context_t* >( user );
+            logic_retval_t out;
+            if ( c.binding )
+            {
+                const ui_ret_t r = c.binding->fire_plug( *c.entity, out_plug, p );
+                out.type = r.m_words[ 0 ];
+                out.value = r.m_words[ 1 ];
+            }
+            return out;
+        };
+        logic_retval_t out{ };
+        ui_ret_t ret;
+        if ( !logic_dispatch( at->second, plug, out, params, h ) )
+        {
+            LOG_VERBOSE( "front end: the input %s . %s is not in the logic table - not run", e.m_type.c_str( ), plug );
+            return ret;
+        }
+        ret.m_words[ 0 ] = out.type;
+        ret.m_words[ 1 ] = out.value;
+        return ret;
     };
     hooks.m_input = [ this ]( int pad, const char* name ) { return m_menu_input && m_menu_input->manager.pressed( pad, name ); };
     // A PLATFORM ANSWER, not read from anything: the license manager's "trial" is no (the owner's copy; the retail shot's Main shows Windows 8 Store, the full licence's text).
@@ -128,6 +201,16 @@ inline ui_bind_hooks_t c_world::menu_hooks( )
     hooks.m_option_db = db( "VuDBAsset/OptionDB", option_db );
     hooks.m_champ_db = db( "VuDBAsset/ChampDB", champ_db );
     hooks.m_font_db = db( "VuDBAsset/FontDB", font_db );
+    static value_t page_db;
+    hooks.m_page_db = db( "VuDBAsset/PageLayoutDB", page_db );
+#if HYDRO_UI_PASS && HYDRO_UI_TEXT
+    if ( m_ui_pass )
+    {
+        hooks.m_page_hooks = ui_screen_environment( ).m_page;
+        hooks.m_page_env.m_default_font = m_ui_pass->font_asset( "Dev" );
+        hooks.m_page_env.m_default = hooks.m_page_env.m_default_font != 0u;
+    }
+#endif
     hooks.m_skin_db = db( "VuDBAsset/SkinDB", skin_db );
     hooks.m_boat_db = &m_boat_db;
     hooks.m_track_db = &m_track_db;
