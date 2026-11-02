@@ -2,7 +2,10 @@
 
 #include <workspace/core/assets/package.hxx>
 
+#include <algorithm>
 #include <cstdint>
+#include <cstring>
+#include <xmmintrin.h>
 #include <functional>
 #include <map>
 #include <memory>
@@ -126,6 +129,23 @@ struct asset_factory_hooks_t
     std::string ( *pack_path )( void* user, const std::string& file ) = nullptr;
     // The self-test's header variants: the 68 bytes served for the pack's header, or null for the file's own.
     const unsigned char* pack_header = nullptr;
+    // The asset's vt+0xC, called by slot 37 on every loaded asset.
+    void ( *reload )( void* user, vu_asset_t& asset ) = nullptr;
+    // 0x4ED410's platform reads: g_vumetrosys vt+0x48 (the language text) and g_vumetrofile's "GameInfo.json": false
+    // when the file is not there (the shipped install has none); the document otherwise, `parsed` = 0x4FEDF0's answer.
+    std::string ( *language )( void* user ) = nullptr;
+    bool ( *game_info )( void* user, value_t& document, bool& parsed ) = nullptr;
+};
+
+// One +0x88 listener (a std::list of interface pointers in retail: add slot 28 0x4ECEC0 pushes at the back, remove
+// slot 29 0x4ECF30 = 0x4A44A0 std::list::remove, EVERY node of that pointer). The hooks below stay the caller's first
+// listener; these run after it, in list order. vt+0 package loaded, vt+4 asset created, vt+8 packages unloaded.
+struct asset_listener_t
+{
+    void* user = nullptr;
+    void ( *package_loaded )( void* user, const std::string& name ) = nullptr;
+    void ( *created )( void* user, vu_asset_t& asset ) = nullptr;
+    void ( *unloaded )( void* user ) = nullptr;
 };
 
 class c_asset_factory
@@ -310,6 +330,11 @@ public:
             m_loaded[ h ] = asset;
             if ( hooks.created != nullptr )
                 hooks.created( hooks.user, *asset );
+            for ( const asset_listener_t* l : m_listeners )
+            {
+                if ( l->created != nullptr )
+                    l->created( l->user, *asset );
+            }
             return asset;
         }
         return nullptr;
@@ -374,6 +399,14 @@ public:
             ok = load_package_file( name, path );
         if ( ok && hooks.package_loaded != nullptr )
             hooks.package_loaded( hooks.user, name );
+        if ( ok )
+        {
+            for ( const asset_listener_t* l : m_listeners )
+            {
+                if ( l->package_loaded != nullptr )
+                    l->package_loaded( l->user, name );
+            }
+        }
         return ok;
     }
 
@@ -390,6 +423,232 @@ public:
     void insert( vu_asset_t* asset )
     {
         m_loaded[ asset->hash ] = asset;
+    }
+
+    // ---- The remaining vtable slots (boat batch 30, oracle case asset_slots). Slot 20 0x4EF270 is NOT here: past
+    // 0x4F0550 and the bake check (vt+0x44 = slot 17) it is 0x4F0EF0, the raw-file path never taken with Base.apf. ----
+
+    // Slot 5 0x4ED410, init( callback, sku ): +4 = sku; the language +0x1C (dev "Language": the dev config 0x75901C is
+    // null in retail); GameInfo.json when it exists: +0x74 set, the document in +0x78 (a failed parse answers false);
+    // the 22 types, the callback, loadPackage( "Base" ) (false -> false), +4 = its sku; the +0x90 map. [0x759018] set
+    // would make a slot 35 ( 0 ) call whose answer is dropped: no effect. +0x99 (g_vumetrofile vt+0x24's +0x10 != 0) is
+    // the platform's and is left out.
+    bool init( void ( *callback )( void* ), void* callback_user, const std::string& sku )
+    {
+        m_sku = sku;
+        if ( hooks.language != nullptr )
+            m_lang = hooks.language( hooks.user );
+        bool parsed = false;
+        if ( hooks.game_info != nullptr && hooks.game_info( hooks.user, m_game_info, parsed ) )
+        {
+            m_has_game_info = true;
+            if ( !parsed )
+                return false;
+        }
+        register_all_types( );
+        if ( callback != nullptr )
+            callback( callback_user );
+        if ( !load_base_package( ) )
+            return false;
+        m_categories[ "VuAnimatedModelAsset" ] = 1;
+        m_categories[ "VuStaticModelAsset" ] = 1;
+        m_categories[ "VuPfxAsset" ] = 2;
+        m_categories[ "VuAudioEventAsset" ] = 3;
+        return true;
+    }
+
+    // 0x4F0550 ( type, name, out package ): the first package (+0x48 order) listing it: its entry, else null.
+    asset_entry_t* find_listing( const std::string& type, const std::string& name ) const
+    {
+        for ( const auto& p : m_packages )
+        {
+            if ( asset_entry_t* e = p->entry( type, name ) )
+                return e;
+        }
+        return nullptr;
+    }
+
+    // Slot 10 0x4EDF10: 0x4F0550 != 0.
+    bool exists( const std::string& type, const std::string& name ) const
+    {
+        return find_listing( type, name ) != nullptr;
+    }
+
+    // Slot 12 0x4EDF40: the record's +0 name vector; no record: the function-local empty vector 0x819924.
+    const std::vector< std::string >& names( const std::string& type ) const
+    {
+        static const std::vector< std::string > none;
+        const record_t* r = record( type );
+        return r != nullptr ? r->names : none;
+    }
+
+    // Slots 13 / 14 share this tail: an object entry holding `key` answers that member, ANY OTHER entry answers the
+    // entry itself (a missing key gives the whole entry, not null).
+    static const value_t& info_of( const value_t& entry, const std::string& key )
+    {
+        if ( entry.tag == 6 )
+        {
+            for ( const auto& field : entry.object )
+            {
+                if ( field.first == key )
+                    return field.second;
+            }
+        }
+        return entry;
+    }
+
+    // The null container 0x7593A0.
+    static const value_t& null_container( )
+    {
+        static const value_t null{};
+        return null;
+    }
+
+    // Slot 13 0x4EE030 ( key, type, name ): the first package listing it; none -> the null container.
+    const value_t& info( const std::string& key, const std::string& type, const std::string& name ) const
+    {
+        const asset_entry_t* e = find_listing( type, name );
+        return e != nullptr ? info_of( e->data, key ) : null_container( );
+    }
+
+    // Slot 14 0x4EDFC0 ( key, package, type, name ): that package only.
+    const value_t& info_in( const std::string& key, const std::string& package_name, const std::string& type, const std::string& name ) const
+    {
+        asset_package_t* p = package( package_name );
+        const asset_entry_t* e = p != nullptr ? p->entry( type, name ) : nullptr;
+        return e != nullptr ? info_of( e->data, key ) : null_container( );
+    }
+
+    // Slot 15 0x4EE110: the key hash's table entry erased (0x4F2BA0 find + 0x4F25A0 erase); the asset is NOT deleted.
+    void forget( const std::string& type, const std::string& name )
+    {
+        m_loaded.erase( asset_key_hash( type.c_str( ), name.c_str( ) ) );
+    }
+
+    // Slot 16 0x4EE170, reset: every package deleted (0x4ED930 + delete), every record's name vector emptied, +0x48
+    // emptied, the +0x54 table emptied (buckets back to mask 7 / maxidx 8; the assets are NOT deleted); then
+    // loadPackage( "Base" ) (false -> false, the sku is not re-read) and slot 26's answer. The substitutes stay.
+    bool reset( )
+    {
+        m_packages.clear( );
+        for ( auto& [ type, r ] : m_types )
+            r.names.clear( );
+        m_loaded.clear( );
+        if ( !load_package( "Base" ) )
+            return false;
+        return load_installed( );
+    }
+
+    // Slot 24 0x4EF510: the used byte of the first package listing it; none -> false.
+    bool used( const std::string& type, const std::string& name ) const
+    {
+        const asset_entry_t* e = find_listing( type, name );
+        return e != nullptr && e->used;
+    }
+
+    // Slot 25 0x4EF590: every loaded asset pushed on the VuArray. SUBSTITUTION: retail walks the _Hash's list, whose
+    // order std::unordered_map does not model; the set is the same, the order is ours (the head comment).
+    void loaded( std::vector< vu_asset_t* >& out ) const
+    {
+        for ( const auto& [ h, a ] : m_loaded )
+            out.push_back( a );
+    }
+
+    // Slot 26 0x4EF610, the installed packages: nothing without GameInfo.json (+0x74), or when the dev config is set
+    // and its "IgnoreInstalledPackages" is not a true bool (the dev config is null in retail: past that test). Each
+    // "Packages" member by index (0x4FC000, key order, 0 members when not an object): loadPackage (false -> false),
+    // then its "LicenseMask" OR-ed into the package's +0x38: int 1 / int64 7 as the low word, float 2 through
+    // cvttss2si, anything else 0.
+    bool load_installed( )
+    {
+        if ( !m_has_game_info )
+            return true;
+        for ( const auto* k : asset_sorted_members( game_packages( ) ) )
+        {
+            if ( !load_package( k->first ) )
+                return false;
+            asset_package_t* p = package( k->first );
+            if ( p == nullptr )
+                continue;
+            const value_t& m = member( k->second, "LicenseMask" );
+            std::uint32_t bits = 0;
+            if ( m.tag == 1 )
+                bits = static_cast< std::uint32_t >( m.integer );
+            else if ( m.tag == 2 )
+                bits = static_cast< std::uint32_t >( _mm_cvtt_ss2si( _mm_set_ss( m.real ) ) );
+            else if ( m.tag == 7 )
+                bits = static_cast< std::uint32_t >( m.int64 );
+            p->words[ 2 ] |= bits;
+        }
+        return true;
+    }
+
+    // Slot 28 0x4ECEC0 / slot 29 0x4ECF30 (asset_listener_t).
+    void add_listener( const asset_listener_t* listener )
+    {
+        m_listeners.push_back( listener );
+    }
+
+    void remove_listener( const asset_listener_t* listener )
+    {
+        m_listeners.erase( std::remove( m_listeners.begin( ), m_listeners.end( ), listener ), m_listeners.end( ) );
+    }
+
+    // Slot 30 0x4EF760: +4 and every package's +0x18.
+    void set_sku_all( const std::string& sku )
+    {
+        m_sku = sku;
+        for ( const auto& p : m_packages )
+            p->sku = sku;
+    }
+
+    // Slot 36 0x4EF7C0: the named package's +0x38, 0 when not loaded.
+    std::uint32_t license_mask( const std::string& name ) const
+    {
+        const asset_package_t* p = package( name );
+        return p != nullptr ? p->words[ 2 ] : 0u;
+    }
+
+    // Slot 37 0x4EF7E0: while more than one package: the last deleted. Then every loaded asset's vt+0xC, then every
+    // listener's vt+8. The records' name vectors and the +0x54 table keep what those packages added.
+    void unload_packages( )
+    {
+        while ( m_packages.size( ) > 1 )
+            m_packages.pop_back( );
+        if ( hooks.reload != nullptr )
+        {
+            for ( const auto& [ h, a ] : m_loaded )
+                hooks.reload( hooks.user, *a );
+        }
+        for ( const asset_listener_t* l : m_listeners )
+        {
+            if ( l->unloaded != nullptr )
+                l->unloaded( l->user );
+        }
+    }
+
+    // Slot 38 0x4EF880: the +0x90 map's value, 0 when the name is not there.
+    int category( const std::string& type ) const
+    {
+        auto it = m_categories.find( type );
+        return it == m_categories.end( ) ? 0 : it->second;
+    }
+
+    // Slot 39 0x4EF8B0: does the FIRST package list it (0x4F20A0); false with no package.
+    bool base_lists( const std::string& type, const std::string& name ) const
+    {
+        return !m_packages.empty( ) && m_packages[ 0 ]->entry( type, name ) != nullptr;
+    }
+
+    // Slot 40 0x4ECFB0 / slot 41 0x4ECFC0: GameInfo.json's "Packages" / "Skus".
+    const value_t& game_packages( ) const
+    {
+        return member( m_game_info, "Packages" );
+    }
+
+    const value_t& game_skus( ) const
+    {
+        return member( m_game_info, "Skus" );
     }
 
 private:
@@ -530,6 +789,10 @@ private:
     std::map< std::string, record_t > m_types;
     std::unordered_map< std::uint32_t, vu_asset_t* > m_loaded;
     std::vector< std::pair< std::uint32_t, std::string > > m_substitutes;
+    std::vector< const asset_listener_t* > m_listeners;
+    std::map< std::string, int > m_categories;
+    bool m_has_game_info = false;
+    value_t m_game_info;
 };
 
 // ---- The asset rows' scalar-deleting dtors on retail's words (boat batch 26) ----
@@ -988,4 +1251,26 @@ inline std::uint32_t db_entry_property_destroy( const asset_words_t& w, std::uin
     if ( ( flags & 1u ) && h.free_block )
         h.free_block( self );
     return self;
+}
+
+// VuProjectAsset's load, slot 5 0x5551B0 ( stream { data, size, position } ): u32 size, that many bytes of VUJB document
+// (0x55B560: a failed read answers false, the position left after the size word), then the +0x68 word. Both words are
+// little-endian (memcpy_s of 4). The caller's pack record guarantees the bytes; retail does no bounds check, past the
+// end this answers false.
+inline bool project_asset_load( const std::vector< std::uint8_t >& data, std::size_t& position, value_t& document, std::uint32_t& word )
+{
+    std::uint32_t size = 0;
+    if ( position + 4 > data.size( ) )
+        return false;
+    std::memcpy( &size, data.data( ) + position, 4 );
+    position += 4;
+    if ( position + size + 4 > data.size( ) )
+        return false;
+    const std::vector< std::uint8_t > blob( data.begin( ) + position, data.begin( ) + position + size );
+    if ( !c_reader::read_at_start( blob, document ) )
+        return false;
+    position += size;
+    std::memcpy( &word, data.data( ) + position, 4 );
+    position += 4;
+    return true;
 }

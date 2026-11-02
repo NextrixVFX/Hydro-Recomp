@@ -3236,6 +3236,9 @@ inline bool verify_race_all( )
     ok = verify_asset_factory( ) && ok;
     ok = verify_package_filter( ) && ok;
     ok = verify_asset_package( ) && ok;
+    ok = verify_asset_slots( ) && ok;
+    ok = verify_input_manager( ) && ok;
+    ok = verify_asset_loads( ) && ok;
     ok = verify_powerup_dtors( ) && ok;
     ok = verify_asset_dtors( ) && ok;
     ok = verify_asset_creates( ) && ok;
