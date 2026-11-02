@@ -6,6 +6,8 @@
 #include <workspace/core/ui/ladder.hxx>
 #include <workspace/core/ui/results.hxx>
 #include <workspace/core/ui/standings.hxx>
+#include <workspace/core/ui/typeset.hxx>
+#include <workspace/core/assets/archive.hxx>
 
 #include <cstdio>
 #include <cstdlib>
@@ -1779,6 +1781,152 @@ inline bool verify_ui_championship_load( )
     return failed == 0;
 }
 
+inline std::string package_check_pack( );   // checks/package.hxx
+
+inline std::vector< std::uint8_t > ui_fnd_bytes( const char* hex )
+{
+    std::vector< std::uint8_t > out;
+    for ( const char* p = hex; p[ 0 ] && p[ 1 ]; p += 2 )
+        out.push_back( static_cast< std::uint8_t >( std::strtoul( std::string( p, 2 ).c_str( ), nullptr, 16 ) ) );
+    return out;
+}
+
+// core/ui/typeset.hxx against retail's VuFont (oracle case font_draw): VuFontAsset's load 0x5CAE60 on the real UI / Dev / Title fonts
+// (the three metrics, the glyph records' hash, the bytes consumed, the code map per code, the atlas's mip chain through the 0x618890
+// uploads, the image names), the measure 0x5370F0 (both output floats) and the draw 0x5375E0 / 0x537600 (every device and constant
+// call in order, the vertices' hash) on wide records, and 0x618890 on hand-built rectangles.
+inline bool verify_ui_font_draw( )
+{
+    int failed = 0, quads = 0, images = 0;
+    std::vector< ui_font_t > fonts( g_golden_fnd_fonts_count );
+    const std::string pack = package_check_pack( );
+    c_archive archive;
+    if ( pack.empty( ) || !archive.open( pack.c_str( ) ) )
+    {
+        LOG_ERROR( "ui font: no Base.apf" );
+        return false;
+    }
+    for ( std::size_t k = 0; k < g_golden_fnd_fonts_count; ++k )
+    {
+        const golden_fnd_font_t& g = g_golden_fnd_fonts[ k ];
+        std::vector< std::uint8_t > bytes;
+        ui_font_t& f = fonts[ k ];
+        bool same = archive.read( g.m_name, bytes ) && ui_font_load( bytes.data( ), bytes.size( ), f );
+        std::uint32_t metrics[ 3 ];
+        std::memcpy( metrics, &f.m_ascent, 4 );
+        std::memcpy( metrics + 1, &f.m_descent, 4 );
+        std::memcpy( metrics + 2, &f.m_scale, 4 );
+        same = same && std::memcmp( metrics, g.m_metrics, 12 ) == 0 && static_cast< int >( f.m_glyphs.size( ) ) == g.m_count && f.m_width == g.m_width && f.m_height == g.m_height;
+        same = same && g.m_count > 0 && ui_chl_hash( std::string( reinterpret_cast< const char* >( bytes.data( ) ) + 16, static_cast< std::size_t >( g.m_count ) * 0x2C ) ) == g.m_glyphs;
+        for ( int c = 0; c < g.m_codes; ++c )
+        {
+            const golden_fnd_code_t& w = g_golden_fnd_codes[ g.m_first_code + c ];
+            const auto at = f.m_map.m_index.find( w.m_code );
+            same = same && ( at == f.m_map.m_index.end( ) ? 0xFFFFFFFFu : at->second ) == w.m_index;
+        }
+        std::vector< std::uint8_t > level = f.m_atlas;
+        int width = f.m_width, height = f.m_height;
+        for ( int m = 0; m < g.m_mips; ++m )
+        {
+            const golden_fnd_mip_t& w = g_golden_fnd_mips[ g.m_first_mip + m ];
+            same = same && static_cast< int >( level.size( ) ) == w.m_size && ui_chl_hash( std::string( reinterpret_cast< const char* >( level.data( ) ), level.size( ) ) ) == w.m_hash;
+            const int nw = width >> 1 > 1 ? width >> 1 : 1, nh = height >> 1 > 1 ? height >> 1 : 1;
+            std::vector< std::uint8_t > next( static_cast< std::size_t >( nw ) * nh );
+            ui_font_mip( width, height, level.data( ), next.data( ) );
+            level = next;
+            width = nw;
+            height = nh;
+        }
+        same = same && static_cast< int >( f.m_images.size( ) ) == g.m_images;
+        f.m_texture = g.m_texture;
+        for ( int m = 0; same && m < g.m_images; ++m )
+        {
+            same = same && f.m_images[ static_cast< std::size_t >( m ) ] == g_golden_fnd_images[ g.m_first_image + m ].m_name;
+            f.m_image_textures[ static_cast< std::size_t >( m ) ] = g_golden_fnd_images[ g.m_first_image + m ].m_texture;
+        }
+        if ( !same && ++failed <= 6 )
+            LOG_ERROR( "ui font: the load of %s differs", g.m_name );
+    }
+    for ( std::size_t k = 0; k < g_golden_fnd_boxes_count; ++k )
+    {
+        const golden_fnd_box_t& g = g_golden_fnd_boxes[ k ];
+        const std::vector< std::uint8_t > src = ui_fnd_bytes( g.m_src ), want = ui_fnd_bytes( g.m_dst );
+        std::vector< std::uint8_t > dst( want.size( ) );
+        ui_font_mip( g.m_width, g.m_height, src.data( ), dst.data( ) );
+        if ( dst != want && ++failed <= 6 )
+            LOG_ERROR( "ui font: mip %d x %d differs", g.m_width, g.m_height );
+    }
+    for ( std::size_t k = 0; k < g_golden_fnd_measures_count; ++k )
+    {
+        const golden_fnd_measure_t& g = g_golden_fnd_measures[ k ];
+        const std::vector< std::uint8_t > text = ui_fnd_bytes( g.m_text ), params = ui_fnd_bytes( g.m_params );
+        std::string held( text.begin( ), text.end( ) );
+        float width;
+        std::memcpy( &width, &g.m_width, 4 );
+        const float screen[ 2 ] = { static_cast< float >( g.m_screen[ 0 ] ), static_cast< float >( g.m_screen[ 1 ] ) };
+        float out[ 2 ];
+        ui_font_measure( fonts[ static_cast< std::size_t >( g.m_font ) ], held.c_str( ), params.data( ), width, g.m_flags, screen, out );
+        float aspect;
+        std::memcpy( &aspect, &g.m_aspect, 4 );
+        const float line = ui_font_text_width( fonts[ static_cast< std::size_t >( g.m_font ) ], held.c_str( ), params.data( ), aspect );
+        if ( std::memcmp( &line, &g.m_line, 4 ) != 0 && ++failed <= 6 )
+            LOG_ERROR( "ui font: width %d (%s) differs: %g", static_cast< int >( k ), held.c_str( ), line );
+        if ( std::memcmp( out, g.m_out, 8 ) != 0 && ++failed <= 6 )
+            LOG_ERROR( "ui font: measure %d (%s) differs: %08x %08x want %08x %08x", static_cast< int >( k ), held.c_str( ), *reinterpret_cast< unsigned* >( out ), *reinterpret_cast< unsigned* >( out + 1 ), g.m_out[ 0 ], g.m_out[ 1 ] );
+    }
+    ui_font_renderer_t R;
+    for ( std::size_t k = 0; k < g_golden_fnd_draws_count; ++k )
+    {
+        const golden_fnd_draw_t& g = g_golden_fnd_draws[ k ];
+        const std::vector< std::uint8_t > record = ui_fnd_bytes( g.m_record );
+        for ( std::uint32_t s = 0; s < 3; ++s )
+        {
+            R.m_sets[ s ].m_program = g_golden_fnd_programs[ s ];
+            R.m_sets[ s ].m_matrix = 0x100u + s;
+            R.m_sets[ s ].m_range = 0x200u + s;
+            R.m_sets[ s ].m_outline = g.m_variant ? 0u : 0x300u + s;
+            R.m_sets[ s ].m_colour = g.m_variant ? 0u : 0x400u + s;
+        }
+        std::string log;
+        const auto add = [ &log ]( const std::string& line )
+        {
+            if ( !log.empty( ) )
+                log += '\n';
+            log += line;
+        };
+        const auto id = [ ]( std::uint32_t v ) { char at[ 16 ]; std::snprintf( at, sizeof( at ), "%08x", v ); return std::string( at ); };
+        ui_font_ops_t ops;
+        ops.m_texture = [ & ]( std::uint32_t t ) { add( "tex:" + id( t ) ); };
+        ops.m_scissor = [ & ]( const float r[ 4 ] ) { add( "scissor:" + ui_chl_hex( reinterpret_cast< const std::uint8_t* >( r ), 16 ) ); };
+        ops.m_scissor_on = [ & ]( bool on ) { add( on ? "on:1" : "on:0" ); };
+        ops.m_size = [ & ]( std::int32_t& a, std::int32_t& b ) { a = g.m_screen[ 0 ]; b = g.m_screen[ 1 ]; };
+        ops.m_program = [ & ]( std::uint32_t p ) { add( "program:" + id( p ) ); };
+        ops.m_vec2 = [ & ]( std::uint32_t p, std::uint32_t c, const float v[ 2 ] ) { add( "vec2:" + id( p ) + ":" + id( c ) + ":" + ui_chl_hex( reinterpret_cast< const std::uint8_t* >( v ), 8 ) ); };
+        ops.m_colour = [ & ]( std::uint32_t p, std::uint32_t c, const std::uint8_t* v ) { add( "colour:" + id( p ) + ":" + id( c ) + ":" + ui_chl_hex( v, 16 ) ); };
+        ops.m_matrix = [ & ]( std::uint32_t p, std::uint32_t c, const float m[ 16 ] ) { add( "matrix:" + id( p ) + ":" + id( c ) + ":" + ui_chl_hex( reinterpret_cast< const std::uint8_t* >( m ), 64 ) ); };
+        ops.m_draw = [ & ]( int count, const std::uint8_t* v )
+        {
+            char at[ 96 ];
+            std::snprintf( at, sizeof( at ), "draw:3:0:%d:%d:24:%016llx", 4 * count, 2 * count,
+                           static_cast< unsigned long long >( ui_chl_hash( std::string( reinterpret_cast< const char* >( v ), static_cast< std::size_t >( count ) * 0x60 ) ) ) );
+            add( at );
+            quads += count;
+        };
+        const std::size_t before = R.m_images.size( );
+        ui_font_submit( R, fonts[ static_cast< std::size_t >( g.m_font ) ], record.data( ), ops );
+        images += static_cast< int >( before );
+        if ( log != g.m_log && ++failed <= 6 )
+            LOG_ERROR( "ui font: draw %d differs\n  ours   %s\n  retail %s", static_cast< int >( k ), log.substr( 0, 600 ).c_str( ), std::string( g.m_log ).substr( 0, 600 ).c_str( ) );
+    }
+    if ( failed == 0 )
+        LOG_SUCCESS( "ui_font_load / _mip / _measure / _submit match retail's VuFontAsset load 0x5CAE60 (0x619310 0x6197B0 0x618890), 0x5370F0, 0x5373D0 and 0x5375E0 / 0x537600 (0x537AD0 0x537D60 0x537FA0 0x5380B0 0x538110 0x538680 0x538700): %d fonts, %d measures, "
+                     "%d draws (%d quads drawn: every device and constant call, the vertices)",
+                     static_cast< int >( g_golden_fnd_fonts_count ), static_cast< int >( g_golden_fnd_measures_count ), static_cast< int >( g_golden_fnd_draws_count ), quads );
+    else
+        LOG_ERROR( "ui font: %d differ from retail", failed );
+    return failed == 0;
+}
+
 inline bool verify_ui_results_all( )
 {
     bool ok = true;
@@ -1792,5 +1940,6 @@ inline bool verify_ui_results_all( )
     ok = verify_ui_screen_game_init( ) && ok;
     ok = verify_ui_mini_board( ) && ok;
     ok = verify_ui_championship_load( ) && ok;
+    ok = verify_ui_font_draw( ) && ok;
     return ok;
 }
