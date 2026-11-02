@@ -283,6 +283,21 @@ inline int race_drive_ray( void* user, const float* from, const float* to, const
     return n;
 }
 
+// 0x40C750's aabb: the hit body's shape (+0xCC) vt+4 getAabb( body +0x10, min, max ). A body not in the world answers an empty box and logs UNKNOWN.
+inline void race_drive_aabb( void* user, const std::uint8_t* body, float* mn, float* mx )
+{
+    race_session_t& s = *static_cast< race_session_t* >( user );
+    if ( s.dynamics )
+        for ( const collision_object_t* o : s.dynamics->collision.objects )
+            if ( reinterpret_cast< const std::uint8_t* >( o->body.object ) == body )
+            {
+                if ( !body_get_aabb( o->body, o->body.transform, mn, mx ) )
+                    race_unwired( s, "0x40C750: a hit body's getAabb reached a shape not recreated (UNKNOWN)" );
+                return;
+            }
+    race_unwired( s, "0x40C750: the ray's hit body is not in the collision world (UNKNOWN)" );
+}
+
 // 0x5296C0 on the probe point with the callback {vtable, point x, y,
 // direction x, y}: the finder starts at 0 (retail's [ebp-8]); water +0x18
 // (skip waves) is the build's 0.
@@ -430,7 +445,7 @@ inline void race_drive_driver( void* user, float dt )
         ai_tick_hooks_t h;
         h.avoid.user = &s;
         h.avoid.ray = race_drive_ray;
-        h.avoid.aabb = nullptr;   // reached only after a hit
+        h.avoid.aabb = race_drive_aabb;
         h.controls.user = &r;
         h.controls.misfire = []( void* u ) { race_unwired( *race_drive_of( u ).session, "audio: the BoostMisfire sound 0x41E060 (FMOD - platform)" ); };
         // The voice-over manager g 0x758FEC vt+0x1C (boat, line): world/voice.hxx's say-now on this boat.
@@ -453,7 +468,7 @@ inline void race_drive_driver( void* user, float dt )
         nuisance_hooks_t h;
         h.ai.avoid.user = &s;
         h.ai.avoid.ray = race_drive_ray;
-        h.ai.avoid.aabb = nullptr;   // reached only after a hit
+        h.ai.avoid.aabb = race_drive_aabb;
         h.ai.controls.user = &r;
         h.ai.controls.misfire = []( void* u ) { race_unwired( *race_drive_of( u ).session, "audio: the BoostMisfire sound 0x41E060 (FMOD - platform)" ); };
         h.ai.controls.voice = []( void* u, const char* line ) { race_session_vo_say( *race_drive_of( u ).session, race_drive_of( u ).d.boat, line, false ); };
