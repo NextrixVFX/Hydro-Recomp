@@ -8,7 +8,7 @@
 //   m_screen_tick    the root's slot 12 0x629B90 (binding.tick)
 //   m_screen_draw    the root's slot 13 0x629D60 (ui_screen_frame, into the UI pass)
 // The binding's broadcasts reach the mode's event map 0x5156E0 (c_front_end::handle): OnPushScreen, OnSetScreen, OnStartActionGame ...
-// Hooks that answer nothing, named: the audio ones, the title voice-over, analytics, the save check, 0x530BB0, VuProject's reference counts.
+// Hooks that answer nothing, named: the title voice-over, analytics, the save check, 0x530BB0, VuProject's reference counts.
 
 class c_menu_mode final : public game_mode_t
 {
@@ -70,6 +70,7 @@ inline void c_world::action_exit( )
     m_pause_root.reset( );
     if ( m_race.active )
         race_session_end( m_race );
+    m_game_screen_state = screen_state_t{ };
     m_action.reset( );
 }
 
@@ -81,25 +82,22 @@ inline void c_world::action_enter( )
     m_has_chosen = false;
 }
 
-inline float g_menu_dt = 0.0f;   // the tick manager's delta the screen tick sees (UI batch 32; c_world's member when world.hxx takes it)
-
-inline ui_bind_hooks_t c_world::menu_hooks( )
+inline ui_bind_hooks_t c_world::menu_hooks( int id )
 {
     ui_bind_hooks_t hooks;
     hooks.m_root = &m_menu_util;
     hooks.m_broadcast_out = [ this ]( std::uint32_t hash, const ui_params_t& p ) {
+        menu_poster( hash, p );
         if ( m_menu )
             m_menu->handle( hash, p );
     };
     string_db_ready( );
     hooks.m_string_db = [ this ]( const char* key ) { return string_db_get( m_string_db, key ? key : "" ); };
-    hooks.m_external = [ this ]( entity_t& e, const char* plug, const ui_params_t& ) {
-        LOG_VERBOSE( "front end: the external input %s . %s (a platform hook) - not run", e.m_type.c_str( ), plug );
-        return ui_ret_t{ };
+    hooks.m_external = [ this, id ]( entity_t& e, const char* plug, const ui_params_t& p ) {
+        menu_project_t& project = m_menu_projects[ id ];
+        return screen_external( project.state, *project.binding, e, plug, p );
     };
     hooks.m_input = [ this ]( int pad, const char* name ) { return m_menu_input && m_menu_input->manager.pressed( pad, name ); };
-    // The selectors (UI batch 32): one world per process, so these documents stay here until c_world holds them (world.hxx is the world agent's).
-    static value_t option_db, champ_db, font_db, skin_db;
     const auto db = [ this ]( const char* asset, value_t& out ) -> const value_t* {
         if ( out.tag == 0 )
         {
@@ -110,14 +108,16 @@ inline ui_bind_hooks_t c_world::menu_hooks( )
         }
         return &out;
     };
-    hooks.m_option_db = db( "VuDBAsset/OptionDB", option_db );
-    hooks.m_champ_db = db( "VuDBAsset/ChampDB", champ_db );
-    hooks.m_font_db = db( "VuDBAsset/FontDB", font_db );
-    hooks.m_skin_db = db( "VuDBAsset/SkinDB", skin_db );
+    hooks.m_option_db = db( "VuDBAsset/OptionDB", m_option_db );
+    hooks.m_champ_db = db( "VuDBAsset/ChampDB", m_champ_db );
+    hooks.m_font_db = db( "VuDBAsset/FontDB", m_font_db );
+    hooks.m_skin_db = db( "VuDBAsset/SkinDB", m_skin_db );
     hooks.m_boat_db = &m_boat_db;
     hooks.m_track_db = &m_track_db;
-    hooks.m_platform = ui_platform_of( ui_profile_all_unlocked( ) );   // the declared scaffold profile, as --front-end-defaults (the save-backed one: the world's)
-    hooks.m_delta = [ this ] { return g_menu_dt; };
+    hooks.m_platform = ui_platform_of( menu_profile( ) );   // the saved state (world/external.hxx); --front-end-defaults keeps its test profile
+    hooks.m_delta = [ this ] { return m_menu_dt; };
+    hooks.m_sound = [ this ]( const char* name ) { ui_play( name ); };
+    hooks.m_category = m_settings_hooks.category;
     hooks.m_touch_device = &m_touch;
     hooks.m_settings = &m_settings.ui;
     hooks.m_settings_platform = &m_settings_platform;
@@ -139,6 +139,7 @@ inline void c_world::menu_enter( )
             saves_input( *m_menu_input );
         }
     }
+    m_menu_engine.m_sound = [ this ]( const char* name ) { ui_play( name ); };
     m_menu_engine.m_platform = [ this ]( const char* what, int ) {
         if ( std::strcmp( what, "cloud" ) == 0 )   // 0x4BF96D 0x5547F0, 0x4BF978 0x4ABD60: the pair
             saves_commit( );
@@ -175,7 +176,7 @@ inline void c_world::menu_bind( )
         const int id = ++m_menu_serial;
         menu_project_t& p = m_menu_projects[ id ];
         p.root = std::move( root );
-        p.binding = std::make_unique< c_ui_binding >( *p.root, menu_hooks( ) );
+        p.binding = std::make_unique< c_ui_binding >( *p.root, menu_hooks( id ) );
         LOG_INFO( "front end: screen %s loaded (project %d)", name.c_str( ), id );
         return id;
     };
@@ -184,12 +185,19 @@ inline void c_world::menu_bind( )
         m_menu_projects[ id ].binding->project_initialize( );
     };
     m_menu_engine.m_release_project = [ this ]( int id ) {
-        m_menu_projects[ id ].binding->project_release( );
+        menu_project_t& p = m_menu_projects[ id ];
+        p.binding->project_release( );
+        for ( auto& held : p.state.sounds )   // VuAudioEventEntity's dtor 0x5F4220: the emitter's holder release
+        {
+            audio_emitter_t emitter;
+            emitter.holder = held.second;
+            audio_emitter_destroy( emitter, m_sound );
+        }
         m_menu_projects.erase( id );
     };
     m_menu_engine.m_is_screen = [ this ]( int id ) { return ui_common_is_screen( *m_menu_projects[ id ].root ); };
     m_menu_engine.m_screen_tick = [ this ]( int id, float dt, bool input ) {
-        g_menu_dt = dt;
+        m_menu_dt = dt;
         m_menu_projects[ id ].binding->tick( dt, input );
     };
     m_menu_engine.m_screen_draw = [ this ]( int id, float alpha ) {
@@ -212,6 +220,7 @@ inline void c_world::menu_exit( )
     env.boat_db = dbs.boat_db;
     env.track_db = dbs.track_db;
     env.random = &m_vurandom;
+    env.player_name = platform_gamer_tag( );
     env.string_db = [ this ]( const char* id ) { return string_db_get( m_string_db, id ? id : "" ); };
     const ui_game_config_t config = m_menu->exit( m_menu_util, env );
     LOG_INFO( "front end: exit to %s, GameData builder 0x%X %s", m_menu->m_mode.c_str( ), config.builder, config.built ? "built" : "not built" );

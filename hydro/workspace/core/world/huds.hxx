@@ -60,14 +60,14 @@ inline void c_world::load_huds( const char* const* k_names )   // the game ctor'
                 const int index = p;
                 // The world-owned inputs: VuMultiDelayEntity "In" 0x5E0660 (the world's clock); VuAudioEventEntity Start /
                 // Stop (the audio device - a platform hook).
-                hooks.m_external = [ this, index, prefix ]( entity_t& e, const char* plug, const ui_params_t& ) {
+                hooks.m_external = [ this, index, prefix ]( entity_t& e, const char* plug, const ui_params_t& params ) {
                     hud_project_t& hp = m_huds[ index ];
                     const auto at = hp.ui_trail.find( &e );
                     const auto clock = at != hp.ui_trail.end( ) ? m_multi_delays.find( prefix + at->second ) : m_multi_delays.end( );
                     if ( clock != m_multi_delays.end( ) && std::strcmp( plug, "In" ) == 0 )
                         multi_delay_in( clock->second.state );
                     else
-                        race_unwired( m_race, std::string( "the race HUD's external input " ) + e.m_type + " . " + plug + " (audio: a platform hook) - not run" );
+                        return screen_external( m_game_screen_state, hp.ui->binding( ), e, plug, params );
                     return ui_ret_t{ };
                 };
                 hooks.m_broadcast_out = [ this, index ]( std::uint32_t hash, const ui_params_t& bp ) {
@@ -307,9 +307,10 @@ inline void c_world::bind_game_screens( )
     hooks.m_broadcast_out = [ this ]( std::uint32_t hash, const ui_params_t& p ) { race_broadcast_hash( hash, nullptr, p, -1 ); };
     string_db_ready( );
     hooks.m_string_db = [ this ]( const char* key ) { return string_db_get( m_string_db, key ? key : "" ); };
-    hooks.m_external = [ this ]( entity_t& e, const char* plug, const ui_params_t& ) {
-        race_unwired( m_race, std::string( "the Results screen's external input " ) + e.m_type + " . " + plug + " (a platform hook) - not run" );
-        return ui_ret_t{ };
+    hooks.m_external = [ this ]( entity_t& e, const char* plug, const ui_params_t& p ) {
+        ui_game_award_t* award = m_race.screens.m_award.get( );
+        c_ui_binding* binding = award && award->m_binding ? award->m_binding.get( ) : m_race.screens.m_binding.get( );
+        return binding ? screen_external( m_game_screen_state, *binding, e, plug, p ) : ui_ret_t{ };
     };
     // g 0x759038 slot 9( pad, name ): the manager's "pressed" (Results' Select).
     hooks.m_input = [ this ]( int pad, const char* name ) { return m_race.input && m_race.input->manager.pressed( pad, name ); };
@@ -371,6 +372,12 @@ inline void c_world::pause_bind( )
     h.m_screen = [ this ] { return m_pause_root && ui_common_is_screen( *m_pause_root ); };
     h.m_screen_tick = [ this ]( float dt, bool input ) { m_pause_binding->tick( dt, input ); };
 #if HYDRO_UI_PASS
+#if HYDRO_UI_PASS
+    h.m_sort_key = [ this ] {
+        if ( m_ui_pass )
+            m_ui_pass->m_sort.key_high( ) = ui_pause_key( m_ui_pass->m_sort.key_high( ) );
+    };
+#endif
     h.m_screen_draw = [ this ] {
         if ( m_ui_pass )
         {
@@ -455,6 +462,8 @@ inline ui_screen_env_t c_world::ui_screen_environment( )
     // A text leaf's slot 12: VuUITextEntity's 0x446DE0 is VuStringDB slot 7 on its String ID; the screen's bound text has no runtime
     // String ID object here, so the loaded one (SUBSTITUTION until a screen's SetText path needs it).
     env.m_text = [ this ]( const entity_t& e ) {
+        if ( e.m_type == "VuGamerTagUITextEntity" )   // slot 12 0x445DE0
+            return platform_gamer_tag( );
         const ui_slot_t* id = ui_property_value( e, "String ID" );
         return id && !id->m_text.empty( ) ? string_db_get( m_string_db, id->m_text ) : std::string( );
     };
@@ -463,7 +472,9 @@ inline ui_screen_env_t c_world::ui_screen_environment( )
 #if HYDRO_UI_TEXT
     env.m_font_asset = [ this ]( const std::string& asset ) { return m_ui_pass->font_asset( asset ); };
 #endif
-    env.m_root = &m_race.util;
+    env.m_root = m_menu ? &m_menu_util : &m_race.util;
+    m_difficulty_env.m_root = env.m_root;
+    env.m_difficulty = &m_difficulty_env;
     return env;
 }
 #endif

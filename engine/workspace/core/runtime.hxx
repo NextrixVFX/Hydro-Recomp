@@ -79,6 +79,11 @@ void c_engine::lens( float tan_half, float near_plane )
     g_viewport( ).lens( tan_half, near_plane );
 }
 
+void c_engine::flip_interval( int interval )
+{
+    g_swap_interval = static_cast< std::uint32_t >( interval );
+}
+
 void c_engine::sun( const float* direction )
 {
     g_light( ).aim( direction );

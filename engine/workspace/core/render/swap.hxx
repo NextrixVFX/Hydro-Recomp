@@ -39,6 +39,9 @@ private:
 
 c_swap& g_swap( );
 
+// The flip interval g 0x75907C vt+0x28 writes (retail's device +8, the Present's first argument). Held, NOT applied: the user asked for vsync always off (present( ) passes 0), so retail's interval is ignored here.
+inline std::uint32_t g_swap_interval = 1u;
+
 #include <workspace/utility/logger.hxx>
 
 #if HYDRO_HOST_WINDOWS
