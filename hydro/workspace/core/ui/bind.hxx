@@ -486,13 +486,7 @@ struct ui_bind_hooks_t
 // An entity's own property slot (its loaded ui_state_t), or null.
 inline const ui_slot_t* ui_bind_slot( const entity_t& e, const char* name )
 {
-    if ( !ui_is_state( e ) )
-        return nullptr;
-    const ui_state_t* s = static_cast< const ui_state_t* >( e.m_state.get( ) );
-    for ( int k = 0; k < s->m_count; ++k )
-        if ( std::strcmp( s->m_rows[ k ]->m_name, name ) == 0 )
-            return &s->m_value[ static_cast< std::size_t >( k ) ];
-    return nullptr;
+    return ui_state_slot( e, name );
 }
 
 // Batch 25: VuBarracudaUIButtonEntity's touch rect fields (button.hxx
