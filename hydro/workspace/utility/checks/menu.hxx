@@ -6,6 +6,7 @@
 #include <workspace/core/ui/ladder.hxx>
 #include <workspace/core/ui/navigate.hxx>
 #include <workspace/core/ui/ticker.hxx>
+#include <workspace/core/ui/wired.hxx>
 
 #include <cstdio>
 #include <cstring>
@@ -1208,6 +1209,117 @@ inline bool verify_ui_button_draw( )
     return failed == 0;
 }
 
+// The batch 28 leaves' inputs of verify_ui_screen_frame_records (case screen_frame's hooks: StringDB "<id>~", the
+// measure PL_MEASURE in turn from each run's start, every font the stand-in asset, textures A / B by parity).
+template < class tail_t, class leaf_t >
+inline void wired_mirror( ui_frame_inputs_t& in, const ui_impl_t& impl, const tail_t& tail_of, const leaf_t& leaf, int& measured, const golden_frm_run_t& run,
+                          const ui_texture_t& texture_a, const ui_texture_t& texture_b, int& live )
+{
+    static const float k_measure[ 8 ] = { 0.05f, 0.02f, 0.0f, 0.1f, 0.035f, 0.07f, 0.045f, 0.012f };   // PL_MEASURE
+    static const value_t pagedb = c_reader( std::vector< std::uint8_t >( reinterpret_cast< const std::uint8_t* >( g_golden_pl_pagedb ),
+                                                                        reinterpret_cast< const std::uint8_t* >( g_golden_pl_pagedb ) + g_golden_pl_pagedb_bytes ) ).parse( );
+    const auto say = []( const std::string& id ) { return id + "~"; };
+    in.m_page = [ &, say, run_tails = run.m_tails, first_tail = run.m_first_tail ]( const entity_t& who, ui_gfx_sort_t& into, const ui_font_draw_env_t& env, float alpha ) -> bool
+    {
+        const golden_frm_leaf_t* g = leaf( who );
+        if ( !g || g->m_kind != 7 )
+            return false;
+        ui_page_layout_t p = ui_page_layout_of( who );
+        ui_page_env_t pe;
+        pe.m_draw = env;
+        pe.m_crop = impl.m_crop;
+        bool counting = false;
+        ui_page_hooks_t hooks;
+        hooks.m_db = in.m_db;
+        hooks.m_string = say;
+        hooks.m_measure = [ & ]( std::uint32_t, const std::string&, const std::uint8_t*, float, std::uint32_t, const float*, float out[ 2 ] )
+        {
+            out[ 0 ] = 0.25f;
+            out[ 1 ] = counting ? k_measure[ measured++ % 8 ] : 0.0f;
+            return true;
+        };
+        hooks.m_texture = [ & ]( const std::string& ) -> const ui_texture_t* { return &texture_a; };
+        hooks.m_font_asset = []( const std::string&, std::uint32_t& font ) { font = 0x0F0E0D0Cu; return true; };
+        if ( !ui_page_layout_load( p, &pagedb, ui_font_db( 0 ), pe, hooks ) )
+            return false;
+        std::memcpy( &p.m_total, &g->m_words[ 0 ], 4 );
+        std::memcpy( &p.m_scroll, &g->m_words[ 1 ], 4 );
+        // the Text elements' params bytes 41..59, 19 each in list order; the font pieces of OUR load's stand-in
+        std::vector< std::uint8_t > tails;
+        for ( int t = 0; t < run_tails; ++t )
+            if ( g_golden_frm_tails[ first_tail + t ].m_index == g->m_index && g_golden_frm_tails[ first_tail + t ].m_kind == 15 )
+                tails = ui_unhex( g_golden_frm_tails[ first_tail + t ].m_tail );
+        std::size_t at = 0;
+        for ( ui_page_element_t& el : p.m_elements )
+            if ( el.m_kind == ui_page_kind_t::text && at + 19 <= tails.size( ) )
+            {
+                std::memcpy( el.m_params + 41, tails.data( ) + at, 19 );
+                at += 19;
+            }
+        counting = true;
+        ++live;
+        return ui_page_layout_draw( into, pe, hooks, p, alpha );
+    };
+    in.m_remap = [ &, say ]( const entity_t& who, ui_gfx_sort_t& into, const ui_font_draw_env_t& env, float alpha ) -> bool
+    {
+        const golden_frm_leaf_t* g = leaf( who );
+        if ( !g || g->m_kind != 8 )
+            return false;
+        ui_remap_t r = ui_remap_of( who, &ui_font_db( 0 ) );
+        tail_of( who, 16, r.m_label_params );
+        tail_of( who, 17, r.m_control_params );
+        r.m_selected = static_cast< std::uint8_t >( g->m_words[ 2 ] );
+        r.m_hover = static_cast< std::int32_t >( g->m_words[ 3 ] );
+        for ( int j = 0; j < 6; ++j )
+            r.m_textures[ j ] = ( j % 2 ? texture_b : texture_a ).m_handle;
+        for ( ui_text_font_t* f : { &r.m_label_font, &r.m_control_font } )
+        {
+            f->m_asset = true;
+            f->m_asset_font = 0x0F0E0D0Cu;
+        }
+        ui_remap_inputs_t ri;
+        ri.m_input = true;
+        ri.m_throttle = who.m_ctor && who.m_ctor->m_vtable == 0x73D45Cu;
+        ri.m_lookup = [ g ]( int, std::int32_t, const std::string&, std::int32_t& type, std::int32_t& index )
+        {
+            type = static_cast< std::int32_t >( g->m_words[ 0 ] );
+            index = static_cast< std::int32_t >( g->m_words[ 1 ] );
+        };
+        ri.m_axis_name = []( std::int32_t index ) { return std::string( g_golden_frw_axes[ index ] ); };
+        ri.m_button_name = []( std::int32_t index ) { return std::string( g_golden_frw_buttons[ index ] ); };
+        ri.m_string = say;
+        ri.m_string_literal = []( const char* id ) { return std::string( id ) + "~"; };
+        ri.m_missing = [ ] { return std::string( "#missing#" ); };
+        ++live;
+        return ui_remap_draw( into, env, in.m_db, r, ri, alpha );
+    };
+    in.m_champ = [ &, say ]( const entity_t& who, ui_gfx_sort_t& into, const ui_font_draw_env_t& env, float ) -> bool
+    {
+        const golden_frm_leaf_t* g = leaf( who );
+        if ( !g || g->m_kind != 9 )
+            return false;
+        static const value_t doc = c_reader( ui_unhex( g_golden_frm_champ_doc ) ).parse( );
+        static const value_t boats = c_reader( ui_unhex( g_golden_frm_champ_boats ) ).parse( );
+        ui_champ_t c = ui_champ_of( who, &ui_font_db( 0 ) );
+        ui_results_font_t* const fonts[ 4 ] = { &c.m_place_font, &c.m_points_font, &c.m_name_font, &c.m_boat_font };
+        for ( int f = 0; f < 4; ++f )
+        {
+            tail_of( who, 18 + f, fonts[ f ]->m_params );
+            fonts[ f ]->m_font = 0x0F0E0D0Cu;
+        }
+        c.m_table.m_active_rows = 3;
+        c.m_table.m_size = 16;
+        c.m_table.m_capacity = 16;
+        c.m_table.m_pads.assign( 16, -1 );
+        ui_champ_inputs_t ci;
+        ci.m_rows = &member( doc, "rows" );
+        ci.m_boatdb = &boats;
+        ci.m_string = say;
+        ++live;
+        return ui_champ_draw( into, env, c, ci );
+    };
+}
+
 // ui_screen_frame WITH inputs (the export's records) against retail's screen
 // draw 0x629D60 run with the text / image / button leaf draws live (oracle case
 // screen_frame) on every Screens/* root under two environments: the sort's new
@@ -1233,7 +1345,7 @@ inline bool verify_ui_screen_frame_records( )
         b.m_memory.resize( static_cast< std::size_t >( b.m_capacity ) );
     const ui_texture_t texture_a = { g_golden_frm_textures[ 0 ].m_handle, g_golden_frm_textures[ 0 ].m_width, g_golden_frm_textures[ 0 ].m_height };
     const ui_texture_t texture_b = { g_golden_frm_textures[ 1 ].m_handle, g_golden_frm_textures[ 1 ].m_width, g_golden_frm_textures[ 1 ].m_height };
-    int failed = 0, runs = 0, commands = 0, stubs = 0, emitted = 0, live = 0, boards = 0;
+    int failed = 0, runs = 0, commands = 0, stubs = 0, emitted = 0, live = 0, boards = 0, live_wired = 0;
     const value_t option_db = ui_cx_document( 4 );
     for ( std::size_t r = 0; r < g_golden_frm_runs_count; ++r )
     {
@@ -1351,6 +1463,8 @@ inline bool verify_ui_screen_frame_records( )
             }
             else if ( g.m_kind == 6 )
                 state_same = state_same && ui_frame_kind_of( who ) == ui_frame_kind_t::board;
+            else if ( g.m_kind >= 7 )
+                state_same = state_same && ui_frame_kind_of( who ) == ( g.m_kind == 7 ? ui_frame_kind_t::page : g.m_kind == 8 ? ui_frame_kind_t::remap : ui_frame_kind_t::champ );
             else
             {
                 ui_config_entity_t& ce = configs[ k ];
@@ -1547,6 +1661,11 @@ inline bool verify_ui_screen_frame_records( )
             ++boards;
             return true;
         };
+        // Batch 28: the page layouts / remapping rows / championship table live (retail's 0x62E120 / 0x45FB90 / 0x451CA0 in
+        // the case): OUR loaded fields (wired.hxx), the page's elements by OUR load over the real PageLayoutDB; the scroll,
+        // the +0xD0 total, the row's binding and selection and the standings are the case's inputs; params 41..59 retail's.
+        int measured = 0;
+        wired_mirror( in, impl, tail_of, leaf, measured, run, texture_a, texture_b, live_wired );
         float alpha;
         std::memcpy( &alpha, &fe.m_alpha, 4 );
         sort.m_index = e.m_index;
@@ -1590,9 +1709,9 @@ inline bool verify_ui_screen_frame_records( )
     if ( failed == 0 )
         LOG_SUCCESS( "ui_screen_frame's records (the export with inputs) match retail's screen draw 0x629D60 with the text / image / button / Info / "
                      "config / combo box / stat / bar draws live on %d runs over the Screens/* roots: %d leaf draws emitted (%d of them Info / config / "
-                     "combo / stat / bar / leaderboard, their state checked; %d full / mini leaderboard draws 0x47A360 / 0x47DB40), %d commands and "
-                     "records byte for byte, %d unrecreated leaves in order",
-            runs, emitted, live, boards, commands, stubs );
+                     "combo / stat / bar / leaderboard, their state checked; %d full / mini leaderboard draws 0x47A360 / 0x47DB40; %d page layout / remapping / "
+                     "championship draws 0x62E120 / 0x45FB90 / 0x451CA0), %d commands and records byte for byte, %d unrecreated leaves in order",
+            runs, emitted, live, boards, live_wired, commands, stubs );
     else
         LOG_ERROR( "the screen frame's records FAILED %d checks against retail's", failed );
     return failed == 0;

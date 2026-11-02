@@ -60,7 +60,10 @@ enum class ui_frame_kind_t
     difficulty_text,   // VuDifficultyTextEntity: 0x4077E3 -> slot 12 0x45AA30 (difficulty.hxx; needs m_difficulty)
     board,             // VuUIMiniLeaderboardEntity: 0x47DB40 (board.hxx c_ui_mini_board::draw over its runtime FSM; needs m_board)
     leaderboard,       // VuUILeaderboardEntity: 0x47A360 (ladder.hxx ui_leaderboard_draw over its runtime state; needs m_leaderboard)
-    message_box        // VuMessageBoxScreenEntity: 0x4675A0 (message.hxx: the box, then its children walked like a container's; needs m_message_box)
+    message_box,       // VuMessageBoxScreenEntity: 0x4675A0 (message.hxx: the box, then its children walked like a container's; needs m_message_box)
+    page,              // VuUIPageLayoutEntity: 0x62E120 (pages.hxx ui_page_layout_draw over its runtime page; needs m_page)
+    remap,             // VuInputRemappingEntity / VuThrottleRemappingEntity: 0x45FB90 (remap.hxx ui_remap_draw; needs m_remap)
+    champ              // VuChampionshipEntity: 0x451CA0 (champ.hxx ui_champ_draw over the standings; needs m_champ)
 };
 
 struct ui_draw_target_t
@@ -76,7 +79,7 @@ struct ui_draw_target_t
 // loaded entity's FIRST VuUIDrawComponent's delegate: vtable, slot 2 0x404A00 /
 // 0x422000, member pointer).
 inline const ui_draw_target_t k_ui_draw_targets[ ] = {
-    { 0x006F72C4u, 0x0062E120u, 0x0062E120u, ui_frame_kind_t::other, 0x00000000u },   // Screens/Credits (3 loaded)
+    { 0x006F72C4u, 0x0062E120u, 0x0062E120u, ui_frame_kind_t::page, 0x00000000u },   // Screens/Credits (3 loaded)
     { 0x006F737Cu, 0x00627040u, 0x00627C60u, ui_frame_kind_t::text, 0x00443920u },   // Screens/Cheats (1 loaded)
     { 0x006F7434u, 0x00627040u, 0x00627C60u, ui_frame_kind_t::text, 0x00446DE0u },   // HUDs/GhostGameHUD (253 loaded)
     { 0x006F7484u, 0x004077DEu, 0x004401C0u, ui_frame_kind_t::image, 0x00000000u },   // HUDs/GhostGameHUD (311 loaded)
@@ -112,7 +115,7 @@ inline const ui_draw_target_t k_ui_draw_targets[ ] = {
     { 0x0073C32Cu, 0x00627040u, 0x00627C60u, ui_frame_kind_t::text, 0x00446DE0u },   // Screens/Award (2 loaded)
     { 0x0073C69Cu, 0x004077E8u, 0x00448F40u, ui_frame_kind_t::config, 0x00000000u },   // Screens/BoatConfig (5 loaded)
     { 0x0073C808u, 0x0044FB60u, 0x0044FB60u, ui_frame_kind_t::stat, 0x00000000u },   // Screens/BoatConfig (20 loaded)
-    { 0x0073C998u, 0x00451CA0u, 0x00451CA0u, ui_frame_kind_t::other, 0x00000000u },   // Screens/Championship (1 loaded)
+    { 0x0073C998u, 0x00451CA0u, 0x00451CA0u, ui_frame_kind_t::champ, 0x00000000u },   // Screens/Championship (1 loaded)
     { 0x0073CC34u, 0x00627040u, 0x00627C60u, ui_frame_kind_t::text, 0x00443920u },   // Screens/SinglePlayer (1 loaded)
     { 0x0073CC74u, 0x00627040u, 0x00627C60u, ui_frame_kind_t::text, 0x00443920u },   // Screens/SinglePlayer (1 loaded)
     { 0x0073CCB4u, 0x00627040u, 0x00627C60u, ui_frame_kind_t::text, 0x00443920u },   // Screens/SinglePlayer (1 loaded)
@@ -120,8 +123,8 @@ inline const ui_draw_target_t k_ui_draw_targets[ ] = {
     { 0x0073CE3Cu, 0x004077E3u, 0x0045AF40u, ui_frame_kind_t::difficulty_image, 0x00000000u },   // Screens/BoatConfig (11 loaded)
     { 0x0073CE74u, 0x004077E3u, 0x0045AA30u, ui_frame_kind_t::difficulty_text, 0x00000000u },   // Screens/BoatConfig (11 loaded)
     { 0x0073D1DCu, 0x004077E8u, 0x00448F40u, ui_frame_kind_t::config, 0x00000000u },   // Screens/GameConfigChampionship (5 loaded)
-    { 0x0073D45Cu, 0x0045FB90u, 0x0045FB90u, ui_frame_kind_t::other, 0x00000000u },   // Screens/ControlsGamepad (2 loaded)
-    { 0x0073D4F4u, 0x0045FB90u, 0x0045FB90u, ui_frame_kind_t::other, 0x00000000u },   // Screens/ControlsGamepad (14 loaded)
+    { 0x0073D45Cu, 0x0045FB90u, 0x0045FB90u, ui_frame_kind_t::remap, 0x00000000u },   // Screens/ControlsGamepad (2 loaded)
+    { 0x0073D4F4u, 0x0045FB90u, 0x0045FB90u, ui_frame_kind_t::remap, 0x00000000u },   // Screens/ControlsGamepad (14 loaded)
     { 0x0073D724u, 0x004632E0u, 0x004632E0u, ui_frame_kind_t::bar, 0x00000000u },   // Screens/LoadingChamp (7 loaded)
     { 0x0073D8E4u, 0x004675A0u, 0x004675A0u, ui_frame_kind_t::message_box, 0x00000000u },   // Screens/MessageBox (1 loaded)
     { 0x0073DA38u, 0x0046A500u, 0x0046A500u, ui_frame_kind_t::other, 0x00000000u },   // Screens/RaceResults (2 loaded)
@@ -239,6 +242,12 @@ struct ui_frame_inputs_t
     // Batch 27: the message box's runtime state (message.hxx: the enabled bytes, texts, fonts, +0x528..+0x588) and its textures,
     // over the fields the frame takes from the loaded properties (ui_message_box_of). false: unrecreated.
     std::function< bool( const entity_t&, ui_message_box_t&, ui_message_box_inputs_t& ) > m_message_box;
+    // Batch 28: the page layout / remapping row / championship table over their runtime objects (wired.hxx builds
+    // the loaded fields, c_ui_binding owns the runtime): run the draw into `sort` with the leaf's environment; false =
+    // it reached a path not recreated. Null: unrecreated.
+    std::function< bool( const entity_t&, ui_gfx_sort_t&, const ui_font_draw_env_t&, float alpha ) > m_page;
+    std::function< bool( const entity_t&, ui_gfx_sort_t&, const ui_font_draw_env_t&, float alpha ) > m_remap;
+    std::function< bool( const entity_t&, ui_gfx_sort_t&, const ui_font_draw_env_t&, float alpha ) > m_champ;
 };
 
 // A loaded entity's own / its first UI draw component's property bits.
@@ -494,6 +503,12 @@ inline bool ui_frame_emit( ui_gfx_sort_t& sort, const ui_impl_t& impl, const ui_
         return in.m_board( e, sort, env );
     if ( d.m_kind == ui_frame_kind_t::leaderboard )
         return in.m_leaderboard( e, sort, env );
+    if ( d.m_kind == ui_frame_kind_t::page )
+        return in.m_page( e, sort, env, d.m_alpha );
+    if ( d.m_kind == ui_frame_kind_t::remap )
+        return in.m_remap( e, sort, env, d.m_alpha );
+    if ( d.m_kind == ui_frame_kind_t::champ )
+        return in.m_champ( e, sort, env, d.m_alpha );
     return true;
 }
 
@@ -524,6 +539,12 @@ inline bool ui_frame_ready( ui_frame_kind_t kind, const ui_frame_inputs_t* in )
         return in && in->m_leaderboard;
     case ui_frame_kind_t::message_box:
         return in && in->m_message_box;
+    case ui_frame_kind_t::page:
+        return in && in->m_page;
+    case ui_frame_kind_t::remap:
+        return in && in->m_remap;
+    case ui_frame_kind_t::champ:
+        return in && in->m_champ;
     default:
         return true;
     }
