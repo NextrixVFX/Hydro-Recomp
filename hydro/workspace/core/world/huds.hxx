@@ -60,14 +60,14 @@ inline void c_world::load_huds( const char* const* k_names )   // the game ctor'
                 const int index = p;
                 // The world-owned inputs: VuMultiDelayEntity "In" 0x5E0660 (the world's clock); VuAudioEventEntity Start /
                 // Stop (the audio device - a platform hook).
-                hooks.m_external = [ this, index, prefix ]( entity_t& e, const char* plug, const ui_params_t& ) {
+                hooks.m_external = [ this, index, prefix ]( entity_t& e, const char* plug, const ui_params_t& params ) {
                     hud_project_t& hp = m_huds[ index ];
                     const auto at = hp.ui_trail.find( &e );
                     const auto clock = at != hp.ui_trail.end( ) ? m_multi_delays.find( prefix + at->second ) : m_multi_delays.end( );
                     if ( clock != m_multi_delays.end( ) && std::strcmp( plug, "In" ) == 0 )
                         multi_delay_in( clock->second.state );
                     else
-                        race_unwired( m_race, std::string( "the race HUD's external input " ) + e.m_type + " . " + plug + " (audio: a platform hook) - not run" );
+                        return screen_external( m_game_screen_state, hp.ui->binding( ), e, plug, params );
                     return ui_ret_t{ };
                 };
                 hooks.m_broadcast_out = [ this, index ]( std::uint32_t hash, const ui_params_t& bp ) {

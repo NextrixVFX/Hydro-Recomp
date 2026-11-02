@@ -70,6 +70,7 @@ inline void c_world::action_exit( )
     m_pause_root.reset( );
     if ( m_race.active )
         race_session_end( m_race );
+    m_game_screen_state = screen_state_t{ };
     m_action.reset( );
 }
 
