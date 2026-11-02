@@ -14,8 +14,7 @@
 // Boosts (37 on Hydroelectric), triggers (3), hidden packages (10; slots 6 0x43DD20, 13 0x43DE20, 15 0x43DE80, on game/packages.hxx's
 // manager: with the saves off no document answers, so they are not made live). Hooks answered here:
 //   an entity id (0x500D50, FNV-1a of the long name) is the boat's index + 1: SUBSTITUTION, the map's key only;
-//   the ApplyPfx (0x52BAC0 + the spring constraint: read to 0x43C02D, tools tmp/b38/d_43BDB0.txt) and the StaticPfx's scale (vt+0x10: no slot
-//   in boat_pfx_ops_t) are logged, not run; gameRelease 0x43BCA0 is not run (the session's teardown drops the bodies).
+//   the ApplyPfx (0x52BAC0 + the spring constraint: read to 0x43C02D, tools tmp/b38/d_43BDB0.txt) is logged, not run; gameRelease 0x43BCA0 is not run (the session's teardown drops the bodies).
 
 // 0x43C700: a btSphereShape (vtable 0x73ADD4: type 8, +0x10 scaling (1, 1, 1, 0), +0x20 and +0x30 the radius), mass 0, the
 // entity's world, group 0x20, mask 0x10 (the boats), +0xD8 |= 4, +0x2C4 the +0x5C part (a marker word here).
@@ -63,6 +62,8 @@ inline powerup_world_hooks_t race_powerup_world_hooks( race_session_t& s, race_s
         const std::uint32_t handle = pfx_manager_handle( m, e );
         const int x = handle ? pfx_manager_lookup( m, handle ) : -1;
         const transform_component_t* t = entity_transform( *u.entity );
+        if ( t )
+            LOG_VERBOSE( "power-up: %s StaticPfx %s handle 0x%X at %.1f %.1f %.1f", u.entity->m_name.c_str( ), name.c_str( ), handle, t->world[ 12 ], t->world[ 13 ], t->world[ 14 ] );
         if ( x >= 0 && t )
         {
             const boat_pfx_ops_t o = boat_pfx_runtime_ops( *s.world.pfx );
@@ -176,6 +177,14 @@ inline void race_powerup_tick( void* user, float dt )
             if ( s.world.fire )
                 s.world.fire( *u.entity, "OnTrigger" );
         } );
+    };
+    // The handle +0x110's instance, slot 4 setScale (the manager's table; a released handle: nothing).
+    h.pfx_scale = [ &s ]( std::uint32_t handle, float scale ) {
+        if ( !s.world.pfx || !s.world.pfx_manager || !handle )
+            return;
+        const int x = pfx_manager_lookup( *s.world.pfx_manager, handle );
+        if ( x >= 0 )
+            pfx_instance_set_scale( s.world.pfx->heap, s.world.pfx_manager->entries[ static_cast< std::size_t >( x ) ].instance, scale );
     };
     h.apply_pfx = [ &s ]( void* ) { race_unwired( s, "a power-up's ApplyPfx (0x52BAC0 + VuPfxBoatSpringConstraint) - not run" ); };
     h.driver_38 = [ ]( void* ) { return true; };   // 0x404BD0 in all five driver vtables
