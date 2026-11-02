@@ -19,7 +19,9 @@
 #include <workspace/core/world/drawing.hxx>
 #include <workspace/core/world/gfxsort.hxx>
 #include <workspace/core/world/meshes.hxx>
+#include <workspace/core/world/livery.hxx>
 #include <workspace/core/world/settings.hxx>
+#include <workspace/core/world/skeleton.hxx>
 
 #include <cmath>
 #include <cstdint>
@@ -37,6 +39,23 @@ struct gfx_retail_model_t
     scene_t m_scene;
     std::vector< std::uint8_t > m_blob;
     gfx_scene_view_t m_view;
+    std::vector< std::uint32_t > m_program_ids, m_layout_ids;   // per shader: what a skin's material is made on
+    bool m_animated = false;
+};
+
+// A material list a skin made (0x421490's result, instance +8): the shader's index to the material.
+struct gfx_retail_map_t final : gfx_material_map_t
+{
+    std::map< std::uint32_t, std::uint32_t > m_ids;
+    std::uint32_t map( std::uint32_t name ) override { return m_ids.at( name ); }
+};
+
+// One boat's three instances (+0x2A4, +0x2A8, +0x2AC).
+struct gfx_retail_boat_t
+{
+    gfx_animated_model_t m_high, m_middle;
+    gfx_static_model_t m_low;
+    gfx_retail_map_t m_maps[ 3 ];
 };
 
 struct gfx_retail_t
@@ -55,6 +74,10 @@ struct gfx_retail_t
         m_backend.m_callbacks[ k_gfx_cb_model ] = colour( k_gfx_pass_colour );
         m_backend.m_callbacks[ k_gfx_cb_model_back ] = colour( k_gfx_pass_prepass );
         m_backend.m_callbacks[ k_gfx_cb_model_front ] = colour( k_gfx_pass_equal );
+        const auto skinned = [ this ]( gfx_model_pass_t pass ) { return [ this, pass ]( std::uint8_t* r ) { skin_record( r, pass ); }; };
+        m_backend.m_callbacks[ k_gfx_cb_skin ] = skinned( k_gfx_pass_colour );
+        m_backend.m_callbacks[ k_gfx_cb_skin_back ] = skinned( k_gfx_pass_prepass );
+        m_backend.m_callbacks[ k_gfx_cb_skin_front ] = skinned( k_gfx_pass_equal );
         // 0x5EBFF0 (the sky's record: the matrix, the part at +0x40): only the matrix constant, then the draw.
         m_backend.m_callbacks[ k_gfx_cb_sky ] = [ this ]( std::uint8_t* r )
         {
@@ -96,6 +119,7 @@ struct gfx_retail_t
     light_manager_t m_lights;
     gfx_camera_t m_camera;
     int m_passes = 0;
+    std::vector< const float* > m_palettes;   // this pass's skinned draws
 
     // A VuCubeTextureAsset's object (0x5AE140). A substitution (VuSubstituteAssetEntity) changes the object in place: `m_cube_name` answers the resolved name, frame( ) follows it.
     gfx_texture_object_t* cube_object( const std::string& name )
@@ -165,23 +189,30 @@ struct gfx_retail_t
         return id;
     }
 
-    // The asset's load 0x542C30: the scene (assets/scene.hxx), then the device half of 0x5C1560: per shader 0x5929B0's tail, per chunk 0x618160's. Null: the pack has no such model.
-    const gfx_scene_view_t* model( const std::string& asset )
+    // A model's own record, null when the pack has none: the asset's load 0x542C30 (static) or 0x5A83E0 (animated, its scene with no roots; the skeleton is rig.hxx's), then the device half of 0x5C1560:
+    // per shader 0x5929B0's tail, per chunk 0x618160's.
+    gfx_retail_model_t* record( const std::string& asset )
     {
         const auto found = m_models.find( asset );
         if ( found != m_models.end( ) )
-            return found->second ? &found->second->m_view : nullptr;
+            return found->second.get( );
         auto made = std::make_unique< gfx_retail_model_t >( );
         if ( !m_read( "VuStaticModelAsset/" + asset, made->m_blob ) || !scene_load_static( made->m_blob.data( ), made->m_blob.size( ), made->m_scene ) )
         {
-            m_models.emplace( asset, nullptr );
-            return nullptr;
+            skel_model_asset_t animated;
+            if ( !m_read( "VuAnimatedModelAsset/" + asset, made->m_blob ) || !skel_model_asset_load( made->m_blob.data( ), made->m_blob.size( ), animated ) )
+            {
+                m_models.emplace( asset, nullptr );
+                return nullptr;
+            }
+            made->m_scene = std::move( animated.scene );
+            made->m_animated = true;
         }
         gfx_retail_model_t& m = *made;
         gfx_scene_view_build( m.m_view, m.m_scene, m.m_blob.data( ) );
         std::vector< const gfx_model_shader_t* > shaders( m.m_scene.shaders.size( ) );
         for ( std::size_t i = 0; i < m.m_scene.shaders.size( ); ++i )
-            shaders[ i ] = shader( m.m_scene.shaders[ i ], m.m_blob.data( ), m.m_view.m_rows[ i ] );
+            shaders[ i ] = shader( m, m.m_scene.shaders[ i ], m.m_blob.data( ), m.m_view.m_rows[ i ] );
         std::vector< std::uint32_t > chunks( m.m_scene.chunks.size( ) );
         for ( std::size_t i = 0; i < m.m_scene.chunks.size( ); ++i )
             chunks[ i ] = chunk( m.m_scene.chunks[ i ], m.m_blob.data( ) );
@@ -199,11 +230,47 @@ struct gfx_retail_t
                 out.m_triangles = part.triangles;
                 p.m_id = static_cast< std::uint32_t >( m_parts.size( ) );
             }
-        return &m_models.emplace( asset, std::move( made ) ).first->second->m_view;
+        return m_models.emplace( asset, std::move( made ) ).first->second.get( );
+    }
+
+    const gfx_scene_view_t* model( const std::string& asset )
+    {
+        const gfx_retail_model_t* m = record( asset );
+        return m ? &m->m_view : nullptr;
+    }
+
+    static void table_desc( const scene_table_t& t, gfx_material_desc_t& desc )
+    {
+        for ( const scene_constant_t& c : t.constants )
+        {
+            gfx_material_desc_t::constant_t k;
+            k.m_name = c.name;
+            k.m_kind = c.type;
+            std::memcpy( k.m_value, c.value, sizeof( k.m_value ) );
+            desc.m_constants.push_back( k );
+        }
+        for ( const scene_texture_t& t2 : t.textures )
+        {
+            gfx_material_desc_t::texture_t k;
+            k.m_name = t2.name;
+            k.m_slot = t2.slot;
+            k.m_kind = t2.value;
+            k.m_asset = t2.asset;
+            desc.m_textures.push_back( k );
+        }
+    }
+
+    // A skin's material of shader `s` (0x421490): the same program and declaration, the skinned desc, 0x53A440.
+    std::uint32_t skinned_material( const gfx_retail_model_t& m, std::size_t s, const scene_table_t& table )
+    {
+        gfx_material_desc_t desc;
+        table_desc( table, desc );
+        const gfx_material_t* material = m_sort.material_create( m.m_program_ids[ s ], m.m_layout_ids[ s ], desc );
+        return id_of( material, [ & ] { return m_backend.add_material( material ); } );
     }
 
     // 0x5AC0C0, 0x540E00, 0x541290 + 0x5414C0 into the desc, 0x53A440, then 0x593C00's constants.
-    const gfx_model_shader_t* shader( const scene_shader_t& s, const std::uint8_t* blob, gfx_scene_material_t& row )
+    const gfx_model_shader_t* shader( gfx_retail_model_t& model, const scene_shader_t& s, const std::uint8_t* blob, gfx_scene_material_t& row )
     {
         gfx_program_t* program = m_programs.load( blob + s.program.at );
         std::vector< gfx_vertex_element_t > elements( s.elements.size( ) );
@@ -217,26 +284,12 @@ struct gfx_retail_t
         }
         gfx_declaration_t* declaration = m_declarations.create( elements, *program );
         gfx_material_desc_t desc;
-        for ( const scene_constant_t& c : s.tables[ 0 ].constants )
-        {
-            gfx_material_desc_t::constant_t k;
-            k.m_name = c.name;
-            k.m_kind = c.type;
-            std::memcpy( k.m_value, c.value, sizeof( k.m_value ) );
-            desc.m_constants.push_back( k );
-        }
-        for ( const scene_texture_t& t : s.tables[ 0 ].textures )
-        {
-            gfx_material_desc_t::texture_t k;
-            k.m_name = t.name;
-            k.m_slot = t.slot;
-            k.m_kind = t.value;
-            k.m_asset = t.asset;
-            desc.m_textures.push_back( k );
-        }
+        table_desc( s.tables[ 0 ], desc );
         const std::uint32_t program_id = id_of( program, [ & ] { return m_backend.add_program( program ); } );
         const gfx_handle_t layout = declaration->m_layout;
         const std::uint32_t layout_id = id_of( declaration, [ & ] { return m_backend.add_layout( layout ); } );
+        model.m_program_ids.push_back( program_id );
+        model.m_layout_ids.push_back( layout_id );
         const gfx_material_t* material = m_sort.material_create( program_id, layout_id, desc );
         row.m_material = row.m_depth_material = row.m_shadow_material = id_of( material, [ & ] { return m_backend.add_material( material ); } );
         m_shaders.emplace_back( );
@@ -275,6 +328,30 @@ struct gfx_retail_t
         r.m_part = &m_parts[ id - 1u ];
         r.m_lit = record[ 0x4C ];
         gfx_model_draw( m_device, r, pass, false, []( float* block ) { std::memset( block, 0, 81 * 4 ); } );
+    }
+
+    // 0x533C90 0x533D40 0x533E30: the 0x58-byte record, +0x4C the bone count, +0x50 the palette (here m_palettes' index + 1), +0x54 the lit byte.
+    void skin_record( std::uint8_t* record, gfx_model_pass_t pass )
+    {
+        gfx_model_record_t r;
+        std::memcpy( r.m_matrix, record, 64 );
+        std::memcpy( r.m_colour, record + 0x40, 4 );
+        std::memcpy( &r.m_word, record + 0x44, 4 );
+        std::uint32_t id, bones;
+        std::memcpy( &id, record + 0x48, 4 );
+        std::memcpy( &r.m_palette_count, record + 0x4C, 4 );
+        std::memcpy( &bones, record + 0x50, 4 );
+        r.m_part = &m_parts[ id - 1u ];
+        r.m_palette = m_palettes[ bones - 1u ];
+        r.m_lit = record[ 0x54 ];
+        gfx_model_draw( m_device, r, pass, true, []( float* block ) { std::memset( block, 0, 81 * 4 ); } );
+    }
+
+    // The instance's current palette (+0x1C + 4 x +0x28) as a record word.
+    std::uint32_t palette_id( const float* palette )
+    {
+        m_palettes.push_back( palette );
+        return static_cast< std::uint32_t >( m_palettes.size( ) );
     }
 
     // The settings record's fields the walk reads (0x7596E0: +8 / +0xC the fog range, +0x10 the colour), the far plane, the frame time: once a game frame.
@@ -346,6 +423,7 @@ struct gfx_retail_t
         m_device.clip_plane( clip );
         m_sort.set_layer( 1u );
         m_sort.set_screen( 8u );
+        m_palettes.clear( );
         if ( m_sky != nullptr && ( !reflecting || m_sky_reflect ) )
             gfx_sky_draw( m_sort, m_eye, m_sky );
         m_draw( m_sort, p );
