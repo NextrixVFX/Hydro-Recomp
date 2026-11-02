@@ -177,6 +177,7 @@
     <ClInclude Include="workspace\core\ui\chooser.hxx" />
     <ClInclude Include="workspace\core\ui\combo.hxx" />
     <ClInclude Include="workspace\core\ui\common.hxx" />
+    <ClInclude Include="workspace\core\ui\completion.hxx" />
     <ClInclude Include="workspace\core\ui\compose.hxx" />
     <ClInclude Include="workspace\core\ui\config.hxx" />
     <ClInclude Include="workspace\core\ui\controls.hxx" />
@@ -187,6 +188,7 @@
     <ClInclude Include="workspace\core\ui\expand.hxx" />
     <ClInclude Include="workspace\core\ui\fade.hxx" />
     <ClInclude Include="workspace\core\ui\flow.hxx" />
+    <ClInclude Include="workspace\core\ui\footer.hxx" />
     <ClInclude Include="workspace\core\ui\frame.hxx" />
     <ClInclude Include="workspace\core\ui\fsm.hxx" />
     <ClInclude Include="workspace\core\ui\gauge.hxx" />
