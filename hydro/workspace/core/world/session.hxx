@@ -136,9 +136,8 @@ struct race_session_boat_t
 // - viewports: g_vuviewportmanager 0x759060 +4 - VuActionGameMode's enter
 //   0x4B9630 calls 0x530BB0(1) before its load, and 0x530BB0 stores min(n, 4)
 //   (cmovl) at +4: 1 for the race;
-// - control_method: g_vucontrolmethodmanager 0x758FC0 +0x18 - the input
-//   layer's answer (a PLATFORM HOOK: ours answers 0, the gamepad method, as
-//   the front end's ui flow does);
+// - control_method: g_vucontrolmethodmanager 0x758FC0 +0x18 - c_input_device's
+//   answer, written each "Input" phase (race_input_tick; retail starts at 1);
 // - display_w / _h: g_vumetrod3d11gfx vt+0x40, the display size (PLATFORM).
 // - water_tick: VuWater's "Water" tick 0x529E30 (c_world's water_built_tick +
 //   the view rebuilt), run by the race tick manager's "Water" phase.
@@ -412,9 +411,18 @@ struct race_session_t
     bool game_answer = true;   // VuGame's tick 0x482F10's answer, last frame (false: the game is done - Run's 0x4BAB50 reads it)
     int rules_frames = 0;
     // THE TEST INPUT (ours, flagged - not retail): --input-script's per-frame pad states (world/drive.hxx race_input_script_t),
-    // answered by the platform input hook in place of the device; null: the device (game/input.hxx read_input). rames: the
-    // session frames run (race_session_frame), the script's clock.
+    // answered by the platform input hook in place of the device; null: the device (input below). frames: the session frames
+    // run (race_session_frame), the script's clock.
     std::shared_ptr< struct race_input_script_t > input_script;
+    // The input retail reads (game/input.hxx): the managers on InputDB's document, which `input_db` keeps alive. Made here at
+    // the session's start, not by the engine's init 0x566230 (ours: no input exists outside a race yet). Null: InputDB did not
+    // load; the hooks answer 0.
+    value_t input_db;
+    std::shared_ptr< platform_input_t > input;
+    // Ours (a test driver): --keys "FRAME:KEY:0|1,..." presses retail key indices (input_key_index's names) on the device at
+    // session frames, so the keyboard path through the managers runs without touching the desktop.
+    struct key_script_t { int frame; int key; bool down; };
+    std::vector< key_script_t > key_script;
     int frames = 0;
 };
 
@@ -1973,6 +1981,28 @@ inline void race_session_dev_trace( const race_session_t& s, int before )
 }
 
 // The transform watcher's 0x536350 (the instigator update, trigger/volume.hxx) for a boat of the session.
+// The "Input" phase: the device's, the manager's and the control method's ticks (c_input_device::tick), `real_dt` = the tick
+// manager's unscaled frame time; then g 0x758FC0 +0x18 where the session reads it. A loaded --input-script keeps method 0,
+// the method its keys were written for (ours: the device still ticks, so the UI's "Select" stays live).
+inline void race_input_tick( void* user, float dt )
+{
+    race_session_t& s = *static_cast< race_session_t* >( user );
+    for ( const race_session_t::key_script_t& k : s.key_script )
+        if ( k.frame == s.frames )
+        {
+            if ( k.down )
+                s.input->device.key_down( k.key );
+            else
+                s.input->device.key_up( k.key );
+            LOG_INFO( "race: --keys frame %d key %d %s", k.frame, k.key, k.down ? "down" : "up" );
+        }
+    platform_input_tick( *s.input, dt, s.ticks.raw );
+    const std::int32_t method = s.input_script ? 0 : s.input->device.control_method( );
+    if ( method != s.world.control_method )
+        LOG_INFO( "race: control method %d -> %d (frame %d)", s.world.control_method, method, s.frames );
+    s.world.control_method = method;
+}
+
 inline boat_transform_hooks_t race_session_transform_hooks( race_session_boat_t& b )
 {
     boat_transform_hooks_t h;
@@ -2776,6 +2806,18 @@ inline bool race_session_start( race_session_t& s, const std::string& mode, cons
                      s.stopped_transform );
     // The tick manager (ctor 0x4F6F60, slot 5 0x4F7050) and the AI manager's tick.
     tick_manager_init( s.ticks );
+    {
+        std::vector< std::uint8_t > bytes;
+        if ( archive.read( "VuDBAsset/InputDB", bytes ) )
+        {
+            s.input_db = c_reader( bytes ).parse( );
+            s.input = std::make_shared< platform_input_t >( );
+            platform_input_init( *s.input, s.input_db );
+            tick_register( s.ticks, { s.input.get( ), race_input_tick, &s }, "Input" );
+        }
+        else
+            LOG_WARNING( "race: VuDBAsset/InputDB not in the pack - the human's input answers 0 (UNKNOWN)" );
+    }
     // VuEventManager's init slot 5 0x5055C0: its Decision tick 0x505950 - the engine init 0x566230 makes and inits it
     // (0x5663DD) before every system with a Decision tick (world/bus.hxx).
     tick_register( s.ticks, { &s.bus, race_bus_tick, &s.bus }, "Decision" );

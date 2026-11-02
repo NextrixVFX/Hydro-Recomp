@@ -56,11 +56,9 @@
 //   (trigger/volume.hxx) and the respawn's 0x534C00(0) (no children: nothing).
 //   PLATFORM HOOKS (not copied - BRIEF): FMOD (every get_event answers false:
 //   no event is made, so no audio calls follow), the stats / voice-over
-//   service g 0x758FEC, the gamepad rumble, the accelerometer, the input
-//   device (pad 0's named channels answered from game/input.hxx's
-//   read_input: Throttle = the right trigger / W, Brake = the left trigger /
-//   S, Steering = the left stick / A-D, Boost = the right shoulder / shift;
-//   Jump and Recover have no binding: 0), the display size.
+//   service g 0x758FEC, the gamepad rumble, the accelerometer, the display
+//   size. The input is game/input.hxx's platform_input_t: the recreated
+//   managers over XInput and the keyboard.
 //   RUN ON THE RACE'S DYNAMICS WORLD (world/dynamics.hxx, world/session.hxx
 //   race_session_enable): slots 17 / 18 0x421980 / 0x421940 (boat_enable /
 //   boat_disable) - the body into the world, the +0x60 interface onto its step
@@ -172,10 +170,31 @@ inline input_t race_input_script_at( const race_input_script_t& s, int frame )
     return pad;
 }
 
-// The platform input hook's answer: the script when one is loaded, else the device.
-inline input_t race_drive_pad( const race_session_t& s )
+// The platform input hooks' answers (VuInputManagerImpl slots 6 / 8 / 9 on pad 0): the script's channels when one is loaded,
+// else the manager. A channel the script has no column for answers 0 with a script.
+inline float race_drive_axis( const race_session_t& s, std::int32_t pad, const char* name )
 {
-    return s.input_script ? race_input_script_at( *s.input_script, s.frames ) : read_input( );
+    if ( s.input_script )
+    {
+        const input_t in = race_input_script_at( *s.input_script, s.frames );
+        return std::strcmp( name, "Throttle" ) == 0 ? in.throttle : std::strcmp( name, "Brake" ) == 0 ? in.brake
+               : std::strcmp( name, "Steering" ) == 0 ? in.steer : 0.0f;
+    }
+    return s.input ? s.input->manager.value( pad, name ) : 0.0f;
+}
+
+inline std::uint8_t race_drive_held( const race_session_t& s, std::int32_t pad, const char* name )
+{
+    if ( s.input_script )
+        return std::strcmp( name, "Boost" ) == 0 && race_input_script_at( *s.input_script, s.frames ).boost ? 1 : 0;
+    return s.input && s.input->manager.held( pad, name ) ? 1 : 0;
+}
+
+inline std::uint8_t race_drive_pressed( const race_session_t& s, std::int32_t pad, const char* name )
+{
+    if ( s.input_script )
+        return 0;
+    return s.input && s.input->manager.pressed( pad, name ) ? 1 : 0;
 }
 
 // g 0x759058's first surface's +0xD8 (boat_decision_t::floor). VuWater +0x20
@@ -565,20 +584,9 @@ inline void race_drive_setup( race_session_t& s, const value_t* constant_db )
         hd.tick.animation = d.animation;
         hd.env.control_method = s.world.control_method;
         hd.hooks.user = &s;
-        hd.hooks.axis = []( void* u, std::int32_t, const char* name ) -> float {
-            const input_t in = race_drive_pad( *static_cast< const race_session_t* >( u ) );
-            if ( std::strcmp( name, "Throttle" ) == 0 )
-                return in.throttle;
-            if ( std::strcmp( name, "Brake" ) == 0 )
-                return in.brake;
-            if ( std::strcmp( name, "Steering" ) == 0 )
-                return in.steer;
-            return 0.0f;
-        };
-        hd.hooks.held = []( void* u, std::int32_t, const char* name ) -> std::uint8_t {
-            return std::strcmp( name, "Boost" ) == 0 && race_drive_pad( *static_cast< const race_session_t* >( u ) ).boost ? 1 : 0;
-        };
-        hd.hooks.pressed = []( void*, std::int32_t, const char* ) -> std::uint8_t { return 0; };
+        hd.hooks.axis = []( void* u, std::int32_t pad, const char* name ) -> float { return race_drive_axis( *static_cast< const race_session_t* >( u ), pad, name ); };
+        hd.hooks.held = []( void* u, std::int32_t pad, const char* name ) -> std::uint8_t { return race_drive_held( *static_cast< const race_session_t* >( u ), pad, name ); };
+        hd.hooks.pressed = []( void* u, std::int32_t pad, const char* name ) -> std::uint8_t { return race_drive_pressed( *static_cast< const race_session_t* >( u ), pad, name ); };
         hd.hooks.misfire = []( void* u ) { race_unwired( *static_cast< race_session_t* >( u ), "audio: the BoostMisfire sound 0x41E060 (FMOD - platform)" ); };
         // vt+0x1C (boat, line) from the human's decision: these hooks carry the session, not the boat - the human list's
         // only entry is the boat (a second human: UNKNOWN, logged).

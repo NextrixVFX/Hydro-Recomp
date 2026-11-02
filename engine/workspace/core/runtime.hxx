@@ -142,11 +142,16 @@ int c_engine::run( const char* title )
     if ( g_bench( ).active( ) )
         swap.vsync( false );
 
+    // Ours (a test driver): --exit-after N ends the run after N frames, so the real window path can be run unattended.
+    const char* exit_after = c_engine::option( "exit-after" );
+    long frames = 0;
     while ( window.pump( ) )
     {
         g_draw( ).tick( );
         swap.present( );
         if ( !g_bench( ).step( ) )
+            break;
+        if ( exit_after && ++frames >= std::atol( exit_after ) )
             break;
     }
 

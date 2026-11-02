@@ -12,6 +12,9 @@
 
 // First-chance handler for fatal SEH. Continues the search so the process
 // still dies, after the record is on stderr and crash.log beside the exe.
+// Ours, a diagnostic (no retail counterpart). Each record opens with the local
+// time, the build (the exe's link stamp, its file time and size: with them a
+// module offset below names one exe) and the command line.
 class c_crash
 {
 public:
@@ -104,6 +107,37 @@ private:
         CloseHandle( log );
     }
 
+    // The record's first lines. No heap: this runs inside the exception.
+    static void header( ) noexcept
+    {
+        SYSTEMTIME now{};
+        GetLocalTime( &now );
+        char line[ 512 ]{};
+        std::snprintf( line, sizeof( line ), "=== %04u-%02u-%02u %02u:%02u:%02u\r\n", now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond );
+        emit( line );
+
+        char path[ MAX_PATH ]{};
+        GetModuleFileNameA( nullptr, path, MAX_PATH );
+        const auto* base = reinterpret_cast< const unsigned char* >( GetModuleHandleA( nullptr ) );
+        const auto* dos = reinterpret_cast< const IMAGE_DOS_HEADER* >( base );
+        const auto* nt = reinterpret_cast< const IMAGE_NT_HEADERS* >( base + dos->e_lfanew );
+        WIN32_FILE_ATTRIBUTE_DATA file{};
+        SYSTEMTIME written{};
+        if ( GetFileAttributesExA( path, GetFileExInfoStandard, &file ) )
+        {
+            FILETIME local{};
+            FileTimeToLocalFileTime( &file.ftLastWriteTime, &local );
+            FileTimeToSystemTime( &local, &written );
+        }
+        std::snprintf( line, sizeof( line ), "    build %s stamp 0x%08lx written %04u-%02u-%02u %02u:%02u:%02u size %lu\r\n", path,
+                       nt->FileHeader.TimeDateStamp, written.wYear, written.wMonth, written.wDay, written.wHour, written.wMinute, written.wSecond, file.nFileSizeLow );
+        emit( line );
+
+        emit( "    command " );
+        emit( GetCommandLineA( ) );
+        emit( "\r\n" );
+    }
+
     static void module_of( const void* address, char* out, std::size_t out_size ) noexcept
     {
         if ( out_size == 0 )
@@ -138,6 +172,8 @@ private:
         static volatile LONG busy = 0;
         if ( InterlockedCompareExchange( &busy, 1, 0 ) != 0 )
             return EXCEPTION_CONTINUE_SEARCH;
+
+        header( );
 
         char where[ 160 ]{};
         module_of( record->ExceptionAddress, where, sizeof( where ) );

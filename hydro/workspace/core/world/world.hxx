@@ -1119,6 +1119,17 @@ public:
             else
                 LOG_ERROR( "race: --input-script %s did not load (no keys) - the device answers", script );
         }
+        if ( const char* keys = c_engine::option( "keys" ) )
+        {
+            std::istringstream list( keys );
+            std::string one;
+            while ( std::getline( list, one, ',' ) )
+            {
+                const std::size_t a = one.find( ':' ), b = one.rfind( ':' );
+                if ( a != std::string::npos && b > a )
+                    m_race.key_script.push_back( { std::atoi( one.c_str( ) ), input_key_index( one.substr( a + 1, b - a - 1 ).c_str( ) ), one[ b + 1 ] == '1' } );
+            }
+        }
         // The queries' view of VuWater as the load left it: the race's first frame reads VuWater (DynamicsSync,
         // Decision) before its first "Water" phase rebuilds the view.
         water_view_build( m_water, m_water_view );
