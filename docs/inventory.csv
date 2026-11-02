@@ -1547,7 +1547,7 @@ address,size,ida_name,classes,vtable_slots,subsystem,status,cited_in,thunk,libra
 0x46D1B0,125,sub_46D1B0,,,audio (by address),verified,hydro/workspace/core/game/types.hxx,False,False,game
 0x46D230,6,sub_46D230,VuDisplayScaleSettingsEntity,VuDisplayScaleSettingsEntity+1,rendering / gfx,absent,,False,False,game
 0x46D240,60,sub_46D240,VuDisplayScaleSettingsEntity,VuDisplayScaleSettingsEntity+12,rendering / gfx,verified,hydro/workspace/core/ui/slider.hxx,False,False,game
-0x46D280,52,sub_46D280,VuDisplayScaleSettingsEntity,VuDisplayScaleSettingsEntity+13,rendering / gfx,cited,hydro/workspace/core/ui/slider.hxx,False,False,game
+0x46D280,52,sub_46D280,VuDisplayScaleSettingsEntity,VuDisplayScaleSettingsEntity+13,rendering / gfx,cited,hydro/workspace/core/ui/slider.hxx; hydro/workspace/core/world/stage.hxx,False,False,game
 0x46D2C0,125,sub_46D2C0,,,rendering / gfx (by address),verified,hydro/workspace/core/game/types.hxx,False,False,game
 0x46D340,6,sub_46D340,VuUIUnitsSettingEntity,VuUIUnitsSettingEntity+1,HUD / UI / fonts,absent,,False,False,game
 0x46D350,132,sub_46D350,,,HUD / UI / fonts (by address),verified,hydro/workspace/core/game/types.hxx,False,False,game
@@ -5856,7 +5856,7 @@ address,size,ida_name,classes,vtable_slots,subsystem,status,cited_in,thunk,libra
 0x558AC0,309,sub_558AC0,,,rendering / gfx (by address),verified,hydro/workspace/core/world/composer.hxx; hydro/workspace/core/world/foliage.hxx; hydro/workspace/core/world/world.hxx; hydro/workspace/utility/checks/device.hxx,False,False,game
 0x558C00,918,sub_558C00,,,rendering / gfx (by address),verified,engine/workspace/core/render/target.hxx; hydro/workspace/core/world/composer.hxx; hydro/workspace/core/world/foliage.hxx; hydro/workspace/core/world/saves.hxx; hydro/workspace/core/world/stage.hxx; hydro/workspace/core/world/surface.hxx; hydro/workspace/core/world/waterpass.hxx; hydro/workspace/core/world/world.hxx; hydro/workspace/utility/checks/device.hxx,False,False,game
 0x558FA0,341,sub_558FA0,,,rendering / gfx (by address),verified,hydro/workspace/core/world/composer.hxx,False,False,game
-0x559100,461,sub_559100,,,unattributed,verified,hydro/workspace/core/world/composer.hxx; hydro/workspace/utility/checks/device.hxx,False,False,game
+0x559100,461,sub_559100,,,unattributed,verified,hydro/workspace/core/world/composer.hxx; hydro/workspace/core/world/stage.hxx; hydro/workspace/utility/checks/device.hxx,False,False,game
 0x5592D0,152,sub_5592D0,,,unattributed,verified,hydro/workspace/core/world/composer.hxx,False,False,game
 0x559370,1737,sub_559370,,,unattributed,absent,,False,False,game
 0x559A40,267,sub_559A40,,,unattributed,verified,hydro/workspace/core/ui/glyphs.hxx; hydro/workspace/utility/checks/widgets.hxx,False,False,race

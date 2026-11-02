@@ -681,6 +681,9 @@
     <ClInclude Include="workspace\core\world\tree.hxx">
       <Filter>workspace\core\world</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\core\world\video.hxx">
+      <Filter>workspace\core\world</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\core\world\voice.hxx">
       <Filter>workspace\core\world</Filter>
     </ClInclude>
