@@ -332,6 +332,12 @@
     <ClInclude Include="workspace\core\render\device.hxx">
       <Filter>workspace\core\render</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\core\render\direct.hxx">
+      <Filter>workspace\core\render</Filter>
+    </ClInclude>
+    <ClInclude Include="workspace\core\render\gfx.hxx">
+      <Filter>workspace\core\render</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\core\render\mesh.hxx">
       <Filter>workspace\core\render</Filter>
     </ClInclude>

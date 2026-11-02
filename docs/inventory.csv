@@ -4905,7 +4905,7 @@ address,size,ida_name,classes,vtable_slots,subsystem,status,cited_in,thunk,libra
 0x512780,162,sub_512780,,,unattributed,callee,,False,False,race
 0x512830,146,sub_512830,,,unattributed,callee,,False,False,race
 0x5128D0,148,sub_5128D0,,,unattributed,callee,,False,False,race
-0x512970,144,sub_512970,,,unattributed,callee,,False,False,race
+0x512970,144,sub_512970,,,unattributed,verified,engine/workspace/core/render/gfx.hxx,False,False,race
 0x512A00,66,sub_512A00,,,unattributed,callee,,False,False,race
 0x512A50,238,sub_512A50,,,unattributed,callee,,False,False,race
 0x512B40,66,sub_512B40,,,unattributed,callee,,False,False,race
@@ -5503,22 +5503,22 @@ address,size,ida_name,classes,vtable_slots,subsystem,status,cited_in,thunk,libra
 0x540330,4,sub_540330,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+27; VuD3d11Gfx+27,rendering / gfx,absent,,False,False,race
 0x540340,4,sub_540340,VuD3d11Gfx; VuMetroD3d11Gfx; VuUIImpl,VuUIImpl+9; VuMetroD3d11Gfx+29; VuD3d11Gfx+29,HUD / UI / fonts,absent,,False,False,race
 0x540350,97,sub_540350,,,HUD / UI / fonts (by address),absent,,False,False,game
-0x5403C0,136,sub_5403C0,,,HUD / UI / fonts (by address),absent,,False,False,game
-0x540450,74,sub_540450,,,HUD / UI / fonts (by address),absent,,False,False,game
+0x5403C0,136,sub_5403C0,,,HUD / UI / fonts (by address),callee,,False,False,game
+0x540450,74,sub_540450,,,HUD / UI / fonts (by address),verified,engine/workspace/core/render/gfx.hxx,False,False,game
 0x5404A0,40,sub_5404A0,VuMetroD3d11Gfx,VuMetroD3d11Gfx+0,rendering / gfx,absent,,False,False,game
 0x5404D0,133,sub_5404D0,,,rendering / gfx (by address),absent,,False,False,race
 0x540560,622,sub_540560,VuMetroD3d11Gfx,VuMetroD3d11Gfx+5,rendering / gfx,absent,,False,False,game
 0x5407D0,132,sub_5407D0,VuMetroD3d11Gfx,VuMetroD3d11Gfx+3,rendering / gfx,absent,,False,False,game
 0x540860,17,sub_540860,VuMetroD3d11Gfx,VuMetroD3d11Gfx+12,rendering / gfx,absent,,False,False,game
 0x540880,11,sub_540880,VuMetroD3d11Gfx,VuMetroD3d11Gfx+13,rendering / gfx,absent,,False,False,game
-0x540890,307,sub_540890,VuMetroD3d11Gfx,VuMetroD3d11Gfx+15,rendering / gfx,absent,,False,False,game
-0x5409D0,29,sub_5409D0,VuMetroD3d11Gfx,VuMetroD3d11Gfx+16,rendering / gfx,absent,,False,False,game
-0x5409F0,149,sub_5409F0,VuMetroD3d11Gfx,VuMetroD3d11Gfx+18,rendering / gfx,absent,,False,False,game
-0x540A90,23,sub_540A90,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+22; VuD3d11Gfx+22,rendering / gfx,absent,,False,False,race
-0x540AB0,20,sub_540AB0,VuMetroD3d11Gfx,VuMetroD3d11Gfx+23,rendering / gfx,absent,,False,False,game
-0x540AD0,76,sub_540AD0,VuMetroD3d11Gfx,VuMetroD3d11Gfx+35,rendering / gfx,absent,,False,False,game
-0x540B20,47,sub_540B20,VuMetroD3d11Gfx,VuMetroD3d11Gfx+36,rendering / gfx,absent,,False,False,game
-0x540B50,255,sub_540B50,VuMetroD3d11Gfx,VuMetroD3d11Gfx+45,rendering / gfx,absent,,False,False,game
+0x540890,307,sub_540890,VuMetroD3d11Gfx,VuMetroD3d11Gfx+15,rendering / gfx,verified,engine/workspace/core/render/gfx.hxx,False,False,game
+0x5409D0,29,sub_5409D0,VuMetroD3d11Gfx,VuMetroD3d11Gfx+16,rendering / gfx,verified,engine/workspace/core/render/gfx.hxx,False,False,game
+0x5409F0,149,sub_5409F0,VuMetroD3d11Gfx,VuMetroD3d11Gfx+18,rendering / gfx,verified,engine/workspace/core/render/gfx.hxx,False,False,game
+0x540A90,23,sub_540A90,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+22; VuD3d11Gfx+22,rendering / gfx,verified,engine/workspace/core/render/gfx.hxx,False,False,race
+0x540AB0,20,sub_540AB0,VuMetroD3d11Gfx,VuMetroD3d11Gfx+23,rendering / gfx,verified,engine/workspace/core/render/gfx.hxx,False,False,game
+0x540AD0,76,sub_540AD0,VuMetroD3d11Gfx,VuMetroD3d11Gfx+35,rendering / gfx,verified,engine/workspace/core/render/gfx.hxx,False,False,game
+0x540B20,47,sub_540B20,VuMetroD3d11Gfx,VuMetroD3d11Gfx+36,rendering / gfx,verified,engine/workspace/core/render/gfx.hxx,False,False,game
+0x540B50,255,sub_540B50,VuMetroD3d11Gfx,VuMetroD3d11Gfx+45,rendering / gfx,verified,engine/workspace/core/render/gfx.hxx,False,False,game
 0x540C50,40,sub_540C50,VuMetroD3d11Gfx,VuMetroD3d11Gfx+53,rendering / gfx,absent,,False,False,game
 0x540C80,76,sub_540C80,,,rendering / gfx (by address),absent,,False,False,dead
 0x540CD0,152,sub_540CD0,VuD3d11VertexDeclaration,VuD3d11VertexDeclaration+0,engine core / math / containers,absent,,False,False,race
@@ -6787,37 +6787,37 @@ address,size,ida_name,classes,vtable_slots,subsystem,status,cited_in,thunk,libra
 0x5AC7A0,76,sub_5AC7A0,,,rendering / gfx (by address),absent,,False,False,race
 0x5AC7F0,183,sub_5AC7F0,,,rendering / gfx (by address),verified,hydro/workspace/core/assets/scene.hxx; hydro/workspace/core/world/query.hxx,False,False,race
 0x5AC8B0,5,sub_5AC8B0,VuD3d11Gfx,VuD3d11Gfx+5,rendering / gfx,absent,,False,False,race
-0x5AC8C0,332,sub_5AC8C0,,,rendering / gfx (by address),cited,hydro/workspace/core/world/entities.hxx,False,False,game
+0x5AC8C0,332,sub_5AC8C0,,,rendering / gfx (by address),verified,engine/workspace/core/render/gfx.hxx; hydro/workspace/core/world/entities.hxx,False,False,game
 0x5ACA10,34,sub_5ACA10,VuD3d11Gfx,VuD3d11Gfx+0,rendering / gfx,absent,,False,False,race
-0x5ACA40,156,sub_5ACA40,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+54; VuD3d11Gfx+54,rendering / gfx,absent,,False,False,race
-0x5ACAE0,288,sub_5ACAE0,VuD3d11Gfx,VuD3d11Gfx+3,rendering / gfx,absent,,False,False,race
-0x5ACC00,23,sub_5ACC00,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+17; VuD3d11Gfx+17,rendering / gfx,absent,,False,False,race
-0x5ACC20,237,sub_5ACC20,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+26; VuD3d11Gfx+26,rendering / gfx,absent,,False,False,race
-0x5ACD10,165,sub_5ACD10,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+28; VuD3d11Gfx+28,rendering / gfx,absent,,False,False,race
-0x5ACDC0,233,sub_5ACDC0,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+30; VuD3d11Gfx+30,rendering / gfx,absent,,False,False,race
-0x5ACEB0,101,sub_5ACEB0,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+33; VuD3d11Gfx+33,rendering / gfx,absent,,False,False,race
-0x5ACF20,24,sub_5ACF20,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+34; VuD3d11Gfx+34,rendering / gfx,absent,,False,False,race
-0x5ACF40,17,sub_5ACF40,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+37; VuD3d11Gfx+37,rendering / gfx,absent,,False,False,race
-0x5ACF60,17,sub_5ACF60,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+38; VuD3d11Gfx+38,rendering / gfx,absent,,False,False,race
-0x5ACF80,17,sub_5ACF80,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+39; VuD3d11Gfx+39,rendering / gfx,absent,,False,False,race
-0x5ACFA0,23,sub_5ACFA0,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+40; VuD3d11Gfx+40,rendering / gfx,absent,,False,False,race
-0x5ACFC0,32,sub_5ACFC0,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+41; VuD3d11Gfx+41,rendering / gfx,absent,,False,False,race
-0x5ACFE0,23,sub_5ACFE0,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+42; VuD3d11Gfx+42,rendering / gfx,absent,,False,False,race
-0x5AD000,23,sub_5AD000,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+43; VuD3d11Gfx+43,rendering / gfx,cited,hydro/workspace/core/world/pfxclass.hxx,False,False,race
-0x5AD020,23,sub_5AD020,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+44; VuD3d11Gfx+44,rendering / gfx,absent,,False,False,race
-0x5AD040,115,sub_5AD040,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+46; VuD3d11Gfx+46,rendering / gfx,absent,,False,False,race
-0x5AD0C0,142,sub_5AD0C0,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+47; VuD3d11Gfx+47,rendering / gfx,absent,,False,False,race
-0x5AD150,258,sub_5AD150,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+48; VuD3d11Gfx+48,rendering / gfx,absent,,False,False,race
-0x5AD260,400,sub_5AD260,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+49; VuD3d11Gfx+49,rendering / gfx,absent,,False,False,race
-0x5AD3F0,1013,sub_5AD3F0,,,rendering / gfx (by address),absent,,False,False,race
-0x5AD7F0,205,sub_5AD7F0,,,rendering / gfx (by address),absent,,False,False,game
-0x5AD8C0,137,sub_5AD8C0,,,rendering / gfx (by address),verified,hydro/workspace/core/world/race.hxx; hydro/workspace/core/world/watchers.hxx,False,False,race
-0x5AD950,158,sub_5AD950,,,rendering / gfx (by address),absent,,False,False,race
-0x5AD9F0,143,sub_5AD9F0,,,rendering / gfx (by address),callee,,False,False,race
-0x5ADA80,146,sub_5ADA80,,,unattributed,absent,,False,False,race
-0x5ADB20,143,sub_5ADB20,,,unattributed,callee,,False,False,race
-0x5ADBB0,47,sub_5ADBB0,,,unattributed,callee,,False,False,race
-0x5ADBE0,311,sub_5ADBE0,,,unattributed,absent,,False,False,race
+0x5ACA40,156,sub_5ACA40,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+54; VuD3d11Gfx+54,rendering / gfx,verified,engine/workspace/core/render/gfx.hxx,False,False,race
+0x5ACAE0,288,sub_5ACAE0,VuD3d11Gfx,VuD3d11Gfx+3,rendering / gfx,verified,engine/workspace/core/render/gfx.hxx,False,False,race
+0x5ACC00,23,sub_5ACC00,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+17; VuD3d11Gfx+17,rendering / gfx,verified,engine/workspace/core/render/gfx.hxx,False,False,race
+0x5ACC20,237,sub_5ACC20,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+26; VuD3d11Gfx+26,rendering / gfx,verified,engine/workspace/core/render/gfx.hxx,False,False,race
+0x5ACD10,165,sub_5ACD10,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+28; VuD3d11Gfx+28,rendering / gfx,verified,engine/workspace/core/render/gfx.hxx,False,False,race
+0x5ACDC0,233,sub_5ACDC0,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+30; VuD3d11Gfx+30,rendering / gfx,verified,engine/workspace/core/render/gfx.hxx,False,False,race
+0x5ACEB0,101,sub_5ACEB0,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+33; VuD3d11Gfx+33,rendering / gfx,verified,engine/workspace/core/render/gfx.hxx,False,False,race
+0x5ACF20,24,sub_5ACF20,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+34; VuD3d11Gfx+34,rendering / gfx,verified,engine/workspace/core/render/gfx.hxx,False,False,race
+0x5ACF40,17,sub_5ACF40,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+37; VuD3d11Gfx+37,rendering / gfx,verified,engine/workspace/core/render/gfx.hxx,False,False,race
+0x5ACF60,17,sub_5ACF60,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+38; VuD3d11Gfx+38,rendering / gfx,verified,engine/workspace/core/render/gfx.hxx,False,False,race
+0x5ACF80,17,sub_5ACF80,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+39; VuD3d11Gfx+39,rendering / gfx,verified,engine/workspace/core/render/gfx.hxx,False,False,race
+0x5ACFA0,23,sub_5ACFA0,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+40; VuD3d11Gfx+40,rendering / gfx,verified,engine/workspace/core/render/gfx.hxx,False,False,race
+0x5ACFC0,32,sub_5ACFC0,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+41; VuD3d11Gfx+41,rendering / gfx,verified,engine/workspace/core/render/gfx.hxx,False,False,race
+0x5ACFE0,23,sub_5ACFE0,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+42; VuD3d11Gfx+42,rendering / gfx,verified,engine/workspace/core/render/gfx.hxx,False,False,race
+0x5AD000,23,sub_5AD000,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+43; VuD3d11Gfx+43,rendering / gfx,verified,engine/workspace/core/render/gfx.hxx; hydro/workspace/core/world/pfxclass.hxx,False,False,race
+0x5AD020,23,sub_5AD020,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+44; VuD3d11Gfx+44,rendering / gfx,verified,engine/workspace/core/render/gfx.hxx,False,False,race
+0x5AD040,115,sub_5AD040,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+46; VuD3d11Gfx+46,rendering / gfx,verified,engine/workspace/core/render/gfx.hxx,False,False,race
+0x5AD0C0,142,sub_5AD0C0,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+47; VuD3d11Gfx+47,rendering / gfx,verified,engine/workspace/core/render/gfx.hxx,False,False,race
+0x5AD150,258,sub_5AD150,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+48; VuD3d11Gfx+48,rendering / gfx,verified,engine/workspace/core/render/gfx.hxx,False,False,race
+0x5AD260,400,sub_5AD260,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+49; VuD3d11Gfx+49,rendering / gfx,verified,engine/workspace/core/render/gfx.hxx,False,False,race
+0x5AD3F0,1013,sub_5AD3F0,,,rendering / gfx (by address),verified,engine/workspace/core/render/gfx.hxx; hydro/workspace/utility/checks/device.hxx,False,False,race
+0x5AD7F0,205,sub_5AD7F0,,,rendering / gfx (by address),verified,engine/workspace/core/render/gfx.hxx,False,False,game
+0x5AD8C0,137,sub_5AD8C0,,,rendering / gfx (by address),verified,engine/workspace/core/render/gfx.hxx; hydro/workspace/core/world/race.hxx; hydro/workspace/core/world/watchers.hxx,False,False,race
+0x5AD950,158,sub_5AD950,,,rendering / gfx (by address),verified,engine/workspace/core/render/gfx.hxx,False,False,race
+0x5AD9F0,143,sub_5AD9F0,,,rendering / gfx (by address),verified,engine/workspace/core/render/gfx.hxx,False,False,race
+0x5ADA80,146,sub_5ADA80,,,unattributed,verified,engine/workspace/core/render/gfx.hxx,False,False,race
+0x5ADB20,143,sub_5ADB20,,,unattributed,verified,engine/workspace/core/render/gfx.hxx,False,False,race
+0x5ADBB0,47,sub_5ADBB0,,,unattributed,verified,engine/workspace/core/render/gfx.hxx,False,False,race
+0x5ADBE0,311,sub_5ADBE0,,,unattributed,verified,engine/workspace/core/render/gfx.hxx,False,False,race
 0x5ADD20,113,sub_5ADD20,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+1; VuD3d11Gfx+1,rendering / gfx,absent,,False,False,race
 0x5ADDA0,187,sub_5ADDA0,,,rendering / gfx (by address),cited,hydro/workspace/core/world/wavemap.hxx,False,False,race
 0x5ADE60,6,sub_5ADE60,VuCubeTextureAsset,VuCubeTextureAsset+0,HUD / UI / fonts,verified,engine/workspace/core/assets/rtti.hxx,False,False,race

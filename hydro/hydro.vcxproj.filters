@@ -573,6 +573,9 @@
     <ClInclude Include="workspace\utility\checks\boat.hxx">
       <Filter>workspace\utility\checks</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\utility\checks\device.hxx">
+      <Filter>workspace\utility\checks</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\utility\checks\game.hxx">
       <Filter>workspace\utility\checks</Filter>
     </ClInclude>

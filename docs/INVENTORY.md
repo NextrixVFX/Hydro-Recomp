@@ -18,10 +18,10 @@ Subsystems come from the RTTI class whose vtable holds the function (1253 classe
 
 | | functions | bytes of code |
 |---|---:|---:|
-| verified | 3223 | 1108075 |
-| callee | 724 | 158416 |
-| cited | 588 | 187230 |
-| absent | 4103 | 772539 |
+| verified | 3262 | 1114014 |
+| callee | 721 | 158075 |
+| cited | 586 | 186875 |
+| absent | 4069 | 767296 |
 | **all** | **8638** | **2226260** |
 
 ## By subsystem
@@ -30,12 +30,12 @@ Sorted by code size. Counts are functions; the last column is the share of that 
 
 | subsystem | functions | verified | callee | cited | absent | verified bytes |
 |---|---:|---:|---:|---:|---:|---:|
-| unattributed | 1845 | 719 | 272 | 153 | 701 | 366330 of 695394 |
+| unattributed | 1845 | 724 | 269 | 153 | 699 | 367121 of 695394 |
 | physics (Bullet) | 646 | 445 | 17 | 47 | 137 | 128786 of 256657 |
 | entity / component / script framework | 1094 | 513 | 119 | 57 | 405 | 116506 of 207438 |
-| HUD / UI / fonts | 648 | 245 | 74 | 44 | 285 | 93438 of 184315 |
+| HUD / UI / fonts | 648 | 246 | 75 | 44 | 283 | 93512 of 184315 |
 | game modes / race | 766 | 180 | 42 | 67 | 477 | 92635 of 179957 |
-| rendering / gfx | 552 | 181 | 37 | 54 | 280 | 54584 of 126915 |
+| rendering / gfx | 552 | 214 | 36 | 52 | 250 | 59658 of 126915 |
 | water | 325 | 213 | 29 | 38 | 45 | 61251 of 96416 |
 | boat | 264 | 198 | 22 | 20 | 24 | 71290 of 87400 |
 | engine core / math / containers | 391 | 68 | 11 | 27 | 285 | 17153 of 76072 |
@@ -58,8 +58,8 @@ Over-approximate (a referenced vtable brings every slot) and under-approximate (
 
 | tier | functions | verified | callee | cited | absent | runtime / STL / thunk | platform layer | game + engine logic not verified |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| race | 4905 | 2579 | 517 | 464 | 1345 | 68 | 610 | 1895 |
-| game | 2431 | 642 | 206 | 122 | 1461 | 77 | 313 | 1444 |
+| race | 4905 | 2608 | 513 | 463 | 1321 | 68 | 610 | 1890 |
+| game | 2431 | 652 | 207 | 121 | 1451 | 77 | 313 | 1443 |
 | service | 452 | 0 | 0 | 0 | 452 | 45 | 98 | 309 |
 | dead | 850 | 2 | 1 | 2 | 845 | 61 | 126 | 661 |
 
