@@ -584,6 +584,16 @@ private:
     c_cloud_save m_cloud;                               // g 0x758FA0
     value_t m_hidden_db;                                // VuHiddenPackageManagerImpl +4's document
     c_hidden_packages m_hidden;                         // g 0x758FD0
+    settings_t m_settings;                              // g 0x758FE0
+    ui_settings_platform_t m_settings_platform;
+    settings_hooks_t m_settings_hooks;
+    cloud_profile_t m_cloud_profile;                    // g 0x7590FC's profile half
+    c_unlock_manager m_unlock;                          // g 0x758FE8
+    value_t m_unlock_db;
+    value_t m_champ_db;
+    ui_champ_env_t m_champ_env;
+    void settings_start( );
+    void unlock_bind( );
     // The game modes (world/mode.hxx, menu.hxx).
     friend class c_menu_mode;
     friend class c_title_mode;
@@ -1234,6 +1244,7 @@ public:
             else
                 LOG_ERROR( "race: --input-script %s did not load (no keys) - the device answers", script );
         }
+        m_race.autopilot = c_engine::option( "autopilot" ) != nullptr;
         if ( const char* keys = c_engine::option( "keys" ) )
         {
             std::istringstream list( keys );

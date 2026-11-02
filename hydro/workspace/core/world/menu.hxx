@@ -93,6 +93,9 @@ inline ui_bind_hooks_t c_world::menu_hooks( )
         return ui_ret_t{ };
     };
     hooks.m_input = [ this ]( int pad, const char* name ) { return m_menu_input && m_menu_input->manager.pressed( pad, name ); };
+    hooks.m_settings = &m_settings.ui;
+    hooks.m_settings_platform = &m_settings_platform;
+    hooks.m_champ = &m_champ_env;
     return hooks;
 }
 

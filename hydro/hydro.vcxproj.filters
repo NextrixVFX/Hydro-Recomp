@@ -363,6 +363,9 @@
     <ClInclude Include="workspace\core\world\attach.hxx">
       <Filter>workspace\core\world</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\core\world\autopilot.hxx">
+      <Filter>workspace\core\world</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\core\world\awards.hxx">
       <Filter>workspace\core\world</Filter>
     </ClInclude>

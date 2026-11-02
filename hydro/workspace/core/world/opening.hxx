@@ -398,11 +398,13 @@ inline bool race_session_start( race_session_t& s, const std::string& mode, cons
         if ( s.world.save_doc )
             ui_progress_boat_used( *s.world.save_doc, boat );
     };
-    s.rules.screen_hooks.award.unlock_value = [ ]( std::uint32_t, const std::string&, std::int32_t ) { return 0; };
-    s.rules.screen_hooks.award.unlock_show = [ ]( std::int32_t, const std::vector< std::string >& ) { return false; };
-    s.rules.screen_hooks.award.award_open = [ &s ]( const char*, std::int32_t, const std::string&, std::int32_t, const std::vector< std::string >& ) {
-        race_unwired( s, "the award screen 0x47ECC0 (UI) - not built" );
-        return false;
+    // THE POINT FOR c_unlock_manager::reward( ) (slots 6 .. 11, agent/boat d5289ec, not on this tree): no credits until then.
+    s.rules.screen_hooks.award.unlock_value = [ &s ]( std::uint32_t, const std::string&, std::int32_t ) {
+        race_unwired( s, "the unlock manager's reward slot 0x4B60B0 .. - not on this tree: no credits (UNKNOWN)" );
+        return 0;
+    };
+    s.rules.screen_hooks.award.unlock_show = [ &s ]( std::int32_t value, const std::vector< std::string >& names ) {   // vt+0x58 0x4B66E0
+        return s.world.unlock && s.world.unlock->unlock_count_for( value, names ) != 0;
     };
     s.rules.championship = s.game.championship;
     s.rules.screen_hooks.award_boat = [ &s ] {

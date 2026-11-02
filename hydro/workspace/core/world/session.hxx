@@ -7,6 +7,8 @@
 #include <workspace/core/world/ghost.hxx>
 #include <workspace/core/world/ghostgame.hxx>
 #include <workspace/core/game/packages.hxx>
+#include <workspace/core/game/settings.hxx>
+#include <workspace/core/ui/award.hxx>
 #include <workspace/core/world/tiretrack.hxx>
 #include <workspace/core/world/pause.hxx>
 #include <workspace/core/boat/construct.hxx>
@@ -195,6 +197,8 @@ struct race_world_t
     // The game save (VuCloudSaveManager +0x20, c_world's; null: saves off) and the hidden package manager g 0x758FD0; 0x4ABD60; the input manager's profile load.
     value_t* save_doc = nullptr;
     c_hidden_packages* hidden = nullptr;
+    const settings_t* settings = nullptr;     // g 0x758FE0
+    c_unlock_manager* unlock = nullptr;       // g 0x758FE8
     std::function< void( ) > save_game;
     std::function< void( platform_input_t& ) > input_profile;
     std::uint32_t viewports = 1;
@@ -430,6 +434,7 @@ struct race_session_t
     // answered by the platform input hook in place of the device; null: the device (input below). frames: the session frames
     // run (race_session_frame), the script's clock.
     std::shared_ptr< struct race_input_script_t > input_script;
+    bool autopilot = false;   // --autopilot (world/autopilot.hxx)
     // The input retail reads (game/input.hxx): the managers on InputDB's document, which `input_db` keeps alive. Made here at
     // the session's start, not by the engine's init 0x566230 (ours: no input exists outside a race yet). Null: InputDB did not
     // load; the hooks answer 0.
@@ -2715,4 +2720,5 @@ inline void race_session_boat_events( race_session_t& s )
 }
 
 #include <workspace/core/world/ghostplay.hxx>
+#include <workspace/core/world/autopilot.hxx>
 #include <workspace/core/world/opening.hxx>

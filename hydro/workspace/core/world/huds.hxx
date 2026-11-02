@@ -316,6 +316,12 @@ inline void c_world::bind_game_screens( )
     m_race.rules.screen_hooks.screen = [ this ]( int screen, int verb, float dt ) {
         if ( screen == 0 )
             m_race.screens.screen( verb, dt );
+        else
+            m_race.screens.award_screen( verb, dt );
+    };
+    m_race.rules.screen_hooks.award_done = [ this ] { return m_race.screens.award_done( ); };
+    m_race.rules.screen_hooks.award.award_open = [ this ]( const char* project, std::int32_t tier, const std::string& boat_class, std::int32_t value, const std::vector< std::string >& names ) {
+        return m_race.screens.award_open( project, tier, boat_class, value, names );
     };
     m_race.rules.screen_hooks.paused = [ ] { return false; };
 #if HYDRO_UI_PASS

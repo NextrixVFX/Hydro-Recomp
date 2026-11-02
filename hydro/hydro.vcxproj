@@ -213,6 +213,7 @@
     <ClInclude Include="workspace\core\world\action.hxx" />
     <ClInclude Include="workspace\core\world\animate.hxx" />
     <ClInclude Include="workspace\core\world\attach.hxx" />
+    <ClInclude Include="workspace\core\world\autopilot.hxx" />
     <ClInclude Include="workspace\core\world\awards.hxx" />
     <ClInclude Include="workspace\core\world\backend.hxx" />
     <ClInclude Include="workspace\core\world\background.hxx" />
