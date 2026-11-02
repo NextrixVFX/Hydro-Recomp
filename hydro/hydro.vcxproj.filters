@@ -558,6 +558,9 @@
     <ClInclude Include="workspace\utility\checks\game.hxx">
       <Filter>workspace\utility\checks</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\utility\checks\input.hxx">
+      <Filter>workspace\utility\checks</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\utility\checks\leaves.hxx">
       <Filter>workspace\utility\checks</Filter>
     </ClInclude>

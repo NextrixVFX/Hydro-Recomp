@@ -18,10 +18,10 @@ Subsystems come from the RTTI class whose vtable holds the function (1253 classe
 
 | | functions | bytes of code |
 |---|---:|---:|
-| verified | 3118 | 1084933 |
-| callee | 699 | 155531 |
-| cited | 613 | 193439 |
-| absent | 4208 | 792357 |
+| verified | 3119 | 1085148 |
+| callee | 698 | 155316 |
+| cited | 664 | 204072 |
+| absent | 4157 | 781724 |
 | **all** | **8638** | **2226260** |
 
 ## By subsystem
@@ -30,7 +30,7 @@ Sorted by code size. Counts are functions; the last column is the share of that 
 
 | subsystem | functions | verified | callee | cited | absent | verified bytes |
 |---|---:|---:|---:|---:|---:|---:|
-| unattributed | 1845 | 696 | 255 | 156 | 738 | 360037 of 695394 |
+| unattributed | 1845 | 697 | 254 | 164 | 730 | 360252 of 695394 |
 | physics (Bullet) | 646 | 445 | 17 | 47 | 137 | 128786 of 256657 |
 | entity / component / script framework | 1094 | 490 | 119 | 74 | 411 | 113170 of 207438 |
 | HUD / UI / fonts | 648 | 233 | 74 | 45 | 296 | 89357 of 184315 |
@@ -40,10 +40,10 @@ Sorted by code size. Counts are functions; the last column is the share of that 
 | boat | 264 | 198 | 22 | 20 | 24 | 71290 of 87400 |
 | engine core / math / containers | 391 | 68 | 11 | 27 | 285 | 17153 of 76072 |
 | other classes | 731 | 12 | 3 | 5 | 711 | 6660 of 67698 |
-| assets | 286 | 100 | 25 | 21 | 140 | 13631 of 61239 |
+| assets | 286 | 100 | 25 | 40 | 121 | 13631 of 61239 |
 | particles | 215 | 185 | 5 | 14 | 11 | 39264 of 45495 |
 | audio | 163 | 40 | 20 | 15 | 88 | 6736 of 30823 |
-| input | 156 | 26 | 2 | 9 | 119 | 10320 of 30388 |
+| input | 156 | 26 | 2 | 33 | 95 | 10320 of 30388 |
 | C++ runtime / STL | 227 | 17 | 32 | 3 | 175 | 9615 of 30128 |
 | save / settings / profile | 199 | 1 | 0 | 5 | 193 | 8 of 25714 |
 | AI | 42 | 29 | 3 | 8 | 2 | 8620 of 11304 |
@@ -58,8 +58,8 @@ Over-approximate (a referenced vtable brings every slot) and under-approximate (
 
 | tier | functions | verified | callee | cited | absent | runtime / STL / thunk | platform layer | game + engine logic not verified |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| race | 4905 | 2475 | 492 | 489 | 1449 | 68 | 610 | 1975 |
-| game | 2431 | 641 | 206 | 122 | 1462 | 77 | 313 | 1444 |
+| race | 4905 | 2476 | 491 | 539 | 1399 | 68 | 610 | 1974 |
+| game | 2431 | 641 | 206 | 123 | 1461 | 77 | 313 | 1444 |
 | service | 452 | 0 | 0 | 0 | 452 | 45 | 98 | 309 |
 | dead | 850 | 2 | 1 | 2 | 845 | 61 | 126 | 661 |
 

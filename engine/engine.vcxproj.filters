@@ -25,6 +25,9 @@
     <Filter Include="workspace\core\entity">
       <UniqueIdentifier>{e20204a3-cb37-54f6-9f7e-3de6a02de1dc}</UniqueIdentifier>
     </Filter>
+    <Filter Include="workspace\core\input">
+      <UniqueIdentifier>{48b0c785-d9fb-51a9-8d5f-c8c69d40dfe0}</UniqueIdentifier>
+    </Filter>
     <Filter Include="workspace\core\render">
       <UniqueIdentifier>{a7116a4f-7175-50e6-9128-14b25f7c5da8}</UniqueIdentifier>
     </Filter>
@@ -322,6 +325,9 @@
     </ClInclude>
     <ClInclude Include="workspace\core\entity\values.hxx">
       <Filter>workspace\core\entity</Filter>
+    </ClInclude>
+    <ClInclude Include="workspace\core\input\manager.hxx">
+      <Filter>workspace\core\input</Filter>
     </ClInclude>
     <ClInclude Include="workspace\core\render\device.hxx">
       <Filter>workspace\core\render</Filter>
