@@ -4,6 +4,7 @@
 
 #include <workspace/core/world/attach.hxx>
 #include <workspace/core/world/rig.hxx>
+#include <workspace/core/world/rotate.hxx>
 
 inline std::uint32_t rig_fnv( const void* data, std::size_t size )
 {
@@ -290,10 +291,216 @@ inline bool verify_attach_components( )
     return true;
 }
 
+// Case attach_entity: VuAttachEntity's slot 6 0x5F54F0, slot 7 0x5F5520, plugs 0x5F5550 / 0x5F5690 (resolve 0x5F56D0, finds 0x5F57E0 /
+// 0x5F5810) on fake parents and children: the components' slots in order with their arguments.
+inline bool verify_attach_entity( )
+{
+    const unsigned* g = g_golden_ate_words;
+    std::size_t at = 0;
+    int failed = 0, compared = 0;
+    int vec = 0;
+    auto same = [ & ]( const char* what, std::uint32_t mine, std::uint32_t r ) {
+        ++compared;
+        if ( r != mine )
+        {
+            if ( failed < 8 )
+                LOG_ERROR( "attach_entity vector %d: %s 0x%08X, retail 0x%08X", vec, what, mine, r );
+            ++failed;
+        }
+    };
+    const unsigned vectors = g[ at++ ];
+    struct log_t
+    {
+        std::vector< std::uint32_t > words;
+        std::vector< int > attach, motion;
+        bool has_transform = false;
+    };
+    using hooks_t = attach_entity_hooks_t< const int, const int, const int >;
+    for ( vec = 0; vec < static_cast< int >( vectors ); ++vec )
+    {
+        const unsigned which = g[ at++ ], at_start = g[ at++ ];
+        float position[ 3 ], rotation[ 3 ];
+        std::memcpy( position, g + at, 12 );
+        std::memcpy( rotation, g + at + 3, 12 );
+        at += 6;
+        const unsigned parent_link = g[ at++ ], child_link = g[ at++ ];
+        log_t log;
+        log.has_transform = g[ at++ ] != 0;
+        // The two component lists: count, then per component the chain (count, descriptors).
+        std::vector< std::vector< std::uint32_t > > lists[ 2 ];
+        for ( int side = 0; side < 2; ++side )
+        {
+            const unsigned n = g[ at++ ];
+            for ( unsigned k = 0; k < n; ++k )
+            {
+                const unsigned d = g[ at++ ];
+                lists[ side ].emplace_back( g + at, g + at + d );
+                at += d;
+            }
+        }
+        const unsigned name_size = g[ at++ ];
+        std::string node;
+        for ( unsigned k = 0; k < name_size; ++k )
+            node.push_back( static_cast< char >( g[ at++ ] ) );
+        static const int parent_entity = 0, child_entity = 0;
+        const int a_index = attach_find_component( lists[ 0 ], 0x736E18u ), m_index = attach_find_component( lists[ 1 ], 0x736968u );
+        const int a_slot = a_index, m_slot = m_index;
+        hooks_t h;
+        struct ctx_t
+        {
+            log_t* log;
+            const int* a;
+            const int* m;
+        } ctx{ &log, a_index >= 0 ? &a_slot : nullptr, m_index >= 0 ? &m_slot : nullptr };
+        h.user = &ctx;
+        h.find_attach = []( void* u, const int* ) { return static_cast< ctx_t* >( u )->a; };
+        h.find_motion = []( void* u, const int* ) { return static_cast< ctx_t* >( u )->m; };
+        h.attach = []( void* u, const int* c, const int* m, const float* relative, const std::string& name ) {
+            std::vector< std::uint32_t >& w = static_cast< ctx_t* >( u )->log->words;
+            w.push_back( 12 );
+            w.push_back( static_cast< std::uint32_t >( *c ) );
+            w.push_back( static_cast< std::uint32_t >( *m ) );
+            for ( int k = 0; k < 16; ++k )
+            {
+                std::uint32_t b;
+                std::memcpy( &b, relative + k, 4 );
+                w.push_back( b );
+            }
+            w.push_back( static_cast< std::uint32_t >( name.size( ) ) );
+            for ( char ch : name )
+                w.push_back( static_cast< std::uint8_t >( ch ) );
+        };
+        h.detach = []( void* u, const int* c, const int* m ) {
+            std::vector< std::uint32_t >& w = static_cast< ctx_t* >( u )->log->words;
+            w.push_back( 13 );
+            w.push_back( static_cast< std::uint32_t >( *c ) );
+            w.push_back( static_cast< std::uint32_t >( *m ) );
+        };
+        h.update_from_owner = []( void* u, const int* c ) {
+            ctx_t& x = *static_cast< ctx_t* >( u );
+            if ( !x.log->has_transform )
+                return;
+            x.log->words.push_back( 14 );
+            x.log->words.push_back( static_cast< std::uint32_t >( *c ) );
+            for ( int k = 0; k < 6; ++k )
+                x.log->words.push_back( 0u );
+        };
+        const int* parent = parent_link ? &parent_entity : nullptr;
+        const int* child = child_link ? &child_entity : nullptr;
+        switch ( which )
+        {
+        case 0:   // slot 6 0x5F54F0
+            if ( at_start )
+                attach_entity_attach( position, rotation, node, parent, child, h );
+            break;
+        case 1:   // the plug 0x5F5550
+            attach_entity_attach( position, rotation, node, parent, child, h );
+            break;
+        default:  // slot 7 0x5F5520, the plug 0x5F5690
+            attach_entity_detach( parent, child, h );
+            break;
+        }
+        const unsigned n = g[ at++ ];
+        same( "log words", static_cast< std::uint32_t >( log.words.size( ) ), n );
+        for ( unsigned k = 0; k < n; ++k )
+            same( "log word", k < log.words.size( ) ? log.words[ k ] : 0xDEADu, g[ at + k ] );
+        at += n;
+    }
+    if ( at != g_golden_ate_size )
+    {
+        LOG_ERROR( "attach_entity: %zu words read of %u", at, g_golden_ate_size );
+        return false;
+    }
+    if ( failed )
+    {
+        LOG_ERROR( "attach_entity: %d of %d values differ", failed, compared );
+        return false;
+    }
+    LOG_SUCCESS( "VuAttachEntity (0x5F54F0, 0x5F5520, 0x5F5550, 0x5F5690, 0x5F56D0, 0x5F57E0): %u vectors, %d values bit-exact against retail's own code", vectors, compared );
+    return true;
+}
+
+// Case rotate_motion: VuRotateMotionEntity's 0x5D0FE0 then its tick 0x5D1090 over seeded sequences against retail: the axis and
+// angle after enable, each tick's angle, the target's matrix / linear / angular, the IF calls.
+inline bool verify_rotate_motion( )
+{
+    const unsigned* g = g_golden_rot_words;
+    std::size_t at = 0;
+    int failed = 0, compared = 0, ticks = 0;
+    int vec = 0;
+    auto bits = []( float f ) {
+        std::uint32_t b;
+        std::memcpy( &b, &f, 4 );
+        return b;
+    };
+    auto same = [ & ]( const char* what, std::uint32_t mine ) {
+        const std::uint32_t r = g[ at++ ];
+        ++compared;
+        if ( r != mine )
+        {
+            if ( failed < 8 )
+                LOG_ERROR( "rotate_motion vector %d: %s 0x%08X, retail 0x%08X", vec, what, mine, r );
+            ++failed;
+        }
+    };
+    const unsigned vectors = g[ at++ ];
+    for ( vec = 0; vec < static_cast< int >( vectors ); ++vec )
+    {
+        rotate_motion_t r;
+        std::memcpy( r.axis, g + at, 12 );
+        at += 3;
+        std::memcpy( &r.speed, g + at++, 4 );
+        r.local = g[ at++ ] != 0;
+        std::memcpy( r.base, g + at, 64 );   // the words +0x88 held before
+        at += 16;
+        const bool has_world = g[ at++ ] != 0;
+        float world[ 16 ];
+        std::memcpy( world, g + at, 64 );
+        at += 16;
+        rotate_motion_enable( r, has_world ? world : nullptr );
+        for ( int k = 0; k < 3; ++k )
+            same( "axis", bits( r.axis[ k ] ) );
+        for ( int k = 0; k < 16; ++k )
+            same( "base", bits( r.base[ k ] ) );
+        same( "angle", bits( r.angle ) );
+        const unsigned n = g[ at++ ];
+        for ( unsigned t = 0; t < n; ++t )
+        {
+            float dt;
+            std::memcpy( &dt, g + at++, 4 );
+            float m[ 16 ], angular[ 4 ];
+            rotate_motion_tick( r, dt, m, angular );
+            same( "tick angle", bits( r.angle ) );
+            for ( int k = 0; k < 16; ++k )
+                same( "matrix", bits( m[ k ] ) );
+            for ( int k = 0; k < 4; ++k )
+                same( "linear", 0u );
+            for ( int k = 0; k < 3; ++k )
+                same( "angular", bits( angular[ k ] ) );
+            same( "IF calls", 1u );
+            ++ticks;
+        }
+    }
+    if ( at != g_golden_rot_size )
+    {
+        LOG_ERROR( "rotate_motion: %zu words read of %u", at, g_golden_rot_size );
+        return false;
+    }
+    if ( failed )
+    {
+        LOG_ERROR( "rotate_motion: %d of %d values differ", failed, compared );
+        return false;
+    }
+    LOG_SUCCESS( "VuRotateMotionEntity (0x5D0FE0, the tick 0x5D1090): %d ticks of %u sequences, %d values bit-exact against retail's own code", ticks, vectors, compared );
+    return true;
+}
+
 inline bool verify_rig_all( )
 {
     bool ok = true;
     ok = verify_boat_rig( ) && ok;
     ok = verify_attach_components( ) && ok;
+    ok = verify_attach_entity( ) && ok;
+    ok = verify_rotate_motion( ) && ok;
     return ok;
 }

@@ -559,6 +559,8 @@ inline void race_session_create_rig( race_session_boat_t& b )
     boat_rig_create( b.rig, names, [ &b ]( const std::string& name, std::vector< std::uint8_t >& blob ) {
         return !name.empty( ) && b.meshes.read( b.meshes.read_user, "VuAnimationAsset/" + name, blob );
     } );
+    LOG_VERBOSE( "boat rig: Thrust '%s' %d, Turn '%s' %d, Transform '%s' %d", names[ 0 ].c_str( ), b.rig.has[ 0 ] ? 1 : 0, names[ 1 ].c_str( ), b.rig.has[ 1 ] ? 1 : 0,
+                 names[ 2 ].c_str( ), b.rig.has[ 2 ] ? 1 : 0 );
 }
 
 // The fill's hooks on a session boat (bound once per boat; used by postLoad's fill and the gameInitialize's 0x419FF0).

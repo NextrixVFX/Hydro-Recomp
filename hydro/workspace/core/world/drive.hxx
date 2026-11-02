@@ -1073,7 +1073,14 @@ inline void race_drive_animation( race_drive_t& r, float dt )
         race_drive_t& d = *static_cast< race_drive_t* >( u );
         race_session_vo_say( *d.session, d.d.boat, line, false );
     };
+    std::uint32_t before, after;
+    std::memcpy( &before, r.d.animation + 0x78, 4 );
     boat_rig_animation_tick( race_drive_boat( r ).rig, in, dt );
+    std::memcpy( &after, r.d.animation + 0x78, 4 );
+    // Diagnostic (ours): the boost state's transitions, the measured run behind boat_boost's +0x78 == 2.
+    if ( before != after )
+        LOG_VERBOSE( "boost state: boat %p frame %d %u -> %u, energy %.3f, boosting %d, Xform control %d", r.d.boat, s.frames, before, after,
+                     state_f( r.d.boat, 0x310 ), r.d.boat[ 0x32C ], race_drive_boat( r ).rig.has[ 2 ] ? 1 : 0 );
 }
 
 // The pfx frame's boats (pfxsim.hxx pfx_frame_t): what the processes bound to boat `b` read of it, refreshed at its Build
