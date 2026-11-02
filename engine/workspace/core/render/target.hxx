@@ -16,7 +16,7 @@ public:
     void bind_scene( );
     void bind_mirror( );
     void clear_mirror( float red, float green, float blue, float alpha );
-    void sample_mirror( );
+    ID3D11ShaderResourceView* mirror_view( ) const { return m_mirror_srv; }
 
 private:
     void release( );
@@ -347,9 +347,3 @@ void c_target::clear_mirror( float red, float green, float blue, float alpha )
 #endif
 }
 
-void c_target::sample_mirror( )
-{
-#if HYDRO_HOST_WINDOWS
-    g_device( ).context( )->PSSetShaderResources( 5, 1, &m_mirror_srv );
-#endif
-}

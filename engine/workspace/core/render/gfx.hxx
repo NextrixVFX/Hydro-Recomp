@@ -76,6 +76,21 @@ struct gfx_rect_t   // D3D11_RECT
     std::int32_t m_left, m_top, m_right, m_bottom;
 };
 
+struct gfx_layout_element_t   // D3D11_INPUT_ELEMENT_DESC
+{
+    const char* m_name;
+    std::uint32_t m_index, m_format, m_slot, m_offset, m_class, m_step;
+};
+
+struct gfx_sampler_desc_t   // D3D11_SAMPLER_DESC
+{
+    std::uint32_t m_filter, m_u, m_v, m_w;
+    float m_bias;
+    std::uint32_t m_anisotropy, m_compare;
+    float m_border[ 4 ];
+    float m_min, m_max;
+};
+
 struct gfx_api_t
 {
     virtual ~gfx_api_t( ) = default;
@@ -83,8 +98,13 @@ struct gfx_api_t
     // ID3D11Device. A failure answers 0: retail tests none of the state calls and stores what it got.
     virtual gfx_handle_t create_buffer( const gfx_buffer_desc_t& d ) = 0;           // +0xC
     virtual gfx_handle_t create_texture( const gfx_texture_desc_t& d ) = 0;         // +0x14
+    virtual gfx_handle_t create_view( gfx_handle_t texture ) = 0;                   // +0x1C (null description)
     virtual gfx_handle_t create_target_view( gfx_handle_t texture ) = 0;            // +0x24 (null description)
     virtual gfx_handle_t create_depth_view( gfx_handle_t texture ) = 0;             // +0x28 (null description)
+    virtual gfx_handle_t create_vertex_shader( const void* code, std::uint32_t size ) = 0;   // +0x30 (code, size, 0, &out)
+    virtual gfx_handle_t create_pixel_shader( const void* code, std::uint32_t size ) = 0;    // +0x3C (code, size, 0, &out)
+    virtual gfx_handle_t create_layout( const gfx_layout_element_t* e, std::uint32_t count, const void* code, std::uint32_t size ) = 0;   // +0x2C
+    virtual gfx_handle_t create_sampler( const gfx_sampler_desc_t& d ) = 0;         // +0x5C
     virtual gfx_handle_t create_blend( const gfx_blend_desc_t& d ) = 0;             // +0x50
     virtual gfx_handle_t create_depth( const gfx_depth_desc_t& d ) = 0;             // +0x54
     virtual gfx_handle_t create_raster( const gfx_raster_desc_t& d ) = 0;           // +0x58
@@ -113,6 +133,7 @@ struct gfx_api_t
     virtual void set_raster( gfx_handle_t state ) = 0;                              // +0xAC
     virtual void set_viewport( const gfx_viewport_t& v ) = 0;                       // +0xB0 (1, &v)
     virtual void set_scissor( const gfx_rect_t& r ) = 0;                            // +0xB4 (1, &r)
+    virtual void update_texture( gfx_handle_t texture, std::uint32_t level, const void* data, std::uint32_t row, std::uint32_t depth ) = 0;   // +0xC0 (null box)
     virtual void clear_target( gfx_handle_t view, const float* rgba ) = 0;          // +0xC8
     virtual void clear_depth( gfx_handle_t view, std::uint32_t flags, float depth, std::uint8_t stencil ) = 0;   // +0xD4
     // +0x164 OMGetRenderTargets( 1, &view, &depth ). Retail never releases what it gets, and its resize answers that with the
@@ -143,6 +164,9 @@ struct gfx_stage_t
     bool m_dirty = false;
     const void* m_data = nullptr;
     std::uint32_t m_size = 0;
+    // render/program.hxx's part: +4 references, +0xC the DXBC's hash, +0x24 the code, the memory behind m_data.
+    std::uint32_t m_refs = 1, m_hash = 0, m_kind = 0;
+    std::vector< std::uint8_t > m_code, m_memory;
 };
 
 // VuD3d11ShaderProgram's +0x10 / +0x14.
@@ -185,6 +209,7 @@ struct gfx_device_t
     gfx_handle_t m_chain_depth = 0;            // +0xD8
     std::int32_t m_width = 0, m_height = 0;    // +0x34, +0x38: the bound target's
     std::int32_t m_chain_width = 0, m_chain_height = 0;   // +0xDC, +0xE0
+    float m_clip[ 4 ] = { };                   // +0x18, the clip plane: vt+0x7C 0x540300 stores it, vt+0x80 0x540320 answers it (the sort's gClipPlane)
     float m_viewport[ 4 ] = { 0.0f, 0.0f, 1.0f, 1.0f };   // +0x3C
     float m_scissor[ 4 ] = { 0.0f, 0.0f, 1.0f, 1.0f };    // +0x4C
     const gfx_program_stages_t* m_program = nullptr;      // +0x5C
@@ -234,6 +259,8 @@ struct gfx_device_t
     // 0x5AD000 0x5AD020: vt +0xAC +0xB0.
     void cull( std::uint32_t v ) { m_raster_dirty = true; m_cull = v; }
     void scissor_enable( std::uint8_t v ) { m_raster_dirty = true; m_scissor_enable = v; }
+
+    void clip_plane( const float* v ) { std::memcpy( m_clip, v, 16 ); }
 
     // 0x5ACC00 vt +0x44.
     void size( std::int32_t& w, std::int32_t& h ) const { w = m_width; h = m_height; }
@@ -336,7 +363,8 @@ struct gfx_device_t
     }
 
     // 0x540B50 vt +0xB4. `slots`: the low 16 bits the sampler slot, the high 16 (arithmetic) the view slot. Null: both unbound,
-    // on the whole word as a slot, as retail passes it.
+    // on the whole word as a slot, as retail passes it. TRAP: on a real device a packed word like 0x30002 is an out of range start slot and D3D11 stomps its state
+    // (found by the wiring experiment, batch 35): a shader whose texture exists must never reach this with null.
     void set_texture( std::uint32_t slots, const gfx_texture_t* texture )
     {
         if ( texture == nullptr )

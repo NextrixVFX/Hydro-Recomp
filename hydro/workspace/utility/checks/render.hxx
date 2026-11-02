@@ -2598,5 +2598,17 @@ inline bool verify_render_all( )
     ok = verify_gfx_device( ) && ok;
     ok = verify_ui_record_draws( ) && ok;
     ok = verify_mode_switch( ) && ok;
+    ok = verify_gfx_program( ) && ok;
+    ok = verify_gfx_model_draws( ) && ok;
+    ok = verify_water_material( ) && ok;
+    ok = verify_gfx_post( ) && ok;
+    ok = verify_gfx_composer( ) && ok;
+    ok = verify_gfx_buffers( ) && ok;
+    ok = verify_gfx_backend( ) && ok;
+    ok = verify_gfx_quads( ) && ok;
+    ok = verify_gfx_texture_load( ) && ok;
+#if HYDRO_HOST_WINDOWS
+    ok = verify_gfx_direct( ) && ok;
+#endif
     return ok;
 }
