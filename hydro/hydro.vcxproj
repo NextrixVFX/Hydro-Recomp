@@ -276,7 +276,6 @@
     <ClInclude Include="workspace\core\world\primitive.hxx" />
     <ClInclude Include="workspace\core\world\query.hxx" />
     <ClInclude Include="workspace\core\world\race.hxx" />
-    <ClInclude Include="workspace\core\world\records.hxx" />
     <ClInclude Include="workspace\core\world\rig.hxx" />
     <ClInclude Include="workspace\core\world\rotate.hxx" />
     <ClInclude Include="workspace\core\world\rules.hxx" />

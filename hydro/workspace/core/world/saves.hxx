@@ -39,10 +39,12 @@ inline void c_world::saves_start( )
         else
             LOG_WARNING( "saves: VuDBAsset/HiddenPackagesDB not in the pack" );
     }
-    std::int32_t packages = 0;
-    package_found_total( m_cloud.data, packages );
+    m_hidden.init( &m_hidden_db );
+    m_hidden.save = [ this ] { saves_game( ); };
+    m_hidden.progress = [ ]( const char*, float ) { };   // the "Collector" achievement 0x4AA1A0: a platform service, a hook
+    const std::int32_t packages = c_hidden_packages::found_total( m_cloud.data );
     LOG_SUCCESS( "saves: %s - profile status %d, game save status %d: %d races, %d time trials, %d slaloms, %d packages", save_seam::root( ).string( ).c_str( ), m_profile.status, m_cloud.status,
-                 record_count( m_cloud.data, "Race" ), record_count( m_cloud.data, "TimeTrial" ), record_count( m_cloud.data, "Slalom" ), packages );
+                 ui_progress_count( m_cloud.data, "Race" ), ui_progress_count( m_cloud.data, "TimeTrial" ), ui_progress_count( m_cloud.data, "Slalom" ), packages );
 }
 
 // "OnSaveProfile": VuInputManagerImpl 0x5111B0 on the live manager (the race's, else the menus').
@@ -84,7 +86,7 @@ inline void c_world::saves_input( platform_input_t& in )
 inline void c_world::saves_bind( )
 {
     m_race.world.save_doc = m_saves_on ? &m_cloud.data : nullptr;
-    m_race.world.hidden_db = m_saves_on ? &m_hidden_db : nullptr;
+    m_race.world.hidden = m_saves_on ? &m_hidden : nullptr;
     m_race.world.save_game = [ this ] { saves_game( ); };
     m_race.world.input_profile = [ this ]( platform_input_t& in ) { saves_input( in ); };
 }

@@ -6,7 +6,7 @@
 #include <workspace/core/save/ghost.hxx>
 #include <workspace/core/world/ghost.hxx>
 #include <workspace/core/world/ghostgame.hxx>
-#include <workspace/core/world/records.hxx>
+#include <workspace/core/game/packages.hxx>
 #include <workspace/core/world/tiretrack.hxx>
 #include <workspace/core/world/pause.hxx>
 #include <workspace/core/boat/construct.hxx>
@@ -192,9 +192,9 @@ struct race_world_t
     std::function< bool( const entity_t& e ) > motion_release;
     // The audio platform (FMOD's imports - world/sound.hxx; c_world's). Null: no audio calls made (logged).
     const sound_hooks_t* sound = nullptr;
-    // The game save (VuCloudSaveManager +0x20, c_world's; null: saves off) and HiddenPackagesDB; 0x4ABD60; the input manager's profile load.
+    // The game save (VuCloudSaveManager +0x20, c_world's; null: saves off) and the hidden package manager g 0x758FD0; 0x4ABD60; the input manager's profile load.
     value_t* save_doc = nullptr;
-    const value_t* hidden_db = nullptr;
+    c_hidden_packages* hidden = nullptr;
     std::function< void( ) > save_game;
     std::function< void( platform_input_t& ) > input_profile;
     std::uint32_t viewports = 1;

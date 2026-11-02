@@ -583,6 +583,7 @@ private:
     c_profile_manager m_profile;                        // g 0x759084
     c_cloud_save m_cloud;                               // g 0x758FA0
     value_t m_hidden_db;                                // VuHiddenPackageManagerImpl +4's document
+    c_hidden_packages m_hidden;                         // g 0x758FD0
     // The game modes (world/mode.hxx, menu.hxx).
     friend class c_menu_mode;
     friend class c_title_mode;
