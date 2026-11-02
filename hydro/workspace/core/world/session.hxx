@@ -454,6 +454,7 @@ struct race_session_t
     std::shared_ptr< struct race_input_script_t > input_script;
     bool dock = false;        // the front end's dock boat (world/dock.hxx): ticks run, `active` stays false
     bool autopilot = false;   // --autopilot (world/autopilot.hxx)
+    float time_scale = 1.0f;  // ours, the Benchmark: the simulation's dt only
     bool autopilot_keys = false;   // --autopilot-keys
     int autopilot_held = 0;
     // The input retail reads (game/input.hxx): the managers on InputDB's document, which `input_db` keeps alive. Made here at

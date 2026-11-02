@@ -717,7 +717,7 @@ inline void race_session_frame( race_session_t& s, float dt )
 {
     if ( !s.active && !s.dock )
         return;
-    s.clock += static_cast< double >( dt );
+    s.clock += static_cast< double >( dt * s.time_scale );
     tick_run( s.ticks, s.clock );
     ++s.frames;
 }

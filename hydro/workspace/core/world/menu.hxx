@@ -10,6 +10,8 @@
 // The binding's broadcasts reach the mode's event map 0x5156E0 (c_front_end::handle): OnPushScreen, OnSetScreen, OnStartActionGame ...
 // Hooks that answer nothing, named: the title voice-over, analytics, the save check, 0x530BB0, VuProject's reference counts.
 
+#include <workspace/core/world/benchmark.hxx>
+
 class c_menu_mode final : public game_mode_t
 {
 public:
@@ -65,6 +67,7 @@ inline void c_world::action_exit( )
         m_menu_util = m_race.util;   // a race from the command line: no front end built the root
     else
         ui_json_child( m_menu_util, "GameResults" ) = member( m_race.util, "GameResults" );
+    benchmark_after_exit( );   // ours
     m_pause_menu.reset( );
     m_pause_binding.reset( );
     m_pause_root.reset( );
@@ -78,6 +81,8 @@ inline void c_world::action_exit( )
 
 inline void c_world::action_enter( )
 {
+    if ( m_benchmark.active )
+        benchmark_enter( );   // ours
     m_has_chosen = true;
     m_chosen = member( m_menu_util, "GameData" );
     load_scene( "", nullptr, nullptr );
@@ -105,6 +110,11 @@ inline ui_bind_hooks_t c_world::menu_hooks( int id )
     hooks.m_string_db = [ this ]( const char* key ) { return string_db_get( m_string_db, key ? key : "" ); };
     hooks.m_external = [ this, id ]( entity_t& e, const char* plug, const ui_params_t& p ) {
         menu_project_t& project = m_menu_projects[ id ];
+        if ( e.m_type == "VuShowWebPageUIAction" && e.m_name == "ShowWebPage01" && std::strcmp( plug, "Trigger" ) == 0 )
+        {
+            benchmark_start( );   // ours: the Benchmark button, Screens/Main (world/benchmark.hxx)
+            return ui_ret_t{ };
+        }
         return screen_external( project.state, *project.binding, e, plug, p );
     };
     hooks.m_input = [ this ]( int pad, const char* name ) { return m_menu_input && m_menu_input->manager.pressed( pad, name ); };
@@ -320,7 +330,9 @@ inline std::unique_ptr< entity_t > c_world::menu_load_root( const std::string& n
         LOG_WARNING( "front end: %s not in the pack", asset.c_str( ) );
         return nullptr;
     }
-    const value_t document = c_reader( bytes ).parse( );
+    value_t document = c_reader( bytes ).parse( );
+    if ( name == "Screens/Main" )
+        benchmark_menu_patch( document );   // ours
     const value_t* project = find( document, "VuProject" );
     if ( !project )
         return nullptr;
@@ -331,6 +343,14 @@ inline std::unique_ptr< entity_t > c_world::menu_load_root( const std::string& n
 // Slot 3: 0x4BF9B0, its data step over gameutil +0x50; the GameData the Action mode's load takes.
 inline void c_world::menu_exit( )
 {
+    const ui_game_config_t config = m_menu->exit( m_menu_util, menu_game_env( ) );
+    LOG_INFO( "front end: exit to %s, GameData builder 0x%X %s", m_menu->m_mode.c_str( ), config.builder, config.built ? "built" : "not built" );
+    m_menu.reset( );
+    m_menu_projects.clear( );
+}
+
+inline ui_game_env_t c_world::menu_game_env( )
+{
     const race_session_dbs_t dbs = race_dbs( );
     ui_game_env_t env;
     env.boat_db = dbs.boat_db;
@@ -339,10 +359,7 @@ inline void c_world::menu_exit( )
     env.player_name = platform_gamer_tag( );
     env.championship_now = [ this ] { return &ui_progress_champ_state( m_cloud.data ); };   // 0x4C2300's progress vt+0x6C, after the screen's unload saved it
     env.string_db = [ this ]( const char* id ) { return string_db_get( m_string_db, id ? id : "" ); };
-    const ui_game_config_t config = m_menu->exit( m_menu_util, env );
-    LOG_INFO( "front end: exit to %s, GameData builder 0x%X %s", m_menu->m_mode.c_str( ), config.builder, config.built ? "built" : "not built" );
-    m_menu.reset( );
-    m_menu_projects.clear( );
+    return env;
 }
 
 // VuOnAnyButtonOrKeyEntity (vtable 0x7385E0): slot 6 0x423560 registers its Decision tick 0x423650 and a keyboard callback (+0x5C, slot 0

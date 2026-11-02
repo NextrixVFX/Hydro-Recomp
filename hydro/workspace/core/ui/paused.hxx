@@ -76,6 +76,7 @@ inline void ui_pause_background( ui_gfx_sort_t& sort, const ui_font_draw_env_t& 
 class c_ui_pause_menu
 {
 public:
+    bool paused( ) const { return m_gate.paused; }   // ours: world/benchmark.hxx
     // `colour`: +0x32 (0xFF000000 from the ctor, then ConstantDB UI / PauseMenuBackgroundColor's 0x4FDEC0).
     c_ui_pause_menu( pause_menu_t& gate, ui_pause_hooks_t hooks, std::uint32_t colour ) : m_gate( gate ), m_hooks( std::move( hooks ) ), m_colour( colour )
     {

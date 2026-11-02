@@ -61,6 +61,9 @@ inline ui_hud_boat_t ui_hud_boat_of( const std::uint8_t* image )
     return b;
 }
 
+// OURS, not retail (world/benchmark.hxx): the texts of the Benchmark HUD's two elements, Types 100 / 101.
+inline std::string g_benchmark_hud[ 2 ];
+
 struct ui_hud_world_t
 {
     bool m_manager = false;                      // g_vu_boat_manager 0x758FB8 != 0
@@ -124,6 +127,8 @@ public:
     // to it either way, 7 the units' string; any other Type: "").
     const std::string& text( const ui_hud_world_t& world )
     {
+        if ( m_type == 100 || m_type == 101 )   // ours: world/benchmark.hxx
+            return g_benchmark_hud[ m_type - 100 ];
         // The defaults, then the local boat when the manager and the settings
         // both exist, the index is below the array size (a signed compare; a
         // negative index would read before the array - never authored, NOT

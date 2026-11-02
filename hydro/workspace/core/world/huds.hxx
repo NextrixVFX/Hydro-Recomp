@@ -34,7 +34,9 @@ inline void c_world::load_huds( const char* const* k_names )   // the game ctor'
             LOG_WARNING( "race HUD: %s not in the pack - not loaded (UNKNOWN)", asset.c_str( ) );
             continue;
         }
-        const value_t root = c_reader( bytes ).parse( );
+        value_t root = c_reader( bytes ).parse( );
+        if ( m_benchmark.active && std::strcmp( k_names[ p ], "HUDs/RaceGameHUD" ) == 0 )
+            benchmark_hud_patch( root );   // ours
         const value_t* project = find( root, "VuProject" );
         if ( project )
             h.tree = race_load_tree( m_archive, asset.c_str( ), *project, [ this ]( const std::string& name ) { return template_document( name ); } );
@@ -631,6 +633,14 @@ inline void c_world::hud_env( hud_project_t& h )
         images.push_back( m_race.rules_boats[ k ].boat );
         for ( const void* b : m_race.manager.lists.humans.boats )
             if ( b == m_race.rules_boats[ k ].boat && local < 0 )
+                local = static_cast< std::int32_t >( k );
+    }
+    if ( m_benchmark.active )   // ours: no human in a Benchmark race, the HUD reads the boat the camera follows
+    {
+        const auto& all = m_race.manager.lists.all.boats;
+        const std::int32_t v = m_race.manager.lists.viewport;
+        for ( std::size_t k = 0; v >= 0 && static_cast< std::size_t >( v ) < all.size( ) && k < images.size( ); ++k )
+            if ( images[ k ] == all[ static_cast< std::size_t >( v ) ] )
                 local = static_cast< std::int32_t >( k );
     }
     ui_hud_env_t& env = h.ui->env( );

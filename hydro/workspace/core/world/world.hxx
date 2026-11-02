@@ -70,6 +70,8 @@
 #include <workspace/core/world/stage.hxx>
 #include <workspace/core/world/waterpass.hxx>
 
+#include <workspace/core/world/benchrun.hxx>
+
 class c_world
 {
 public:
@@ -545,6 +547,15 @@ private:
 
     // update_delays: graph.hxx
     void update_delays( float dt );
+    // Ours, the Benchmark mode (world/benchmark.hxx).
+    benchmark_t m_benchmark;
+    void benchmark_start( );
+    void benchmark_track( );
+    void benchmark_next_data( );
+    void benchmark_enter( );
+    void benchmark_frame( );
+    void benchmark_after_exit( );
+    ui_game_env_t menu_game_env( );
 
     // VuStringDBImpl's init (slot 5 0x53B700), once: the languages = the factory's getAssetNames("VuStringAsset")
     // (the pack's names; only their membership is read), then setLanguage (slot 11 0x53B9C0) with the PLATFORM's
@@ -571,6 +582,8 @@ private:
         } );
         LOG_INFO( "VuStringDB: language %s (the platform's answer: %s), %u strings%s", m_string_db.language.c_str( ), lang ? "--language" : "the system's tag",
                   static_cast< unsigned >( m_string_db.strings.size( ) ), ok ? "" : " - the asset did not load (UNKNOWN)" );
+        m_string_db.strings[ string_db_hash( "Benchmark" ) ] = "Benchmark";   // ours: world/benchmark.hxx
+        m_string_db.strings[ string_db_hash( "Benchmark_Info" ) ] = "Every level in turn, driven by the AI at double speed.";
     }
 
     // The race HUD projects and their countdown (world/huds.hxx).
@@ -1819,7 +1832,10 @@ public:
             };
         else
             m_race.world.game_mode = nullptr;
+        m_race.time_scale = m_benchmark.active ? 2.0f : 1.0f;   // ours: world/benchmark.hxx
         race_session_frame( m_race, dt );
+        if ( m_benchmark.active && m_race.active )
+            benchmark_frame( );
         if ( m_menu )
             m_modes.tick( dt );
         else if ( !m_modes.m_next.empty( ) )
