@@ -485,6 +485,7 @@ private:
     void update_rotators( float dt );
 
     // motion_child / motions_game_initialize / rotator_activate / rotator_deactivate: motion.hxx
+    void motion_unread( const entity_t& child );
     void motion_child( entity_t& child, const float* matrix, const float* linear, const float* angular );
     void motions_game_initialize( );
     void rotator_activate( rotator_t& motion );
@@ -775,6 +776,8 @@ private:
         m_joints.clear( );
         m_prop_skels.clear( );
         m_motion_unknown = 0;
+        m_motion_unread.clear( );
+        m_wake_of.clear( );
         m_refs.clear( );
         m_booleans.clear( );
         m_graph.clear( );
@@ -1344,9 +1347,10 @@ public:
         // sections load ran to its end (b.sections); the Skin watcher's earlier run (0x481CE0 sets Skin before the
         // models load) finds the instances' scenes null and leaves every skin empty. Until the boat agent's
         // collision-mesh reader lets 0x420A70 finish, the hulls therefore draw their own materials (the
-        // Boat_proxy/Proxy_diffuse placeholder) - retail's state at that point, not a stand-in. The damage pieces'
-        // skins (+0x238, 0x4119F0) are not built here: our renderer does not draw the pieces. race_draw moves the
-        // shown instance each frame (0x41EAE0's matrix).
+        // Boat_proxy/Proxy_diffuse placeholder) - retail's state at that point, not a stand-in. The damage items'
+        // skins (+0x238, 0x4119F0, entry["Dest"]) are in the same pass, one map per item for its instance's +8. The
+        // pass reads "Dest" on the items only: the Breakable Mesh Asset's parts (debris +4) keep their own materials.
+        // race_draw moves the shown instance each frame (0x41EAE0's matrix).
         m_race.boat_models = [ this ]( std::size_t k ) { race_boat_models( k ); };
         for ( std::size_t k = 0; k < m_race.boats.size( ); ++k )
             m_race.boat_models( k );
@@ -1367,6 +1371,8 @@ public:
         m_retail_boats[ k ] = std::make_unique< gfx_retail_boat_t >( );
         gfx_retail_boat_t* retail_boat = m_retail_boats[ k ].get( );
         int skinned = 0;
+        std::vector< livery_scene_t > piece_scenes( b.debris.pieces.size( ) );
+        std::vector< std::vector< scene_table_t > > piece_tables( b.debris.pieces.size( ) );
         if ( b.sections )
         {
             livery_scene_t scenes[ 3 ];
@@ -1375,7 +1381,12 @@ public:
                 if ( livery_scene_for( b.io.boat_strings[ at[ i ] ], scenes[ i ] ) )
                     pointers[ i ] = &scenes[ i ];
             std::vector< std::vector< livery_material_t > > skins;
-            if ( livery_pass( m_skin_db.tag == 6 ? &m_skin_db : nullptr, b.skin, pointers, { }, skins ) )
+            std::vector< const livery_scene_t* > piece_pointers( piece_scenes.size( ), nullptr );
+            for ( std::size_t j = 0; j < piece_scenes.size( ); ++j )
+                if ( livery_scene_for( b.debris.pieces[ j ]->asset, piece_scenes[ j ] ) )
+                    piece_pointers[ j ] = &piece_scenes[ j ];
+            if ( livery_pass( m_skin_db.tag == 6 ? &m_skin_db : nullptr, b.skin, pointers, piece_pointers, skins ) )
+            {
                 for ( int i = 0; i < 3; ++i )
                     for ( std::size_t s = 0; pointers[ i ] && s < skins[ i ].size( ) && s < scenes[ i ].size( ); ++s )
                     {
@@ -1384,6 +1395,13 @@ public:
                         skin_tables[ i ].emplace_back( );
                         livery_table_of( skins[ static_cast< std::size_t >( i ) ][ s ], skin_tables[ i ].back( ) );
                     }
+                for ( std::size_t j = 0; j < piece_tables.size( ); ++j )
+                    for ( const livery_material_t& material : skins[ 3 + j ] )
+                    {
+                        piece_tables[ j ].emplace_back( );
+                        livery_table_of( material, piece_tables[ j ].back( ) );
+                    }
+            }
             else
                 LOG_WARNING( "race: %s skin pass 0x421490 UNKNOWN (a texture name of 64 bytes or more: strcpy_s's invalid-parameter path)",
                              b.name.c_str( ) );
@@ -1413,6 +1431,25 @@ public:
                 gfx_scene_view_attach( a, model->m_view );
                 a.m_map = r.m_maps[ i ].m_ids.empty( ) ? nullptr : &r.m_maps[ i ];
             }
+        }
+        // The items' maps: 0x4119F0's skin per item, in shader order, on the item's own model (bound later, world/pieces.hxx's order).
+        if ( m_retail )
+        {
+            retail_boat->m_pieces.resize( piece_tables.size( ) );
+            int piece_skins = 0;
+            for ( std::size_t j = 0; j < piece_tables.size( ); ++j )
+            {
+                race_piece_t& piece = *b.debris.pieces[ j ];
+                gfx_retail_map_t& map = retail_boat->m_pieces[ j ];
+                const gfx_retail_model_t* model = m_retail->record( piece.asset );
+                for ( std::size_t s = 0; model && s < piece_tables[ j ].size( ) && s < model->m_program_ids.size( ); ++s )
+                    map.m_ids[ static_cast< std::uint32_t >( model->m_scene.shaders[ s ].index ) ] = m_retail->skinned_material( *model, s, piece_tables[ j ][ s ] );
+                piece.skin = map.m_ids.empty( ) ? nullptr : &map;
+                if ( piece.bound )
+                    piece.model.m_map = piece.skin;
+                piece_skins += piece.skin ? 1 : 0;
+            }
+            LOG_INFO( "race: %s damage items' skins 0x4119F0: %d of %u", b.name.c_str( ), piece_skins, static_cast< unsigned >( piece_tables.size( ) ) );
         }
         b.shown = -1;
         LOG_INFO( "race: %s hull at %.1f %.1f %.1f - models '%s' / '%s' / '%s', skin '%s': %s", b.name.c_str( ), m[ 12 ], m[ 13 ], m[ 14 ],
@@ -2267,6 +2304,8 @@ private:
     bool prop_pose( const animated_t& item );
     const std::vector< float >* prop_palette( const animated_t& item );
     int m_motion_unknown = 0;   // a motion child's IF slot 0 not read
+    std::set< const entity_t* > m_motion_unread;
+    std::map< const entity_t*, int > m_wake_of;   // VuWakeWaveEntity +0x98: its wake in m_water, -1 none
     // (entity, refName) -> the full path the ref points at.
     std::map< std::pair< std::string, std::string >, std::string > m_refs;
     std::map< std::string, bool > m_booleans;

@@ -600,6 +600,7 @@ inline void race_boat_debris_bind( race_session_t& s, race_session_boat_t& b )
             if ( const gfx_scene_view_t* v = s.world.debris_model( p->asset ) )
             {
                 gfx_scene_view_attach( p->model, *v );
+                p->model.m_map = p->skin;
                 p->model.m_colour = 0xFFFFFFFFu;   // 0x412270: +0x5C 1.0, +0x60 -1, +0x64 0
                 p->model.m_lod = 1.0f;
                 p->bound = true;

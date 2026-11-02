@@ -35,6 +35,7 @@ struct race_piece_t
     fluid_solver_t solver{ };
     std::string asset, pfx;
     gfx_static_model_t model;
+    gfx_material_map_t* skin = nullptr;   // +0x68: the "Dest" skin 0x4119F0 builds (the instance's +8 = +0x50 points at it), held by the boat's retail instances
     const float* model_aabb = nullptr;
     bool bound = false;     // the model looked up
     bool stepping = false;  // the step callback and the motion set exist

@@ -72,6 +72,7 @@ struct gfx_retail_boat_t
     gfx_animated_model_t m_high, m_middle;
     gfx_static_model_t m_low;
     gfx_retail_map_t m_maps[ 3 ];
+    std::vector< gfx_retail_map_t > m_pieces;   // the damage items' skins (+0x238's items' +0x68, 0x4119F0)
 };
 
 struct gfx_retail_t final : gfx_composer_hooks_t
