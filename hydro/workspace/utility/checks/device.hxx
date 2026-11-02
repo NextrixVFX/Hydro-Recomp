@@ -3,6 +3,7 @@
 #include <workspace/core/render/gfx.hxx>
 #include <workspace/core/render/post.hxx>
 #include <workspace/core/render/program.hxx>
+#include <workspace/core/world/composer.hxx>
 #include <workspace/core/world/drawing.hxx>
 #include <workspace/core/world/shading.hxx>
 #include <workspace/core/world/waterpass.hxx>
@@ -772,6 +773,155 @@ inline bool verify_gfx_post( )
         return true;
     }
     LOG_ERROR( "gfx_post FAILED %d of %d words (cursor %zu of %zu)", g.failed, g.compared, g.at, g.size );
+    return false;
+}
+
+// Case gfx_composer: the logging hooks. A target is the case's address (the records hold it), logged as its number n; its texture 0x100 + n.
+struct gfx_composer_check_t : gfx_composer_hooks_t
+{
+    std::vector< std::uint32_t > m_log;
+    std::int32_t m_display[ 2 ] = { };
+    std::uint32_t m_next = 1;
+    bool m_lens[ 2 ] = { };
+    const std::uint8_t* m_comp = nullptr;
+    void rec( std::initializer_list< std::uint32_t > w ) { m_log.insert( m_log.end( ), w ); }
+    static std::uint32_t hash( const void* p, std::uint32_t n ) { return gfx_check_api_t::code_hash( p, n ); }
+    void display( std::int32_t& w, std::int32_t& h ) override { w = m_display[ 0 ]; h = m_display[ 1 ]; }
+    static constexpr std::uint32_t k_targets = 0x6C010000u;
+    static std::uint32_t number( std::uint32_t t ) { return t ? ( t - k_targets ) / 0x40u + 1u : 0u; }
+    std::uint32_t target_create( std::int32_t w, std::int32_t h, std::uint32_t f ) override
+    {
+        rec( { 65, static_cast< std::uint32_t >( w ), static_cast< std::uint32_t >( h ), f, m_next } );
+        return k_targets + 0x40u * ( m_next++ - 1u );
+    }
+    void target_release( std::uint32_t t ) override { rec( { 66, number( t ) } ); }
+    std::uint32_t target_texture( std::uint32_t t ) override { return 0x100u + number( t ); }
+    bool lens_active( ) override { return m_lens[ 0 ]; }
+    bool lens_on( ) override { return m_lens[ 1 ]; }
+    void lens_size( std::int32_t w, std::int32_t h ) override { rec( { 70, static_cast< std::uint32_t >( w ), static_cast< std::uint32_t >( h ) } ); }
+    void lens_draw( std::uint32_t tex, std::uint32_t t ) override { rec( { 71, tex, number( t ) } ); }
+    void camera_static( const std::uint8_t*, const std::uint8_t* ) override { rec( { 60, 0x28u, 0x54u } ); }
+    void sort_view( const std::uint8_t* ) override { rec( { 61, 0x54u } ); }
+    void sort_camera( const std::uint8_t* c ) override { rec( { 62, hash( c, 0x240 ) } ); }
+    void draw( const gfx_draw_params_t& p, const std::uint8_t* camera ) override
+    {
+        std::uint8_t raw[ 0x2A ] = { };
+        std::memcpy( raw, p.m_eye, 16 );
+        std::memcpy( raw + 0x10, &p.m_lod, 4 );
+        raw[ 0x14 ] = p.m_reflecting;
+        std::memcpy( raw + 0x15, p.m_clip, 16 );
+        raw[ 0x25 ] = p.m_second_depth;
+        raw[ 0x26 ] = p.m_skip_models;
+        rec( { 67, hash( raw, 0x27 + 0u ) , hash( camera, 0x240 ) } );
+    }
+    void trail( ) override { rec( { 63, 0xA8u } ); }
+    void depth_extra( const std::uint8_t* c ) override { rec( { 68, hash( c, 0x240 ) } ); }
+    void overlay( std::uint32_t tex, const float* ) override { rec( { 64, tex } ); }
+};
+
+struct gfx_composer_sort_hooks_t : gfx_sort_hooks_t
+{
+    std::uint32_t device( int, std::uint32_t, std::uint32_t, std::uint32_t ) override { return 0; }
+    void program( std::uint32_t, int, std::uint32_t, std::uint32_t, const std::uint32_t* ) override { }
+    std::uint32_t thread( int, std::uint32_t, std::uint32_t ) override { return 0; }
+    void profile( int ) override { }
+    void composer( int, std::uint32_t, std::uint32_t ) override { }
+    void water_flip( ) override { }
+    void light_flip( ) override { }
+    std::uint32_t texture_handle( std::uint32_t ) override { return 0; }
+    void draw( std::uint32_t, std::uint8_t* ) override { }
+    const gfx_material_t* material( std::uint32_t ) override { return nullptr; }
+    const gfx_chunk_t* chunk( std::uint32_t ) override { return nullptr; }
+};
+
+inline bool verify_gfx_composer( )
+{
+    anim_cursor_t g;
+    g.w = g_golden_gcm_words;
+    g.size = g_golden_gcm_size;
+    g.where = "gfx_composer";
+    gfx_composer_sort_hooks_t sort_hooks;
+    static gfx_sort_t sort( sort_hooks );
+    gfx_composer_check_t hooks;
+    gfx_composer_t c( sort, hooks );
+    const auto real = []( std::uint32_t u ) { float f; std::memcpy( &f, &u, 4 ); return f; };
+    const unsigned rows = g.take( );
+    unsigned commands = 0;
+    for ( unsigned r = 0; r < rows; ++r )
+    {
+        c.m_scale = real( g.take( ) );
+        c.m_forced_w = static_cast< std::int32_t >( g.take( ) );
+        c.m_forced_h = static_cast< std::int32_t >( g.take( ) );
+        c.m_lod = real( g.take( ) );
+        c.m_flag_c = static_cast< std::uint8_t >( g.take( ) );
+        c.m_radial = static_cast< std::uint8_t >( g.take( ) );
+        c.m_no_copy = static_cast< std::uint8_t >( g.take( ) );
+        c.m_depth_first = static_cast< std::uint8_t >( g.take( ) );
+        c.m_depth_pass = static_cast< std::uint8_t >( g.take( ) );
+        hooks.m_lens[ 0 ] = g.take( ) != 0u;
+        hooks.m_lens[ 1 ] = g.take( ) != 0u;
+        const bool reflection = g.take( ) != 0u;
+        const float plane = real( g.take( ) ), blur = real( g.take( ) );
+        sort.m_key_lo = g.take( );
+        sort.m_key_hi = g.take( );
+        hooks.m_display[ 0 ] = static_cast< std::int32_t >( g.take( ) );
+        hooks.m_display[ 1 ] = static_cast< std::int32_t >( g.take( ) );
+        std::uint32_t camera[ 0x90 ];
+        for ( std::uint32_t& w : camera )
+            w = g.take( );
+        sort.m_commands[ sort.m_index ].clear( );
+        sort.m_buffers[ sort.m_index ].m_used = 0;
+        sort.m_buffers[ sort.m_index ].m_memory.assign( sort.m_buffers[ sort.m_index ].m_memory.size( ), 0 );
+        sort.m_offset = 0;
+        hooks.m_log.clear( );
+        c.frame( reinterpret_cast< const std::uint8_t* >( camera ), plane, blur, reflection );
+        const unsigned logged = g.take( );
+        std::vector< std::uint32_t > got;
+        // Retail logs each allocation too: drop them from the golden side.
+        std::vector< std::uint32_t > want;
+        const std::size_t end = g.at + logged;
+        while ( g.at < end )
+        {
+            const unsigned kind = g.take( );
+            const unsigned len = kind == 69 ? 1 : kind == 65 ? 4 : kind == 66 || kind == 61 || kind == 62 || kind == 63 || kind == 64 || kind == 68 ? 1 : 2;
+            std::vector< std::uint32_t > w;
+            for ( unsigned i = 0; i < len; ++i )
+                w.push_back( g.take( ) );
+            if ( kind == 69 )
+                continue;
+            want.push_back( kind );
+            want.insert( want.end( ), w.begin( ), w.end( ) );
+        }
+        g.eq( static_cast< std::uint32_t >( hooks.m_log.size( ) ), static_cast< std::uint32_t >( want.size( ) ) );
+        for ( std::size_t i = 0; i < want.size( ); ++i )
+            g.eq( i < hooks.m_log.size( ) ? hooks.m_log[ i ] : 0xDEADBEEFu, want[ i ] );
+        const unsigned count = g.take( );
+        g.eq( static_cast< std::uint32_t >( sort.m_commands[ sort.m_index ].size( ) ), count );
+        commands += count;
+        for ( unsigned i = 0; i < count; ++i )
+            for ( int j = 0; j < 7; ++j )
+            {
+                const std::uint32_t mine = i < sort.m_commands[ sort.m_index ].size( ) ? sort.m_commands[ sort.m_index ][ i ].m_words[ j ] : 0xDEADBEEFu;
+                g.eq( j == 6 ? mine & 0xFFFFu : mine, g.take( ) );
+            }
+        const std::uint32_t used = g.take( );
+        g.eq( static_cast< std::uint32_t >( sort.m_buffers[ sort.m_index ].m_used ), used );
+        g.eq( gfx_check_api_t::code_hash( sort.m_buffers[ sort.m_index ].m_memory.data( ), used ), g.take( ) );
+        g.eq( sort.m_key_hi, g.take( ) );
+        g.eq( gfx_composer_check_t::number( c.m_targets[ 0 ] ), g.take( ) );
+        g.eq( gfx_composer_check_t::number( c.m_targets[ 1 ] ), g.take( ) );
+        g.eq( gfx_composer_check_t::number( c.m_reflection ), g.take( ) );
+        g.eq( static_cast< std::uint32_t >( c.m_width ), g.take( ) );
+        g.eq( static_cast< std::uint32_t >( c.m_height ), g.take( ) );
+        g.eq( c.m_resized, g.take( ) );
+    }
+    g.eq( static_cast< std::uint32_t >( g.at ), static_cast< std::uint32_t >( g.size ) );
+    if ( !g.failed )
+    {
+        LOG_SUCCESS( "gfx_composer matches retail's frame 0x5588B0 (targets 0x559100, reflection 0x558C00, scene 0x558AC0, commands) on %u frames, %u commands: %d words exact", rows, commands, g.compared );
+        return true;
+    }
+    LOG_ERROR( "gfx_composer FAILED %d of %d words (cursor %zu of %zu)", g.failed, g.compared, g.at, g.size );
     return false;
 }
 
