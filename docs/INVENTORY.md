@@ -18,10 +18,10 @@ Subsystems come from the RTTI class whose vtable holds the function (1253 classe
 
 | | functions | bytes of code |
 |---|---:|---:|
-| verified | 3688 | 1249083 |
-| callee | 760 | 164019 |
-| cited | 629 | 186692 |
-| absent | 3561 | 626466 |
+| verified | 3693 | 1249287 |
+| callee | 759 | 163967 |
+| cited | 626 | 186590 |
+| absent | 3560 | 626416 |
 | **all** | **8638** | **2226260** |
 
 ## By subsystem
@@ -34,7 +34,7 @@ Sorted by code size. Counts are functions; the last column is the share of that 
 | physics (Bullet) | 646 | 451 | 17 | 46 | 132 | 129825 of 256657 |
 | entity / component / script framework | 1094 | 564 | 117 | 59 | 354 | 130475 of 207438 |
 | HUD / UI / fonts | 648 | 290 | 72 | 38 | 248 | 109380 of 184315 |
-| game modes / race | 766 | 249 | 43 | 85 | 389 | 109988 of 179957 |
+| game modes / race | 766 | 251 | 43 | 83 | 389 | 110054 of 179957 |
 | rendering / gfx | 552 | 246 | 36 | 56 | 214 | 65802 of 126915 |
 | water | 325 | 219 | 27 | 38 | 41 | 65094 of 96416 |
 | boat | 264 | 198 | 22 | 22 | 22 | 71290 of 87400 |
@@ -43,7 +43,7 @@ Sorted by code size. Counts are functions; the last column is the share of that 
 | assets | 286 | 131 | 31 | 20 | 104 | 19256 of 61239 |
 | particles | 215 | 185 | 5 | 14 | 11 | 39264 of 45495 |
 | audio | 163 | 40 | 20 | 15 | 88 | 6736 of 30823 |
-| input | 156 | 69 | 6 | 8 | 73 | 21158 of 30388 |
+| input | 156 | 72 | 5 | 7 | 72 | 21296 of 30388 |
 | C++ runtime / STL | 227 | 19 | 31 | 4 | 173 | 10110 of 30128 |
 | save / settings / profile | 199 | 21 | 1 | 15 | 162 | 5825 of 25714 |
 | AI | 42 | 29 | 3 | 8 | 2 | 8620 of 11304 |
@@ -58,8 +58,8 @@ Over-approximate (a referenced vtable brings every slot) and under-approximate (
 
 | tier | functions | verified | callee | cited | absent | runtime / STL / thunk | platform layer | game + engine logic not verified |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| race | 4905 | 2768 | 542 | 466 | 1129 | 68 | 610 | 1767 |
-| game | 2431 | 904 | 213 | 150 | 1164 | 77 | 313 | 1219 |
+| race | 4905 | 2770 | 542 | 464 | 1129 | 68 | 610 | 1765 |
+| game | 2431 | 907 | 212 | 149 | 1163 | 77 | 313 | 1219 |
 | service | 452 | 11 | 2 | 10 | 429 | 45 | 98 | 306 |
 | dead | 850 | 5 | 3 | 3 | 839 | 61 | 126 | 659 |
 
