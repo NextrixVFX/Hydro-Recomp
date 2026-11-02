@@ -2140,6 +2140,68 @@ inline bool verify_ui_progress_champ( )
     return failed == 0;
 }
 
+// core/ui/progress.hxx's records against retail's VuProgressManagerImpl on its own vtable (oracle case progress_records): a seeded op script on
+// five starting documents, each op's answer, the out words' raw bits and the whole document's hash.
+inline bool verify_ui_progress_records( )
+{
+    int failed = 0, ops = 0;
+    const auto hash = [ ]( const value_t& v ) { std::string d; vujb_dump( v, d ); return ui_chl_hash( d ); };
+    const auto bits = [ ]( float f ) { std::uint32_t u; std::memcpy( &u, &f, 4 ); return u; };
+    const auto real = [ ]( std::uint32_t u ) { float f; std::memcpy( &f, &u, 4 ); return f; };
+    static const char* const k_games[ 3 ] = { "Race", "TimeTrial", "Slalom" };
+    for ( std::size_t k = 0; k < g_golden_pgr_runs_count; ++k )
+    {
+        const golden_pgr_run_t& run = g_golden_pgr_runs[ k ];
+        value_t document;
+        if ( run.m_doc[ 0 ] )
+            document = c_reader( ui_fnd_bytes( run.m_doc ) ).parse( );
+        for ( int t = 0; t < run.m_steps; ++t )
+        {
+            const golden_pgr_step_t& g = g_golden_pgr_steps[ run.m_first + t ];
+            const std::string op = g.m_op, game = k_games[ g.m_game ];
+            const std::string none = "None", group = g.m_game == 2 ? g.m_group : none;
+            int ret = 0;
+            std::int32_t ia = 0x11111111, ib = 0x22222222, ic = 0x33333333;
+            float fb = real( 0x22222222u ), fc = real( 0x33333333u ), fa = real( 0x11111111u );
+            bool ints = false, one_float = false;
+            if ( op == "add" )
+                ui_progress_add( document, game, g.m_track, group, g.m_boat, g.m_mode, g.m_place, real( g.m_total ), real( g.m_lap ) );
+            else if ( op == "read" )
+                ret = ui_progress_record( document, game, g.m_track, g.m_boat, g.m_mode, ia, fb, fc ) ? 1 : 0;
+            else if ( op == "best" )
+                ret = ui_progress_best( document, game, g.m_track, group, g.m_mode, ia, fb, fc ) ? 1 : 0;
+            else if ( op == "any" )
+                ret = ui_progress_best_any( document, game, g.m_track, g.m_group, ia, fb, fc ) ? 1 : 0;
+            else if ( op == "count" )
+                ret = ui_progress_count( document, game );
+            else if ( op == "medals" )
+            {
+                ui_progress_medals( document, game, g.m_mode, ia, ib, ic );
+                ints = true;
+            }
+            else if ( op == "ghost" )
+                ui_progress_ghost_add( document, g.m_boat, g.m_place, real( g.m_total ) );
+            else if ( op == "ghostread" )
+            {
+                ret = ui_progress_ghost_time( document, g.m_boat, fa ) ? 1 : 0;
+                one_float = true;
+            }
+            const std::uint32_t a = one_float ? bits( fa ) : static_cast< std::uint32_t >( ia );
+            const std::uint32_t b = ints ? static_cast< std::uint32_t >( ib ) : one_float ? 0x22222222u : bits( fb );
+            const std::uint32_t c = ints ? static_cast< std::uint32_t >( ic ) : one_float ? 0x33333333u : bits( fc );
+            ++ops;
+            if ( ( ret != g.m_ret || a != g.m_a || b != g.m_b || c != g.m_c || hash( document ) != g.m_doc ) && ++failed <= 6 )
+                LOG_ERROR( "ui records: run %d step %d %s %s %s %s %s mode %d differs: %d %08X %08X %08X doc %d, want %d %08X %08X %08X", static_cast< int >( k ), t, g.m_op, game.c_str( ), g.m_track, g.m_group, g.m_boat, g.m_mode,
+                           ret, a, b, c, hash( document ) == g.m_doc ? 1 : 0, g.m_ret, g.m_a, g.m_b, g.m_c );
+        }
+    }
+    if ( failed == 0 )
+        LOG_SUCCESS( "ui_progress_* records match retail's VuProgressManagerImpl slots 5 .. 21, 30, 31 (0x4B1930 .. 0x4B37F0 0x4B3E10 0x4B3F90) on %d ops", ops );
+    else
+        LOG_ERROR( "ui records: %d ops differ from retail", failed );
+    return failed == 0;
+}
+
 inline bool verify_ui_results_all( )
 {
     bool ok = true;
@@ -2156,5 +2218,6 @@ inline bool verify_ui_results_all( )
     ok = verify_ui_font_draw( ) && ok;
     ok = verify_ui_save_file( ) && ok;
     ok = verify_ui_progress_champ( ) && ok;
+    ok = verify_ui_progress_records( ) && ok;
     return ok;
 }
