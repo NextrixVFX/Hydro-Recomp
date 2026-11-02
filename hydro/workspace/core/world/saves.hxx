@@ -94,6 +94,8 @@ inline void c_world::settings_start( )
     m_settings_hooks.has_accelerometer = m_settings_platform.m_sys_54;
     m_settings_hooks.has_tilt = m_settings_platform.m_sys_58;
     settings_load( m_settings, m_constant_db, m_profile.data, m_settings_hooks, m_settings_platform );
+    if ( const char* fidelity = c_engine::option( "fidelity" ) )   // ours (a test driver): Low, Medium or High for this run
+        ui_settings_set_fidelity( m_settings.ui, fidelity, m_settings_platform );
     cloud_profile_load( m_cloud_profile, m_profile.data );
     {
         std::vector< std::uint8_t > bytes;

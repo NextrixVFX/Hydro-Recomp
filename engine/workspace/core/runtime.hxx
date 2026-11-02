@@ -15,6 +15,7 @@
 #include <workspace/core/render/mesh.hxx>
 #include <workspace/core/scene/composer.hxx>
 #include <workspace/core/bench.hxx>
+#include <workspace/utility/drawstats.hxx>
 
 #include <cstdio>
 #include <cstring>
@@ -176,6 +177,7 @@ int c_engine::run( const char* title )
     LOG_SUCCESS( "draw handlers %d  scene nodes %d", g_draw( ).count( ), g_scene( ).count( ) );
 
     g_bench( ).configure( );
+    drawstats::configure( c_engine::option( "draw-stats" ) != nullptr );   // ours (a test driver): utility/drawstats.hxx
 
     // Ours (a test driver): --exit-after N ends the run after N frames, so the real window path can be run unattended.
     const char* exit_after = c_engine::option( "exit-after" );
@@ -248,6 +250,7 @@ int c_engine::run( const char* title )
         const double phase_overlay = trace::now( );
         swap.present( );
         const double phase_present = trace::now( );
+        drawstats::frame_end( );
         if ( frame_log )
             frame_rows.push_back( { fps_last, phase_pump, phase_tick, phase_overlay, phase_present, 0.0, logger::g_lines - lines_before } );
 
@@ -293,6 +296,11 @@ int c_engine::run( const char* title )
         }
     }
 
+    {
+        const char* out = c_engine::option( "out" );
+        const std::string path = out != nullptr ? std::string( out ) + "/drawstats.txt" : std::string( );
+        drawstats::report( out != nullptr ? path.c_str( ) : nullptr );
+    }
     const int code = g_bench( ).report( );
     g_geometry( ).release( );
     return code;

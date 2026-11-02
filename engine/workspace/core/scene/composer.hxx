@@ -1,6 +1,7 @@
-﻿#pragma once
+#pragma once
 
 #include <impl/engine.hxx>
+#include <workspace/utility/drawstats.hxx>
 
 class c_composer : public c_draw
 {
@@ -96,6 +97,8 @@ void c_composer::main_pass( )
 void c_composer::blit( )
 {
 #if HYDRO_HOST_WINDOWS
+    const drawstats::scope_t pass( drawstats::k_post );
+    ++drawstats::at( ).draws;
     ID3D11ShaderResourceView* unbound = nullptr;
     g_swap( ).bind( g_device( ) );
     g_device( ).context( )->RSSetState( nullptr );
@@ -145,6 +148,9 @@ void c_composer::blit_screen( )
     if ( g_overlay_texture == nullptr || g_overlay_view == nullptr )
         return;
 
+    const drawstats::scope_t pass( drawstats::k_post );
+    ++drawstats::at( ).draws;
+    ++drawstats::at( ).constants;
     context->UpdateSubresource( g_overlay_texture, 0, nullptr, screen.pixels, static_cast< UINT >( screen.width * 4 ), 0 );
 
     if ( g_overlay_blend == nullptr )
