@@ -301,6 +301,8 @@ inline constexpr std::uint32_t k_ui_lock_text_vtable = 0x73BDDCu;
 // binding: +0xB0).
 inline constexpr std::uint32_t k_ui_boat_config_vtable = 0x73C69Cu;
 inline constexpr std::uint32_t k_ui_boat_stat_vtable = 0x73C808u;
+inline constexpr std::uint32_t k_ui_boat_player_vtable = 0x73C654u;  // VuSetBoatConfigPlayerEntity (ctor 0x44ECF0): SetSinglePlayer 0x44EF10, SetIndex 0x44EEA0
+inline constexpr std::uint32_t k_ui_loading_bar_vtable = 0x73D724u;  // VuLoadingProgressBarEntity (leaves.hxx)
 
 struct ui_bound_config_t
 {
@@ -353,6 +355,9 @@ struct ui_bound_t
     ui_combo_box_hooks_t m_combo_hooks;
     std::unique_ptr< c_ui_combo_box > m_combo;              // VuUISubtitlesSettingEntity (chooser.hxx)
     std::unique_ptr< ui_boat_stat_t > m_stat;               // VuBoatStatEntity +0xB0
+    std::unique_ptr< ui_progress_bar_t > m_bar;             // batch 32: VuLoadingProgressBarEntity +0x84 / +0x88
+    std::uint8_t m_bar_initially = 1;                       // +0x80 "Initially Visible"
+    ui_config_combo_t m_combo_record;                       // batch 32: the settings combo's record +0x278 as the draw reads it (combo( e ))
     // batch 22: VuUIMiniLeaderboardEntity (board.hxx; bound when m_leaderboard is set)
     ui_mini_board_hooks_t m_board_hooks;
     std::unique_ptr< c_ui_mini_board > m_board;
@@ -1209,6 +1214,15 @@ private:
             bind_config( b );
         else if ( b.m_vtable == k_ui_boat_stat_vtable )
             b.m_stat = std::make_unique< ui_boat_stat_t >( );
+        else if ( b.m_vtable == k_ui_loading_bar_vtable )
+        {
+            // The ctor 0x462D70: OnLoadProgress 0x463240; the input plugs Show 0x462C40 / Hide 0x462C60 (run_input)
+            b.m_bar = std::make_unique< ui_progress_bar_t >( );
+            if ( const ui_slot_t* s = ui_bind_slot( e, "Initially Visible" ) )
+                b.m_bar_initially = static_cast< std::uint8_t >( s->m_bits[ 0 ] & 0xFFu );
+            ui_progress_bar_t& bar = *b.m_bar;
+            add( b, "OnLoadProgress", 0x463240u, [ &bar ]( const ui_params_t& p ) { ui_progress_bar_on_load_progress( bar, p ); } );
+        }
         else if ( b.m_vtable == k_ui_mini_board_vtable && m_hooks.m_leaderboard )
         {
             // ctor 0x47CC40 registers no event handlers; its draw / slot 6 / slot 7 / "Decision" are board.hxx's
@@ -1397,6 +1411,10 @@ private:
              ( vt == k_ui_subtitles_vtable || ( index_of( owner ) >= 0 && m_bound[ static_cast< std::size_t >( index_of( owner ) ) ]->m_combo ) ) )
             return true;
         if ( vt == k_ui_boat_stat_vtable && std::strcmp( plug, "Set" ) == 0 )
+            return true;
+        if ( vt == k_ui_loading_bar_vtable && ( std::strcmp( plug, "Show" ) == 0 || std::strcmp( plug, "Hide" ) == 0 ) )
+            return true;
+        if ( vt == k_ui_boat_player_vtable && m_hooks.m_root && ( std::strcmp( plug, "SetSinglePlayer" ) == 0 || std::strcmp( plug, "SetIndex" ) == 0 ) )
             return true;
         if ( vt == k_ui_user_next_vtable && std::strcmp( plug, "Trigger" ) == 0 )
             return true;
@@ -1695,6 +1713,8 @@ private:
             known = true;   // batch 29: 0x469B10
         else if ( b && b->m_champ && m_hooks.m_champ )
             known = true;   // batch 30: 0x451370 / 0x451540
+        else if ( vt == k_ui_loading_bar_vtable && b && b->m_bar )
+            known = true;   // batch 32: slot 6 0x463220, slot 7 the nullsub 0x401560
         else if ( !init && ( vt == k_ui_game_config_vtable || ( vt == k_ui_boat_config_vtable && m_hooks.m_root ) ) && b && b->m_config )
             known = true;   // batch 26: slot 7 0x45D080 / 0x44D090 (slot 6 stays config_setup( )'s)
         trace( ui_trace_kind_t::game, index, std::string( ), address, ui_params_t( ), known );
@@ -1730,6 +1750,15 @@ private:
                 ui_game_config_release( c.m_game, c.m_hooks );   // 0x45D080
             else if ( !ui_boat_config_game_release( *m_hooks.m_root, c.m_dock.m_player, c.m_dock.m_base.m_options.size( ), c.m_hooks ) )   // 0x44D090
                 ++m_config_faults;
+        }
+        else if ( vt == k_ui_loading_bar_vtable )
+        {
+            if ( init )
+            {
+                // 0x463220: progress = 0, visible = Initially Visible
+                b->m_bar->m_progress = 0.0f;
+                b->m_bar->m_visible = b->m_bar_initially;
+            }
         }
         else if ( vt == k_ui_button_vtable )
         {
@@ -1838,6 +1867,57 @@ public:
         const c_ui_button* button = index >= 0 ? m_bound[ static_cast< std::size_t >( index ) ]->m_button.get( ) : nullptr;
         focused = button && button->m_focused ? 1u : 0u;
         press = button ? button->m_press : 0u;
+    }
+    // Batch 32: what the frame's m_config / m_combo / m_info / m_stat / m_bar read.
+    // A bound selector's base (VuBaseConfigEntity: its option vector +0x2BC and records +0x2B0), or null.
+    const ui_config_entity_t* config( const entity_t& e )
+    {
+        const int index = index_of( e );
+        if ( index < 0 || !m_bound[ static_cast< std::size_t >( index ) ]->m_config )
+            return nullptr;
+        return &m_bound[ static_cast< std::size_t >( index ) ]->m_config->base( );
+    }
+    // A bound settings combo's record +0x278 (ctor 0x474590; 0x475B10 draws it): +4 Heading String ID, +0x1C the choices, +0x28 the latched
+    // focus +0x2A0, +0x29 / +0x2A the arrows' pressed bytes, +0x2C the current choice, +0x30 the shown one. Null: not bound.
+    const ui_config_combo_t* combo( const entity_t& e )
+    {
+        const int index = index_of( e );
+        if ( index < 0 || !m_bound[ static_cast< std::size_t >( index ) ]->m_combo )
+            return nullptr;
+        ui_bound_t& b = *m_bound[ static_cast< std::size_t >( index ) ];
+        const c_ui_combo_box& c = *b.m_combo;
+        ui_config_combo_t& r = b.m_combo_record;
+        r.m_focused = c.m_latched;
+        r.m_b41 = c.m_left_pressed;
+        r.m_b42 = c.m_right_pressed;
+        r.m_index = c.m_current;
+        r.m_shown = c.m_shown;
+        r.m_choice_ids.clear( );
+        r.m_locked.clear( );
+        for ( const auto& choice : c.m_choice_texts )
+        {
+            r.m_choice_ids.push_back( choice.first );
+            r.m_locked.push_back( choice.second );
+        }
+        if ( const ui_slot_t* s = ui_bind_slot( e, "Heading String ID" ) )
+            r.m_string_id = s->m_text;
+        return &r;
+    }
+    // A bound ticker (VuInfoUITextEntity: +0x12C.. and slot 12's text +0x140), or null.
+    const ui_info_ticker_t* ticker( const entity_t& e ) const
+    {
+        const int index = index_of( e );
+        return index >= 0 ? m_bound[ static_cast< std::size_t >( index ) ]->m_ticker.get( ) : nullptr;
+    }
+    const ui_boat_stat_t* stat( const entity_t& e ) const
+    {
+        const int index = index_of( e );
+        return index >= 0 ? m_bound[ static_cast< std::size_t >( index ) ]->m_stat.get( ) : nullptr;
+    }
+    const ui_progress_bar_t* bar( const entity_t& e ) const
+    {
+        const int index = index_of( e );
+        return index >= 0 ? m_bound[ static_cast< std::size_t >( index ) ]->m_bar.get( ) : nullptr;
     }
     // Batch 30: a bound championship's state (the frame's m_champ draws it), or null.
     ui_champ_state_t* champ( const entity_t& e ) const
@@ -1976,6 +2056,24 @@ private:
         {
             // 0x44FCA0: +0xB0 = the first record as an int; VuRetVal +0 = 0
             ui_boat_stat_set( *m_bound[ static_cast< std::size_t >( index_of( owner ) ) ]->m_stat, p );
+            out.m_known = false;
+            return out;
+        }
+        if ( vt == k_ui_boat_player_vtable )
+        {
+            // 0x44EF10 (select.hxx ui_set_single_player); 0x44EEA0: BoatConfig.CurPlayerIndex = the first record as an int (0x4237B0)
+            if ( std::strcmp( plug, "SetSinglePlayer" ) == 0 )
+                ui_set_single_player( *m_hooks.m_root );
+            else
+                ui_boat_player_index( *m_hooks.m_root, p );
+            out.m_known = false;
+            return out;
+        }
+        if ( vt == k_ui_loading_bar_vtable )
+        {
+            // 0x462C40 / 0x462C60: visible +0x88; VuRetVal +0 = 0
+            ui_progress_bar_t& bar = *m_bound[ static_cast< std::size_t >( index_of( owner ) ) ]->m_bar;
+            out.m_words[ 0 ] = std::strcmp( plug, "Show" ) == 0 ? ui_progress_bar_show( bar ) : ui_progress_bar_hide( bar );
             out.m_known = false;
             return out;
         }

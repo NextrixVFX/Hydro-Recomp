@@ -35,6 +35,9 @@ enum class ui_action_kind_t
     set,
     reload,
     set_game_mode,  // VuSetGameModeUIAction (vtable 0x73E6E0), slot 12 0x472740
+    start_game,     // VuStartActionGameUIAction (ctor 0x470920, vtable 0x73EB08), slot 12 0x470A80: "OnStartActionGame" + its +0x5C "Type" (default "AttractEvent")
+    clear_results,  // VuClearGameResultsUIAction (create 0x4721D0, vtable 0x73E788), slot 12 0x4721A0: gameutil +0x50 ["GameResults"] cleared (0x4FC090, 0x4FBB10)
+    presence        // VuSetMenuPresenceUIAction (ctor 0x472010, vtable 0x73E7E0), slot 12 0x4050B0: VuRetVal 0, nothing else
 };
 
 // The class's kind; false for a type that is not one of the four.
@@ -50,6 +53,12 @@ inline bool ui_action_kind_of( const std::string& cls, ui_action_kind_t& kind )
         kind = ui_action_kind_t::reload;
     else if ( cls == "VuSetGameModeUIAction" )
         kind = ui_action_kind_t::set_game_mode;
+    else if ( cls == "VuStartActionGameUIAction" )
+        kind = ui_action_kind_t::start_game;
+    else if ( cls == "VuClearGameResultsUIAction" )
+        kind = ui_action_kind_t::clear_results;
+    else if ( cls == "VuSetMenuPresenceUIAction" )
+        kind = ui_action_kind_t::presence;
     else
         return false;
     return true;
@@ -87,6 +96,16 @@ public:
             // its +92 "Game Mode"). Without a game-data root nothing is written.
             if ( m_root )
                 ui_json_set_string( ui_json_child( ui_json_child( *m_root, "GameConfig" ), "Mode" ), m_screen.c_str( ) );
+            return 0;
+        case ui_action_kind_t::start_game:
+            p.add_string( m_screen.c_str( ) );
+            event = "OnStartActionGame";
+            break;
+        case ui_action_kind_t::clear_results:
+            if ( m_root )
+                ui_json_child( *m_root, "GameResults" ) = value_t( );
+            return 0;
+        case ui_action_kind_t::presence:
             return 0;
         }
         if ( m_broadcast )
