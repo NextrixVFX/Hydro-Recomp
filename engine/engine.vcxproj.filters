@@ -113,6 +113,9 @@
     <ClInclude Include="workspace\utility\crash.hxx">
       <Filter>workspace\utility</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\utility\drawstats.hxx">
+      <Filter>workspace\utility</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\utility\golden.hxx">
       <Filter>workspace\utility</Filter>
     </ClInclude>

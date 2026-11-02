@@ -6371,14 +6371,14 @@ address,size,ida_name,classes,vtable_slots,subsystem,status,cited_in,thunk,libra
 0x58B8E0,104,sub_58B8E0,,,particles (by address),verified,hydro/workspace/core/world/pfxsim.hxx,False,False,race
 0x58B950,73,sub_58B950,,,particles (by address),verified,hydro/workspace/core/world/pfxsim.hxx,False,False,race
 0x58B9A0,118,sub_58B9A0,,,particles (by address),verified,hydro/workspace/core/world/pfxsim.hxx; hydro/workspace/utility/checks/pfx.hxx,False,False,race
-0x58BA20,16,sub_58BA20,,,particles (by address),cited,hydro/workspace/core/world/pfxclass.hxx; hydro/workspace/core/world/pfxdraw.hxx,False,False,race
+0x58BA20,16,sub_58BA20,,,particles (by address),cited,hydro/workspace/core/world/gfxsort.hxx; hydro/workspace/core/world/pfxclass.hxx; hydro/workspace/core/world/pfxdraw.hxx,False,False,race
 0x58BA30,141,sub_58BA30,,,particles (by address),verified,hydro/workspace/core/world/pfxload.hxx,False,False,game
 0x58BAC0,663,sub_58BAC0,,,particles (by address),cited,hydro/workspace/core/world/pfxdraw.hxx; hydro/workspace/core/world/pfxload.hxx; hydro/workspace/core/world/stage.hxx,False,False,race
 0x58BD60,1502,sub_58BD60,,,unattributed,verified,hydro/workspace/core/world/effects.hxx; hydro/workspace/core/world/pfxclass.hxx; hydro/workspace/core/world/pfxdraw.hxx; hydro/workspace/core/world/pfxsim.hxx; hydro/workspace/utility/checks/pfx.hxx,False,False,race
 0x58C340,2377,sub_58C340,,,unattributed,verified,hydro/workspace/core/world/pfxclass.hxx; hydro/workspace/core/world/pfxdraw.hxx; hydro/workspace/core/world/stage.hxx; hydro/workspace/utility/checks/pfx.hxx,False,False,race
 0x58CC90,37,sub_58CC90,,,unattributed,verified,hydro/workspace/core/world/pfxload.hxx,False,False,game
 0x58CCC0,353,sub_58CCC0,,,unattributed,cited,hydro/workspace/core/world/pfxdraw.hxx; hydro/workspace/core/world/stage.hxx,False,False,race
-0x58CE30,16,sub_58CE30,,,unattributed,cited,hydro/workspace/core/world/effects.hxx; hydro/workspace/core/world/pfxclass.hxx; hydro/workspace/core/world/pfxdraw.hxx,False,False,race
+0x58CE30,16,sub_58CE30,,,unattributed,cited,hydro/workspace/core/world/effects.hxx; hydro/workspace/core/world/gfxsort.hxx; hydro/workspace/core/world/pfxclass.hxx; hydro/workspace/core/world/pfxdraw.hxx,False,False,race
 0x58CE40,485,sub_58CE40,,,unattributed,cited,hydro/workspace/core/world/pfxclass.hxx; hydro/workspace/core/world/pfxdraw.hxx; hydro/workspace/core/world/pfxload.hxx; hydro/workspace/core/world/stage.hxx,False,False,race
 0x58D030,950,sub_58D030,,,unattributed,verified,hydro/workspace/core/world/effects.hxx; hydro/workspace/core/world/pfxclass.hxx; hydro/workspace/core/world/pfxdraw.hxx; hydro/workspace/core/world/pfxsim.hxx; hydro/workspace/utility/checks/pfx.hxx,False,False,race
 0x58D3F0,2538,sub_58D3F0,,,unattributed,verified,hydro/workspace/core/world/pfxclass.hxx; hydro/workspace/core/world/pfxdraw.hxx; hydro/workspace/core/world/stage.hxx; hydro/workspace/utility/checks/pfx.hxx,False,False,race
@@ -6483,7 +6483,7 @@ address,size,ida_name,classes,vtable_slots,subsystem,status,cited_in,thunk,libra
 0x594B20,135,sub_594B20,,,unattributed,verified,hydro/workspace/core/world/surface.hxx; hydro/workspace/utility/checks/watchers.hxx,False,False,game
 0x594BC0,12,sub_594BC0,,,unattributed,cited,hydro/workspace/core/world/grid.hxx,False,False,race
 0x594BD0,413,sub_594BD0,,,unattributed,verified,hydro/workspace/core/world/query.hxx; hydro/workspace/utility/checks/water.hxx,False,False,race
-0x594D70,16,sub_594D70,,,unattributed,verified,hydro/workspace/core/world/shading.hxx; hydro/workspace/core/world/stage.hxx; hydro/workspace/core/world/waterpass.hxx,False,False,race
+0x594D70,16,sub_594D70,,,unattributed,verified,hydro/workspace/core/world/gfxsort.hxx; hydro/workspace/core/world/shading.hxx; hydro/workspace/core/world/stage.hxx; hydro/workspace/core/world/waterpass.hxx,False,False,race
 0x594D80,16,sub_594D80,,,unattributed,absent,,False,False,race
 0x594D90,39,sub_594D90,,,unattributed,verified,hydro/workspace/core/world/grid.hxx,False,False,race
 0x594DD0,1122,sub_594DD0,,,unattributed,cited,hydro/workspace/core/world/grid.hxx; hydro/workspace/core/world/wavemap.hxx,False,False,race
@@ -6992,9 +6992,9 @@ address,size,ida_name,classes,vtable_slots,subsystem,status,cited_in,thunk,libra
 0x5BC5F0,19,sub_5BC5F0,,,unattributed,verified,hydro/workspace/core/world/composer.hxx; hydro/workspace/core/world/stage.hxx; hydro/workspace/utility/checks/device.hxx,False,False,game
 0x5BC610,73,sub_5BC610,,,unattributed,verified,hydro/workspace/core/world/composer.hxx; hydro/workspace/core/world/stage.hxx; hydro/workspace/utility/checks/device.hxx,False,False,game
 0x5BC660,134,sub_5BC660,,,unattributed,verified,hydro/workspace/core/world/composer.hxx,False,False,game
-0x5BC6F0,53,sub_5BC6F0,,,unattributed,verified,engine/workspace/core/render/post.hxx; hydro/workspace/core/world/composer.hxx; hydro/workspace/core/world/stage.hxx; hydro/workspace/utility/checks/device.hxx,False,False,game
+0x5BC6F0,53,sub_5BC6F0,,,unattributed,verified,engine/workspace/core/render/post.hxx; hydro/workspace/core/world/composer.hxx; hydro/workspace/core/world/gfxsort.hxx; hydro/workspace/core/world/stage.hxx; hydro/workspace/utility/checks/device.hxx,False,False,game
 0x5BC730,155,sub_5BC730,,,unattributed,verified,hydro/workspace/core/world/composer.hxx,False,False,game
-0x5BC7D0,58,sub_5BC7D0,,,unattributed,verified,engine/workspace/core/render/post.hxx; hydro/workspace/core/world/composer.hxx; hydro/workspace/core/world/stage.hxx; hydro/workspace/utility/checks/device.hxx,False,False,game
+0x5BC7D0,58,sub_5BC7D0,,,unattributed,verified,engine/workspace/core/render/post.hxx; hydro/workspace/core/world/composer.hxx; hydro/workspace/core/world/gfxsort.hxx; hydro/workspace/core/world/stage.hxx; hydro/workspace/utility/checks/device.hxx,False,False,game
 0x5BC810,811,sub_5BC810,,,unattributed,absent,,False,False,game
 0x5BCB60,16,sub_5BCB60,VuGenericFile; VuMetroFile,VuGenericFile+3; VuMetroFile+3,engine core / math / containers,absent,,False,False,game
 0x5BCB70,17,sub_5BCB70,VuGenericFile,VuGenericFile+5,engine core / math / containers,absent,,False,False,game
@@ -7696,7 +7696,7 @@ address,size,ida_name,classes,vtable_slots,subsystem,status,cited_in,thunk,libra
 0x5E8080,343,sub_5E8080,,,rendering / gfx (by address),verified,hydro/workspace/core/world/corona.hxx; hydro/workspace/utility/checks/render.hxx,False,False,race
 0x5E81E0,230,sub_5E81E0,,,rendering / gfx (by address),cited,hydro/workspace/core/world/corona.hxx,False,False,race
 0x5E82D0,316,sub_5E82D0,,,rendering / gfx (by address),verified,hydro/workspace/core/world/corona.hxx; hydro/workspace/core/world/stage.hxx; hydro/workspace/utility/checks/render.hxx,False,False,race
-0x5E8410,752,sub_5E8410,,,rendering / gfx (by address),cited,engine/workspace/core/entity/light.hxx; hydro/workspace/core/world/corona.hxx; hydro/workspace/core/world/stage.hxx,False,False,race
+0x5E8410,752,sub_5E8410,,,rendering / gfx (by address),cited,engine/workspace/core/entity/light.hxx; hydro/workspace/core/world/corona.hxx; hydro/workspace/core/world/gfxsort.hxx; hydro/workspace/core/world/stage.hxx,False,False,race
 0x5E8700,73,sub_5E8700,,,rendering / gfx (by address),callee,,False,False,race
 0x5E8750,73,sub_5E8750,,,rendering / gfx (by address),callee,,False,False,race
 0x5E87A0,156,sub_5E87A0,,,rendering / gfx (by address),callee,,False,False,race
