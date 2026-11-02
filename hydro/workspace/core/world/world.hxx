@@ -138,6 +138,18 @@ private:
 
     // texture_for: models.hxx
     int texture_for( const std::string& path );
+    void prewarm( const std::string& project );   // world/prewarm.hxx
+    void prewarm_report( double start ) const;
+    // Ours: the load's window ends with the first frame's overlay. That frame reads the HUD and the debris, and frees the cache, before anything is shown.
+    void load_close( )
+    {
+        if ( m_load_settle == 0 )
+            return;
+        m_load_settle = 0;
+        m_archive.cache_end( );
+        m_archive.watch_late( m_load_race );
+        prewarm_report( m_load_start );
+    }
 
     // cube_for: models.hxx
     int cube_for( const std::string& path );
@@ -870,6 +882,7 @@ private:
         const std::string path = pack_path( );
         if ( path.empty( ) || !m_archive.open( path.c_str( ) ) )
             return;
+        m_archive.cache_off( c_engine::option( "no-read-cache" ) != nullptr );   // diagnostic: the before of world/prewarm.hxx's measure
         m_opened = true;
         seed_random( );
     }
@@ -1136,7 +1149,7 @@ public:
                 }, this );
 #if HYDRO_UI_PASS
                 m_ui_pass = std::make_unique< gfx_ui_pass_t >( device, context, [ this ]( const std::string& asset, std::vector< std::uint8_t >& out ) { return m_archive.read( asset.c_str( ), out ); } );
-                c_engine::overlay( []( void* u ) { static_cast< c_world* >( u )->ui_frame( ); }, this );
+                c_engine::overlay( []( void* u ) { static_cast< c_world* >( u )->ui_frame( ); static_cast< c_world* >( u )->load_close( ); }, this );
 #endif
             }
         }
@@ -1206,6 +1219,9 @@ public:
             return false;
         } );
         const std::string path = "VuProjectAsset/" + name;
+        m_load_start = trace::now( );   // ours: world/prewarm.hxx
+        m_archive.watch_late( false );
+        m_archive.cache_begin( );
         wipe_scene( );
         m_vantage_ready = false;
         m_authored_camera = false;
@@ -1240,7 +1256,11 @@ public:
             LOG_WARNING( "0x4BA060: the %s game's ctor (0x48BEC0 / 0x48ED30 / 0x484A20) is NOT recreated - no game object", type.c_str( ) );
             break;
         }
+        if ( race )
+            prewarm( path );
         saves_commit( );   // 0x4BA396 / 0x4BA3A7, at the load's end
+        m_load_settle = 1;
+        m_load_race = race;
         };
         m_action.reset( );
         if ( race && front_end )
@@ -1567,6 +1587,14 @@ public:
     // owns one; without a race the settings entity applied at load stands for it.
     void water_stage_frame( float dt )
     {
+        water_stage_attach( );
+        if ( m_water_texture_set )
+            m_stage.wave_settings( m_water_texture );
+        water_stage_view( dt );
+    }
+    // Once per stage; world/prewarm.hxx calls it at the load, the first frame otherwise.
+    void water_stage_attach( )
+    {
         if ( !m_stage_attached )
         {
             water_pass_source_t source;
@@ -1583,8 +1611,9 @@ public:
             m_stage_bound = true;
             LOG_INFO( "water: %d surfaces on %d retail shaders", static_cast< int >( m_stage.m_surface_shader.size( ) ), static_cast< int >( m_stage.m_pass->m_shaders.size( ) ) );
         }
-        if ( m_water_texture_set )
-            m_stage.wave_settings( m_water_texture );
+    }
+    void water_stage_view( float dt )
+    {
         std::uint32_t record[ 22 ];
         std::memcpy( record, m_gfx_record, sizeof( record ) );
         if ( m_race.active )
@@ -1991,6 +2020,9 @@ public:
 
 private:
     bool m_opened = false;
+    int m_load_settle = 0;
+    bool m_load_race = false;
+    double m_load_start = 0.0;
     bool m_loaded = false;
     // Set when the walk found a real VuSetFrontEndCameraEntity. A race project
     // does not author one, but a screen project does, and an authored vantage
@@ -2493,3 +2525,4 @@ private:
 #include <workspace/core/world/huds.hxx>
 #include <workspace/core/world/front.hxx>
 #include <workspace/core/world/models.hxx>
+#include <workspace/core/world/prewarm.hxx>

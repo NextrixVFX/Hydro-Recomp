@@ -9,6 +9,7 @@
 #include <fstream>
 #include <map>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 extern "C"
@@ -26,6 +27,22 @@ extern "C"
 // compressed flag. A set flag means the payload is a zlib stream.
 class c_archive
 {
+    struct entry_t
+    {
+        std::string name;
+        std::uint32_t offset = 0;
+        std::uint32_t raw = 0;
+        std::uint32_t compressed = 0;
+        std::uint32_t kind = 0;
+        std::uint32_t crc = 0;
+        bool packed = false;
+    };
+
+    mutable std::unordered_map< std::string, std::vector< std::uint8_t > > m_cache;
+    mutable std::size_t m_cache_bytes = 0, m_cache_peak = 0;
+    mutable int m_cache_depth = 0, m_late = 0;
+    mutable bool m_cache_off = false, m_watch_late = false;
+
 public:
     bool open( const char* path )
     {
@@ -119,6 +136,68 @@ public:
         const std::uint32_t stored = entry->packed ? entry->compressed : entry->raw;
         if ( stored < 8 )
             return false;
+
+        // Ours, not retail's (a platform-layer cost, frame spikes fix 2): one inflate per asset. Each caller gets its own
+        // copy, so a caller that edits its bytes cannot reach another's.
+        const auto cached = m_cache.find( name );
+        if ( cached != m_cache.end( ) )
+        {
+            out = cached->second;
+            return true;
+        }
+        if ( !inflate_entry( *entry, stored, name, out ) )
+            return false;
+        spikes::note( name, stored, trace::now( ) - spike_start );
+
+        // Ours: a read during a race is a hitch the load's prewarm missed (world/prewarm.hxx). The goal is 0.
+        if ( m_watch_late )
+        {
+            ++m_late;
+            LOG_WARNING( "late first use %d: %s", m_late, name );
+        }
+        if ( !m_cache_off && ( m_cache_depth > 0 || session_kept( name ) ) )
+        {
+            m_cache_bytes += out.size( );
+            m_cache_peak = m_cache_bytes > m_cache_peak ? m_cache_bytes : m_cache_peak;
+            m_cache.emplace( name, out );
+        }
+        return true;
+    }
+
+    // Ours: reads between begin and end are held; end drops all but what session_kept names. Nests.
+    void cache_begin( ) const { ++m_cache_depth; }
+    void cache_end( ) const
+    {
+        if ( m_cache_depth == 0 || --m_cache_depth != 0 )
+            return;
+        LOG_INFO( "read cache: %u assets, %.1f MB at the load's end, peak %.1f MB", static_cast< unsigned >( m_cache.size( ) ),
+            static_cast< double >( m_cache_bytes ) / 1048576.0, static_cast< double >( m_cache_peak ) / 1048576.0 );
+        for ( auto it = m_cache.begin( ); it != m_cache.end( ); )
+        {
+            if ( session_kept( it->first.c_str( ) ) )
+                ++it;
+            else
+            {
+                m_cache_bytes -= it->second.size( );
+                it = m_cache.erase( it );
+            }
+        }
+    }
+    void cache_off( bool off ) const { m_cache_off = off; }   // --no-read-cache (diagnostic, the before of the measure)
+    void watch_late( bool on ) const { m_watch_late = on; }
+    int late( ) const { return m_late; }
+    bool has( const std::string& name ) const { return find( name.c_str( ) ) != nullptr; }
+
+private:
+    // The small documents every screen and load reads again.
+    static bool session_kept( const char* name )
+    {
+        return std::strncmp( name, "VuDBAsset/", 10 ) == 0 || std::strcmp( name, "Assets/AssetData" ) == 0;
+    }
+
+    bool inflate_entry( const entry_t& record, std::uint32_t stored, const char* name, std::vector< std::uint8_t >& out ) const
+    {
+        const entry_t* entry = &record;
         spikes::count( spikes::c_reads );
         spikes::count( spikes::c_read_bytes, stored );
 
@@ -157,10 +236,10 @@ public:
         }
 
         LOG_VERBOSE( "asset %s  %u bytes", name, static_cast< unsigned >( dest_len ) );
-        spikes::note( name, stored, trace::now( ) - spike_start );
         return true;
     }
 
+public:
     int count( ) const
     {
         return static_cast< int >( m_entries.size( ) );
@@ -391,17 +470,6 @@ private:
     std::map< std::string, pack_record_t > m_pack_records;
     bool m_pack_open = false;
     mutable bool m_pack_unknown = false;
-
-    struct entry_t
-    {
-        std::string name;
-        std::uint32_t offset = 0;
-        std::uint32_t raw = 0;
-        std::uint32_t compressed = 0;
-        std::uint32_t kind = 0;
-        std::uint32_t crc = 0;
-        bool packed = false;
-    };
 
     static std::uint32_t read_u32( const unsigned char* bytes )
     {
