@@ -87,6 +87,7 @@ public:
     // The game's retail scene (hydro world/stage.hxx): called once per view after the opaque placements, `reflecting` on the mirror pass.
     static void stage_pass( void ( *pass )( void* user, int width, int height, bool reflection ), void* user );
     static void chain( void*& view, void*& depth, int& width, int& height );
+    static void display( int& width, int& height );   // g 0x75907C vt+0x40: the chain's size, this frame's
     static void look_target( float* target );
     // The game's post step (hydro world/stage.hxx): with the chain bound, the scene's colour view and size. False: the plain copy.
     static void* texture_view( int texture );

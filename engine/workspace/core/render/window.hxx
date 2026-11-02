@@ -25,6 +25,10 @@ public:
 
     int width( ) const { return m_width; }
     int height( ) const { return m_height; }
+    // No client area (minimized, or dragged down to the caption): nothing to draw and nothing to size the chain to. width( ) / height( ) keep the last real size.
+    bool minimized( ) const { return m_minimized; }
+    // Ours (a test driver, --resize-at): the client to this size without taking the foreground; 0 x 0 minimizes.
+    void script_size( int width, int height );
 
 #if HYDRO_HOST_WINDOWS
     HWND handle( ) const { return m_hwnd; }
@@ -40,6 +44,7 @@ private:
     int  m_width{};
     int  m_height{};
     bool m_open{};
+    bool m_minimized{};
 };
 
 #include <workspace/utility/logger.hxx>
@@ -106,19 +111,18 @@ bool c_window::create( int width, int height, const char* title, bool background
         return false;
     }
 
-    const DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
+    // Retail's UWP window is the user's to size (the shots in hydro-tools\reference are about 1200 x 900).
+    const DWORD style = WS_OVERLAPPEDWINDOW;
+    // WS_EX_NOACTIVATE stops the window taking focus on creation or click;
+    // WS_EX_TOOLWINDOW keeps it out of the taskbar and the alt-tab list.
+    const DWORD extended = background ? WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW : 0;
     RECT bounds{ 0, 0, width, height };
-    AdjustWindowRect( &bounds, style, FALSE );
+    AdjustWindowRectEx( &bounds, style, FALSE, extended );
 
     int x = CW_USEDEFAULT;
     int y = CW_USEDEFAULT;
-    DWORD extended = 0;
     if ( background )
     {
-        // WS_EX_NOACTIVATE stops the window taking focus on creation or click;
-        // WS_EX_TOOLWINDOW keeps it out of the taskbar and the alt-tab list.
-        extended = WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
-
         monitor_pick_t pick{};
         EnumDisplayMonitors( nullptr, nullptr, &pick_monitor, reinterpret_cast< LPARAM >( &pick ) );
         const RECT& area = pick.found_secondary ? pick.secondary : pick.primary;
@@ -154,8 +158,10 @@ bool c_window::create( int width, int height, const char* title, bool background
         return false;
     }
 
-    m_width = width;
-    m_height = height;
+    RECT client{};
+    GetClientRect( m_hwnd, &client );
+    m_width = client.right > 0 ? client.right : width;
+    m_height = client.bottom > 0 ? client.bottom : height;
     m_open = true;
     // SW_SHOWNOACTIVATE leaves the caller's foreground window alone. Pairing it
     // with SWP_NOACTIVATE and HWND_BOTTOM keeps a bench run from ever surfacing
@@ -193,6 +199,25 @@ bool c_window::pump( )
     return m_open;
 }
 
+void c_window::script_size( int width, int height )
+{
+#if HYDRO_HOST_WINDOWS
+    if ( width <= 0 || height <= 0 )
+    {
+        ShowWindow( m_hwnd, SW_SHOWMINNOACTIVE );
+        return;
+    }
+    if ( m_minimized )
+        ShowWindow( m_hwnd, SW_SHOWNOACTIVATE );
+    RECT bounds{ 0, 0, width, height };
+    AdjustWindowRectEx( &bounds, static_cast< DWORD >( GetWindowLongPtrW( m_hwnd, GWL_STYLE ) ), FALSE, static_cast< DWORD >( GetWindowLongPtrW( m_hwnd, GWL_EXSTYLE ) ) );
+    SetWindowPos( m_hwnd, nullptr, 0, 0, bounds.right - bounds.left, bounds.bottom - bounds.top, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE );
+#else
+    ( void )width;
+    ( void )height;
+#endif
+}
+
 #if HYDRO_HOST_WINDOWS
 LRESULT CALLBACK c_window::procedure( HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam )
 {
@@ -221,6 +246,19 @@ LRESULT c_window::on_message( HWND hwnd, UINT message, WPARAM wparam, LPARAM lpa
 
     if ( message == WM_ERASEBKGND )
         return 1;
+
+    // Only noted: the frame loop applies it at the top of its next frame, so a border drag (the pump sits in the modal loop until it ends) resizes once, when it has settled.
+    if ( message == WM_SIZE )
+    {
+        const int width = LOWORD( lparam ), height = HIWORD( lparam );
+        m_minimized = wparam == SIZE_MINIMIZED || width <= 0 || height <= 0;
+        if ( !m_minimized )
+        {
+            m_width = width;
+            m_height = height;
+        }
+        return 0;
+    }
 
     return DefWindowProcW( hwnd, message, wparam, lparam );
 }
