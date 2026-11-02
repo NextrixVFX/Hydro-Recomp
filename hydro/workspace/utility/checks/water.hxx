@@ -2707,6 +2707,7 @@ inline bool verify_property_save( )
 #include <workspace/utility/checks/watchers.hxx>
 #include <workspace/utility/checks/wrapper.hxx>
 #include <workspace/utility/checks/logic.hxx>
+#include <workspace/utility/checks/boxes.hxx>
 #include <workspace/utility/checks/render.hxx>
 
 inline bool verify_water_all( )
@@ -2740,6 +2741,7 @@ inline bool verify_water_all( )
     ok = verify_game_plugs( ) && ok;
     ok = verify_front_props( ) && ok;
     ok = verify_oneshot_pfx( ) && ok;
+    ok = verify_message_box( ) && ok;
     ok = verify_logic_game( ) && ok;
     ok = verify_logic_types( ) && ok;
     ok = verify_control_entity( ) && ok;
