@@ -166,6 +166,7 @@
     <ClInclude Include="workspace\core\ui\champ.hxx" />
     <ClInclude Include="workspace\core\ui\chooser.hxx" />
     <ClInclude Include="workspace\core\ui\combo.hxx" />
+    <ClInclude Include="workspace\core\ui\common.hxx" />
     <ClInclude Include="workspace\core\ui\compose.hxx" />
     <ClInclude Include="workspace\core\ui\config.hxx" />
     <ClInclude Include="workspace\core\ui\controls.hxx" />
@@ -188,6 +189,7 @@
     <ClInclude Include="workspace\core\ui\navigate.hxx" />
     <ClInclude Include="workspace\core\ui\overlay.hxx" />
     <ClInclude Include="workspace\core\ui\pages.hxx" />
+    <ClInclude Include="workspace\core\ui\paused.hxx" />
     <ClInclude Include="workspace\core\ui\remap.hxx" />
     <ClInclude Include="workspace\core\ui\results.hxx" />
     <ClInclude Include="workspace\core\ui\schema.hxx" />
@@ -196,6 +198,7 @@
     <ClInclude Include="workspace\core\ui\slider.hxx" />
     <ClInclude Include="workspace\core\ui\split.hxx" />
     <ClInclude Include="workspace\core\ui\ticker.hxx" />
+    <ClInclude Include="workspace\core\ui\wired.hxx" />
     <ClInclude Include="workspace\core\ui\wiring.hxx" />
     <ClInclude Include="workspace\core\world\action.hxx" />
     <ClInclude Include="workspace\core\world\animate.hxx" />

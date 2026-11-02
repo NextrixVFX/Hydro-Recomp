@@ -222,6 +222,9 @@
     <ClInclude Include="workspace\core\ui\combo.hxx">
       <Filter>workspace\core\ui</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\core\ui\common.hxx">
+      <Filter>workspace\core\ui</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\core\ui\compose.hxx">
       <Filter>workspace\core\ui</Filter>
     </ClInclude>
@@ -288,6 +291,9 @@
     <ClInclude Include="workspace\core\ui\pages.hxx">
       <Filter>workspace\core\ui</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\core\ui\paused.hxx">
+      <Filter>workspace\core\ui</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\core\ui\remap.hxx">
       <Filter>workspace\core\ui</Filter>
     </ClInclude>
@@ -310,6 +316,9 @@
       <Filter>workspace\core\ui</Filter>
     </ClInclude>
     <ClInclude Include="workspace\core\ui\ticker.hxx">
+      <Filter>workspace\core\ui</Filter>
+    </ClInclude>
+    <ClInclude Include="workspace\core\ui\wired.hxx">
       <Filter>workspace\core\ui</Filter>
     </ClInclude>
     <ClInclude Include="workspace\core\ui\wiring.hxx">
