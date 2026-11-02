@@ -209,6 +209,7 @@ struct gfx_device_t
     gfx_handle_t m_chain_depth = 0;            // +0xD8
     std::int32_t m_width = 0, m_height = 0;    // +0x34, +0x38: the bound target's
     std::int32_t m_chain_width = 0, m_chain_height = 0;   // +0xDC, +0xE0
+    float m_clip[ 4 ] = { };                   // +0x18, the clip plane: vt+0x7C 0x540300 stores it, vt+0x80 0x540320 answers it (the sort's gClipPlane)
     float m_viewport[ 4 ] = { 0.0f, 0.0f, 1.0f, 1.0f };   // +0x3C
     float m_scissor[ 4 ] = { 0.0f, 0.0f, 1.0f, 1.0f };    // +0x4C
     const gfx_program_stages_t* m_program = nullptr;      // +0x5C
@@ -258,6 +259,8 @@ struct gfx_device_t
     // 0x5AD000 0x5AD020: vt +0xAC +0xB0.
     void cull( std::uint32_t v ) { m_raster_dirty = true; m_cull = v; }
     void scissor_enable( std::uint8_t v ) { m_raster_dirty = true; m_scissor_enable = v; }
+
+    void clip_plane( const float* v ) { std::memcpy( m_clip, v, 16 ); }
 
     // 0x5ACC00 vt +0x44.
     void size( std::int32_t& w, std::int32_t& h ) const { w = m_width; h = m_height; }

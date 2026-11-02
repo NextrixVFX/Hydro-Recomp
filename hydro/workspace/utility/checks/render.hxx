@@ -2600,6 +2600,7 @@ inline bool verify_render_all( )
     ok = verify_water_material( ) && ok;
     ok = verify_gfx_post( ) && ok;
     ok = verify_gfx_composer( ) && ok;
+    ok = verify_gfx_buffers( ) && ok;
 #if HYDRO_HOST_WINDOWS
     ok = verify_gfx_direct( ) && ok;
 #endif

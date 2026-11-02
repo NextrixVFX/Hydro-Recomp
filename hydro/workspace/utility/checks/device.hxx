@@ -416,6 +416,12 @@ inline bool verify_gfx_program( )
 struct gfx_rig_api_t : gfx_check_api_t
 {
     gfx_rig_api_t( ) { m_mapped.resize( 0x4000 ); }
+    void set_targets( std::uint32_t n, gfx_handle_t v, gfx_handle_t d ) override
+    {
+        m_view = v;
+        m_depth = d;
+        gfx_check_api_t::set_targets( n, v, d );
+    }
     void copy( void* to, std::uint32_t room, const void* from, std::uint32_t count ) override
     {
         rec( { 40, room, count, code_hash( from, count ) } );
@@ -922,6 +928,95 @@ inline bool verify_gfx_composer( )
         return true;
     }
     LOG_ERROR( "gfx_composer FAILED %d of %d words (cursor %zu of %zu)", g.failed, g.compared, g.at, g.size );
+    return false;
+}
+
+// Case gfx_buffers: the buffers' create, resize and set, the composer's device callbacks on real targets.
+inline bool verify_gfx_buffers( )
+{
+    anim_cursor_t g;
+    g.w = g_golden_gbf_words;
+    g.size = g_golden_gbf_size;
+    g.where = "gfx_buffers";
+    gfx_rig_api_t api;
+    api.m_mapped.resize( 0x10000 );
+    gfx_device_t d( api );
+    d.m_width = d.m_chain_width = 1280;
+    d.m_height = d.m_chain_height = 720;
+    d.m_chain_view = 1;
+    d.m_chain_depth = 2;
+    d.create_dynamic( );
+    gfx_target_object_t* targets[ 3 ];
+    for ( gfx_target_object_t*& t : targets )
+        t = gfx_target_create( api, 640, 360, 9u );
+    std::vector< gfx_data_buffer_t* > objects;
+    static const std::uint32_t callbacks[ 8 ] = { 0x5BC330u, 0x5BC1A0u, 0x5BC210u, 0x5BC230u, 0x5BC260u, 0x5BC400u, 0x5BC5F0u, 0x5BC610u };
+    const unsigned rows = g.take( );
+    for ( unsigned r = 0; r < rows; ++r )
+    {
+        const unsigned op = g.take( );
+        unsigned a[ 4 ];
+        for ( unsigned& v : a )
+            v = g.take( );
+        api.m_log.clear( );
+        gfx_data_buffer_t* o = nullptr;
+        std::vector< std::uint8_t > data;
+        switch ( op )
+        {
+        case 0:
+        case 1:
+            o = gfx_buffer_create( api, a[ 0 ], op == 1u );
+            objects.push_back( o );
+            break;
+        case 2:
+            o = objects[ a[ 0 ] ];
+            gfx_check_fill( data, a[ 2 ], a[ 1 ] * o->m_unit );
+            o->set( api, data.data( ), a[ 1 ] );
+            break;
+        case 3:
+            o = objects[ a[ 0 ] ];
+            o->resize( api, a[ 1 ] );
+            break;
+        case 4:
+            o = objects[ a[ 0 ] ];
+            o->m_has_copy = false;
+            break;
+        default:
+        {
+            std::uint32_t record[ 4 ] = { a[ 2 ], a[ 2 ], a[ 2 ], a[ 2 ] };
+            std::uint8_t clear[ 4 ];
+            std::memcpy( clear, &a[ 3 ], 4 );
+            gfx_composer_callback( d, callbacks[ a[ 0 ] ], reinterpret_cast< const std::uint8_t* >( record ), clear, a[ 1 ] < 3u ? targets[ a[ 1 ] ] : nullptr );
+            break;
+        }
+        }
+        const unsigned logged = g.take( );
+        g.eq( static_cast< std::uint32_t >( api.m_log.size( ) ), logged );
+        for ( unsigned i = 0; i < logged; ++i )
+            g.eq( i < api.m_log.size( ) ? api.m_log[ i ] : 0xDEADBEEFu, g.take( ) );
+        if ( g.take( ) != 0u )
+        {
+            g.eq( o->m_count, g.take( ) );
+            g.eq( gfx_check_api_t::id( o->m_buffer ), g.take( ) );
+            g.eq( o->m_desc.m_size, g.take( ) );
+            g.eq( o->m_has_copy ? gfx_check_api_t::code_hash( o->m_copy.data( ), o->m_count * o->m_unit ) : 0u, g.take( ) );
+        }
+        g.eq( d.m_depth_write, g.take( ) );
+        g.eq( d.m_depth_func, g.take( ) );
+        g.eq( d.m_colour_write, g.take( ) );
+        g.eq( d.m_cull, g.take( ) );
+        for ( const float v : d.m_clip )
+            g.eq( gfx_check_api_t::bits( v ), g.take( ) );
+        g.eq( static_cast< std::uint32_t >( d.m_width ), g.take( ) );
+        g.eq( static_cast< std::uint32_t >( d.m_height ), g.take( ) );
+    }
+    g.eq( static_cast< std::uint32_t >( g.at ), static_cast< std::uint32_t >( g.size ) );
+    if ( !g.failed )
+    {
+        LOG_SUCCESS( "gfx_buffers matches retail's vertex and index buffers (0x5637F0 0x563B50 0x5636D0 0x563A20 0x563730 0x563A90) and the composer's device callbacks on %u ops: %d words exact", rows, g.compared );
+        return true;
+    }
+    LOG_ERROR( "gfx_buffers FAILED %d of %d words (cursor %zu of %zu)", g.failed, g.compared, g.at, g.size );
     return false;
 }
 

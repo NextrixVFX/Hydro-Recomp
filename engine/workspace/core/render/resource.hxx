@@ -87,6 +87,56 @@ struct gfx_declarations_t
     }
 };
 
+// VuMetroD3d11VertexBuffer (vtable 0x74F108) and IndexBuffer (0x74F160), 0x30 bytes. gfx_buffer_t's +0x10 the buffer; +0xC the size in bytes or in indices; +0x14 the CPU copy, in retail only the
+// creator's: a null copy maps instead. SUBSTITUTION: the base ctor 0x563540's list 0x759744 (the device-lost walk reads it, not recreated) is not kept.
+struct gfx_data_buffer_t : gfx_buffer_t
+{
+    std::uint32_t m_refs = 1;                  // +4
+    std::uint32_t m_count = 0;                 // +0xC
+    std::vector< std::uint8_t > m_copy;        // +0x14
+    bool m_has_copy = true;
+    gfx_buffer_desc_t m_desc{ };               // +0x18
+    std::uint32_t m_unit = 1u;                 // 1 a vertex buffer, 2 an index buffer: an index is 2 bytes
+
+    // 0x5636D0 / 0x563A20: a new buffer of the size; the old released first, the copy replaced only if there was one.
+    void resize( gfx_api_t& api, std::uint32_t count )
+    {
+        api.release( m_buffer );
+        m_desc.m_size = count * m_unit;
+        m_buffer = api.create_buffer( m_desc );
+        m_count = count;
+        if ( m_has_copy )
+            m_copy.assign( count * m_unit, 0 );
+    }
+
+    // 0x563730 / 0x563A90 (data, count).
+    void set( gfx_api_t& api, const void* data, std::uint32_t count )
+    {
+        const std::uint32_t bytes = count * m_unit;
+        if ( m_has_copy )
+        {
+            api.copy( m_copy.data( ), m_count * m_unit, data, bytes );
+            api.update_texture( m_buffer, 0u, data, bytes, 0u );
+            return;
+        }
+        void* mapped = api.map( m_buffer, 4u );
+        api.copy( mapped, m_count * m_unit, data, bytes );
+        api.unmap( m_buffer );
+    }
+};
+
+// 0x5637F0 (the size) / 0x563B50 (the index count).
+inline gfx_data_buffer_t* gfx_buffer_create( gfx_api_t& api, std::uint32_t count, bool indices )
+{
+    gfx_data_buffer_t* b = new gfx_data_buffer_t( );
+    b->m_unit = indices ? 2u : 1u;
+    b->m_count = count;
+    b->m_desc = gfx_buffer_desc_t{ count * b->m_unit, 0u, indices ? 2u : 1u, 0u, 0u, 0u };
+    b->m_copy.assign( count * b->m_unit, 0 );
+    b->m_buffer = api.create_buffer( b->m_desc );
+    return b;
+}
+
 // The options 0x57C9B0 reads: +0 / +4 the addressing (0 wrap, 1 clamp through 0x751324), +8 / +0xC / +0x10 the filters (2 or more: linear),
 // and +0x10 not 0 asks for the whole mip chain.
 struct gfx_texture_options_t

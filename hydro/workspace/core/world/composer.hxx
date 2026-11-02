@@ -6,11 +6,12 @@
 //
 // HOOKS, by retail address, in gfx_composer_hooks_t: everything that draws or is another object's: the sort's frame constants 0x53AAB0 / 0x53A9C0, the camera static 0x52F690, the draw manager g 0x7590B8,
 // g 0x7590DC's 0x5BBAA0, g 0x75900C vt+0x68, the lens water g 0x759048, VuGfxUtil's quad 0x507360, the render targets 0x57F7D0 and their references.
-// The commands' callbacks: 0x5BC6F0 / 0x5BC7D0 are render/post.hxx; 0x5BC330 0x5BC1A0 0x5BC210 0x5BC230 0x5BC260 0x5BC400 0x5BC5F0 0x5BC610 are not recreated yet.
+// The commands' callbacks: 0x5BC6F0 / 0x5BC7D0 are render/post.hxx; the others are gfx_composer_callback, at the end.
 // Verified against retail: hydro checks/device.hxx verify_gfx_composer (case gfx_composer).
 
 #include <workspace/core/boat/camera.hxx>
 #include <workspace/core/boat/hull.hxx>
+#include <workspace/core/render/gfx.hxx>
 #include <workspace/core/world/drawer.hxx>
 #include <workspace/core/world/gfxsort.hxx>
 
@@ -315,3 +316,49 @@ private:
         m_sort.command( m_sort.m_key_lo, m_sort.m_key_hi, 0x5BC6F0u, 0u, 0u, 0u );
     }
 };
+
+// The commands' device side, the sort's callbacks by retail address (0x5BC6F0 / 0x5BC7D0: render/post.hxx). `clear` the four bytes at 0x7596E4, `target` the record's first word as a target, null for the chain.
+inline bool gfx_composer_callback( gfx_device_t& d, std::uint32_t callback, const std::uint8_t* record, const std::uint8_t* clear, const gfx_target_t* target )
+{
+    switch ( callback )
+    {
+    case 0x5BC330u:
+        d.set_target( target );
+        d.clear( 3u, clear, 1.0f );
+        return true;
+    case 0x5BC1A0u:
+        d.set_target( target );
+        d.cull( 1u );
+        d.clear( 2u, clear, 1.0f );
+        d.colour_write( 0u );
+        return true;
+    case 0x5BC210u:
+        d.colour_write( 1u );
+        return true;
+    case 0x5BC230u:
+        d.depth_write( 0u );
+        d.depth_func( 2u );
+        return true;
+    case 0x5BC260u:
+        d.depth_write( 1u );
+        d.depth_func( 1u );
+        return true;
+    case 0x5BC400u:   // the target's slot 1, retail's empty 0x401560
+        return true;
+    case 0x5BC5F0u:
+    {
+        float v[ 4 ];
+        std::memcpy( v, record, 16 );
+        d.clip_plane( v );
+        return true;
+    }
+    case 0x5BC610u:
+    {
+        const float zero[ 4 ] = { };
+        d.clip_plane( zero );
+        return true;
+    }
+    default:
+        return false;
+    }
+}
