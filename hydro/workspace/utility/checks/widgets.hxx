@@ -1,13 +1,16 @@
 #pragma once
 
+#include <workspace/core/ui/award.hxx>
 #include <workspace/core/ui/bind.hxx>
 #include <workspace/core/ui/champ.hxx>
 #include <workspace/core/ui/common.hxx>
 #include <workspace/core/ui/controls.hxx>
+#include <workspace/core/ui/glyphs.hxx>
 #include <workspace/core/ui/message.hxx>
 #include <workspace/core/ui/pages.hxx>
 #include <workspace/core/ui/paused.hxx>
 #include <workspace/core/ui/remap.hxx>
+#include <workspace/core/ui/screens.hxx>
 #include <workspace/core/ui/slider.hxx>
 
 #include <cstdio>
@@ -2309,6 +2312,344 @@ inline bool verify_ui_remap_logic( )
     return failed == 0;
 }
 
+// c_ui_award_screen (core/ui award.hxx) against retail's VuAwardScreen (oracle case award_screen: ctor 0x47ECC0, then per
+// run 0x47F350 and a script of ticks, draws, the listeners and the exit): each step's calls in order (the events' VuParams
+// bytes included), the state, every field after.
+inline bool verify_ui_award_screen( )
+{
+    int failed = 0, compared = 0;
+    const auto hex = []( const ui_params_t& p )
+    {
+        std::string out;
+        char two[ 4 ];
+        for ( int k = 0; k < p.m_size; ++k )
+        {
+            std::snprintf( two, sizeof( two ), "%02X", p.m_bytes[ k ] );
+            out += two;
+        }
+        return out;
+    };
+    const ui_loaded_t& loaded = ui_loaded( );
+    const entity_t* root = nullptr;
+    for ( std::size_t p = 0; p < g_golden_ui_projects_count && !root; ++p )
+        if ( std::strcmp( g_golden_ui_projects[ p ].m_asset, "Screens/Award" ) == 0 && !loaded.trees[ p ].empty( ) )
+            root = loaded.trees[ p ][ 0 ].second;
+    if ( !root || !ui_common_is_screen( *root ) )
+    {
+        LOG_ERROR( "VuAwardScreen: Screens/Award's root is not a screen" );
+        return false;
+    }
+    std::size_t unlock_next = 0;
+    for ( std::size_t r = 0; r < g_golden_aws_runs_count; ++r )
+    {
+        const golden_aws_run_t& run = g_golden_aws_runs[ r ];
+        const golden_aws_step_t* step = nullptr;
+        std::string log;
+        bool game = false;
+        int queue = -1, index = 0;
+        const auto say = [ &log ]( const std::string& what ) { log += ( log.empty( ) ? "" : ";" ) + what; };
+        const auto flag = [ &step ]( char c ) { return step && std::strchr( step->m_flags, c ) != nullptr; };
+        ui_common_ops_t ops;
+        ops.m_repository_add = [ & ] { say( "add" ); };
+        ops.m_repository_remove = [ & ] { say( "remove" ); };
+        ops.m_initialize = [ & ] { say( "init" ); say( "event OnProjectInitialized " ); };
+        ops.m_release = [ & ] { say( "release" ); };
+        ops.m_tick = [ & ]( float dt )
+        {
+            std::uint32_t b;
+            std::memcpy( &b, &dt, 4 );
+            char text[ 48 ];
+            std::snprintf( text, sizeof( text ), "screen_tick 0x%08X 15", b );
+            say( text );
+        };
+        ops.m_draw = [ & ] { say( "screen_draw 0x3F800000" ); };
+        ui_award_hooks_t hooks;
+        hooks.m_event = [ & ]( const char* name, const ui_params_t& p ) { say( std::string( "event " ) + name + " " + hex( p ) ); };
+        hooks.m_screen_busy = [ & ]( bool busy )
+        {
+            char text[ 48 ];
+            std::snprintf( text, sizeof( text ), "broadcast 0x%08X 03000000%s", fsm_hash( "OnAwardScreenBusy" ), busy ? "01" : "00" );
+            say( text );
+        };
+        hooks.m_play = [ & ]( const char* event ) { say( std::string( "play " ) + event ); };
+        hooks.m_input = [ & ]( const char* name ) { say( std::string( "input " ) + name ); return flag( 'i' ); };
+        hooks.m_touches = [ & ] { return flag( 't' ) ? 0x7FFF : 1; };
+        hooks.m_credits_add = [ & ]( std::int32_t delta, std::int32_t f ) { say( "credits_add " + std::to_string( delta ) + " " + std::to_string( f ) ); };
+        hooks.m_credits = [ & ] { say( "credits" ); return 1000 + index; };
+        hooks.m_credits_room = [ & ]( std::int32_t& room )
+        {
+            say( "room" );
+            if ( !flag( 'c' ) )
+                return false;
+            room = 37 + 11 * index;
+            return true;
+        };
+        hooks.m_unlock = [ & ]( const std::string& name )
+        {
+            say( "unlock " + name );
+            if ( flag( 'u' ) )
+                queue = static_cast< int >( unlock_next++ % g_golden_aws_unlock_count );
+        };
+        hooks.m_analytics = [ & ]( const char* name, std::int64_t value )
+        {
+            say( std::string( "analytics " ) + name + " " + std::to_string( static_cast< std::uint32_t >( value ) ) + " " + std::to_string( static_cast< std::uint32_t >( value >> 32 ) ) );
+        };
+        hooks.m_game_busy = [ & ]( bool busy ) { game = busy; };
+        c_ui_award_screen award( root, ops, hooks );
+        const auto unlock = [ & ]( int k )
+        {
+            const golden_aws_unlock_t& u = g_golden_aws_unlocks[ k ];
+            award.on_unlock( { u.m_string_id, u.m_image, u.m_type, u.m_mode } );
+        };
+        std::vector< std::string > names;
+        for ( const char* at = run.m_names; *at; )
+        {
+            const char* end = std::strchr( at, '|' );
+            names.emplace_back( at, end ? static_cast< std::size_t >( end - at ) : std::strlen( at ) );
+            at = end ? end + 1 : at + names.back( ).size( );
+        }
+        for ( int k = 0; k < run.m_steps; ++k )
+        {
+            const golden_aws_step_t& g = g_golden_aws_steps[ run.m_first + k ];
+            step = &g;
+            index = k - 1;
+            log.clear( );
+            queue = -1;
+            const std::string op = g.m_op;
+            float dt;
+            std::memcpy( &dt, &g.m_dt, 4 );
+            int ret = 0;
+            if ( op == "start" )
+                award.start( run.m_tier, run.m_class, run.m_value, names );
+            else if ( op == "tick" )
+            {
+                award.tick( dt );
+                if ( queue >= 0 )
+                    unlock( queue );
+            }
+            else if ( op == "draw" )
+                award.draw( );
+            else if ( op == "done" )
+                ret = award.done( ) ? 1 : 0;
+            else if ( op == "next" )
+                award.on_flow_next( );
+            else if ( op == "queue" )
+                unlock( g.m_arg );
+            else if ( op == "team" )
+                award.trophy_team( g.m_arg );
+            else if ( op == "exit" )
+                award.exit( );
+            std::uint32_t elapsed, time;
+            const float e = award.elapsed( ), t = award.fsm( ).m_time;
+            std::memcpy( &elapsed, &e, 4 );
+            std::memcpy( &time, &t, 4 );
+            ++compared;
+            if ( log != g.m_log || award.fsm( ).m_current != g.m_state || ret != g.m_ret || award.earned( ) != g.m_earned || elapsed != g.m_elapsed || award.feat( ) != g.m_feat ||
+                 static_cast< int >( award.queued( ) ) != g.m_queued || ( award.select( ) ? 1 : 0 ) != g.m_select || time != g.m_time || ( game ? 1 : 0 ) != g.m_busy )
+            {
+                if ( ++failed <= 4 )
+                    LOG_ERROR( "award_screen run %d step %d %s: state %d (%d) earned %d (%d)\n  ours   %s\n  retail %s", static_cast< int >( r ), k, g.m_op, award.fsm( ).m_current, g.m_state,
+                               award.earned( ), g.m_earned, log.c_str( ), g.m_log );
+            }
+        }
+    }
+    if ( failed == 0 )
+        LOG_SUCCESS( "VuAwardScreen (ctor 0x47ECC0, 0x47F350, 0x47F580, 0x47F6D0, 0x47F720, 0x47F820, 0x47FCD0, 0x47FE40, 0x47FE90, 0x47F4C0) matches retail on %d steps of %d runs", compared,
+                     static_cast< int >( g_golden_aws_runs_count ) );
+    else
+        LOG_ERROR( "VuAwardScreen FAILED on %d of %d steps", failed, compared );
+    return failed == 0;
+}
+
+// ui_font_glyph_width / ui_font_wrap (core/ui glyphs.hxx, over water's wrap_line) against retail's 0x537EF0 / 0x537DB0 (oracle
+// case font_wrap; 0x559D80 / 0x559A40 / 0x559B50 / 0x5A88F0 live, only the code map's find hooked): the width per code, the wrapped
+// text byte for byte per text x width x flags. Hex strings: bad UTF-8 stays exact.
+inline bool verify_ui_font_wrap( )
+{
+    ui_font_glyphs_t f;
+    for ( std::size_t k = 0; k < g_golden_fwr_glyphs_count; ++k )
+    {
+        const golden_fwr_glyph_t& g = g_golden_fwr_glyphs[ k ];
+        float advance;
+        std::memcpy( &advance, &g.m_advance, 4 );
+        f.add( g.m_code, static_cast< std::uint32_t >( k ), advance );
+        if ( g.m_index == 0xFFFFu )
+            f.m_index[ g.m_code ] = 0xFFFFu;
+    }
+    int failed = 0;
+    for ( std::size_t k = 0; k < g_golden_fwr_widths_count; ++k )
+    {
+        const golden_fwr_width_t& g = g_golden_fwr_widths[ k ];
+        if ( ui_font_glyph_width( f, static_cast< std::uint16_t >( g.m_code ) ) != g.m_width && ++failed <= 4 )
+            LOG_ERROR( "font width 0x%X: %u, retail %u", g.m_code, ui_font_glyph_width( f, static_cast< std::uint16_t >( g.m_code ) ), g.m_width );
+    }
+    for ( std::size_t k = 0; k < g_golden_fwr_wraps_count; ++k )
+    {
+        const golden_fwr_wrap_t& g = g_golden_fwr_wraps[ k ];
+        const std::vector< std::uint8_t > text = ui_unhex( g.m_text ), want = ui_unhex( g.m_out );
+        std::string input( text.begin( ), text.end( ) );
+        float width;
+        std::memcpy( &width, &g.m_width, 4 );
+        const std::string out = ui_font_wrap( f, input.c_str( ), width, g.m_flags );
+        if ( out != std::string( want.begin( ), want.end( ) ) && ++failed <= 4 )
+            LOG_ERROR( "font wrap run %d: [%s], retail [%s]", static_cast< int >( k ), out.c_str( ), std::string( want.begin( ), want.end( ) ).c_str( ) );
+    }
+    if ( failed == 0 )
+        LOG_SUCCESS( "The font's width 0x537EF0 and wrap 0x537DB0 match retail on %d codes, %d wraps", static_cast< int >( g_golden_fwr_widths_count ), static_cast< int >( g_golden_fwr_wraps_count ) );
+    else
+        LOG_ERROR( "The font's wrap FAILED on %d", failed );
+    return failed == 0;
+}
+
+// Batch 29, ROUTING only (each draw / callback is compared with retail by its own check): ui_screen_inputs over a bound Screens/RaceResults
+// reaches 0x46A500 through ui_screen_frame (the same commands as the direct draw of that leaf, on the golden's document); the page's and
+// the rows' touch callbacks arrive through the device's dispatch (0x62D9A0 / 0x461200 register them, the slot 7s remove them).
+inline bool verify_ui_screen_inputs( )
+{
+    const ui_loaded_t& loaded = ui_loaded( );
+    const auto root_of = [ & ]( const char* asset ) -> entity_t*
+    {
+        for ( std::size_t p = 0; p < g_golden_ui_projects_count; ++p )
+            if ( std::strcmp( g_golden_ui_projects[ p ].m_asset, asset ) == 0 && !loaded.trees[ p ].empty( ) )
+                return const_cast< entity_t* >( loaded.trees[ p ][ 0 ].second );
+        return nullptr;
+    };
+    int failed = 0, commands = 0, tables = 0, touches = 0, unknown = 0;
+    const golden_rr_run_t* run = nullptr;
+    for ( int k = 0; k < g_golden_rr_entities[ 0 ].m_runs && !run; ++k )
+    {
+        const golden_rr_run_t& r = g_golden_rr_runs[ g_golden_rr_entities[ 0 ].m_first + k ];
+        if ( r.m_op == 1 && r.m_blob[ 0 ] && r.m_commands > 8 )
+            run = &r;
+    }
+    if ( !run )
+        ++failed;
+    else
+    {
+        entity_t* root = root_of( "Screens/RaceResults" );
+        const std::vector< std::uint8_t > blob = ui_unhex( run->m_blob );
+        value_t data = c_reader( blob ).parse( );
+        ui_bind_hooks_t hooks;
+        hooks.m_root = &data;
+        c_ui_binding binding( *root, hooks );
+        ui_screen_env_t env;
+        env.m_fontdb = &ui_font_db( 0 );
+        env.m_root = &data;
+        env.m_font_asset = []( const std::string& ) { return 0x0F0E0D0Cu; };
+        env.m_string6 = []( const std::string& id ) { return id + "~"; };
+        ui_frame_inputs_t in = ui_screen_inputs( binding, env );
+        ui_gfx_sort_t sort, direct;
+        ui_lv_sort( sort );
+        ui_lv_sort( direct );
+        const auto route = in.m_results;
+        in.m_results = [ & ]( const entity_t& e, ui_gfx_sort_t& into, const ui_font_draw_env_t& draw, float alpha )
+        {
+            ui_results_table_t* table = binding.results( e );
+            if ( !table )
+                return false;
+            ui_results_table_t copy = *table;
+            direct.m_key_lo = into.m_key_lo;
+            direct.m_key_hi = into.m_key_hi;
+            ui_results_draw( direct, draw, copy, ui_results_inputs_of( e, env ), data );
+            ++tables;
+            return route( e, into, draw, alpha );
+        };
+        ui_impl_t impl;
+        const ui_frame_t frame = ui_screen_frame( *root, impl, sort, 1.0f, 4, &in );
+        const auto& a = sort.m_commands[ sort.m_index ];
+        const auto& b = direct.m_commands[ direct.m_index ];
+        int results = 0;
+        for ( const ui_frame_draw_t& d : frame.m_draws )
+            if ( d.m_kind == ui_frame_kind_t::results )
+            {
+                ++results;
+                if ( !d.m_emitted || d.m_commands != static_cast< int >( b.size( ) ) )
+                    ++failed;
+                for ( int c = 0; c < d.m_commands && c < static_cast< int >( b.size( ) ); ++c )
+                {
+                    ++commands;
+                    if ( std::memcmp( a[ static_cast< std::size_t >( d.m_first + c ) ].m_words + 4, b[ static_cast< std::size_t >( c ) ].m_words + 4, 16 ) != 0 )
+                        ++failed;
+                }
+            }
+        if ( results != 1 || tables != 1 || commands == 0 )
+        {
+            LOG_ERROR( "screen inputs: %d results leaves, %d tables, %d commands (direct %d)", results, tables, commands, static_cast< int >( b.size( ) ) );
+            ++failed;
+        }
+    }
+    const auto dispatch = [ & ]( const char* asset, const auto& one )
+    {
+        entity_t* root = root_of( asset );
+        ui_touch_device_t device;
+        static const float k_inverse[ 16 ] = { 1.0f, 0, 0, 0, 0, 1.0f, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
+        ui_bind_hooks_t hooks;
+        hooks.m_touch_device = &device;
+        hooks.m_inverse = k_inverse;
+        hooks.m_font_db = &ui_font_db( 0 );
+        c_ui_binding binding( *root, hooks );
+        // Credits authors Touchable off: on here, so the path a touchable page takes runs.
+        const auto touchable = [ & ]( const auto& self, const entity_t& e ) -> void
+        {
+            if ( ui_page_layout_t* page = binding.page( e ) )
+                page->m_touchable = 1;
+            for ( const auto& child : e.m_children )
+                self( self, *child );
+        };
+        touchable( touchable, *root );
+        binding.project_initialize( );
+        const auto visit = [ & ]( const auto& self, const entity_t& e ) -> void
+        {
+            one( binding, device, e );
+            for ( const auto& child : e.m_children )
+                self( self, *child );
+        };
+        visit( visit, *root );
+        binding.project_release( );
+        unknown += binding.m_unknown_slots;
+        if ( !device.m_callbacks.empty( ) || !device.m_handlers.empty( ) )
+        {
+            LOG_ERROR( "screen inputs: %s: %d callbacks, %d handlers left", asset, static_cast< int >( device.m_callbacks.size( ) ), static_cast< int >( device.m_handlers.size( ) ) );
+            ++failed;
+        }
+    };
+    dispatch( "Screens/Credits", [ & ]( c_ui_binding& binding, ui_touch_device_t& device, const entity_t& e )
+    {
+        ui_page_layout_t* page = binding.page( e );
+        if ( !page )
+            return;
+        ui_crop_t crop;
+        float r[ 4 ];
+        ui_page_rect( *page, crop, r );
+        ui_touch_dispatch_down( device, 0u, r[ 0 ] + r[ 2 ] * 0.5f, r[ 1 ] + r[ 3 ] * 0.5f );
+        if ( page->m_held != 1u )
+            ++failed;
+        ui_touch_dispatch_up( device, 0u, 0.0f, 0.0f );
+        if ( page->m_held != 0u )
+            ++failed;
+        ++touches;
+    } );
+    dispatch( "Screens/ControlsGamepad", [ & ]( c_ui_binding& binding, ui_touch_device_t& device, const entity_t& e )
+    {
+        ui_remap_t* row = binding.remap( e );
+        if ( !row || !row->m_visible )
+            return;
+        ui_touch_dispatch_down( device, 0u, 0.25f, 0.125f );
+        ui_remap_runtime_t* s = binding.remap_state( e );
+        if ( s->m_pressed != 1u || s->m_down != 1u )
+            ++failed;
+        s->m_pressed = s->m_down = 0;
+        ++touches;
+    } );
+    if ( touches == 0 )
+        ++failed;
+    if ( failed == 0 )
+        LOG_SUCCESS( "ui_screen_inputs routes the results table (%d commands = the direct draw's) and c_ui_binding the page's / rows' touch callbacks (%d touches), registered and removed; %d other slots unknown", commands, touches, unknown );
+    else
+        LOG_ERROR( "the screen inputs FAILED %d checks", failed );
+    return failed == 0;
+}
+
 inline bool verify_ui_widgets_all( )
 {
     bool ok = true;
@@ -2317,6 +2658,9 @@ inline bool verify_ui_widgets_all( )
     ok = verify_ui_remap_logic( ) && ok;
     ok = verify_ui_wired_bind( ) && ok;
     ok = verify_ui_pause_menu( ) && ok;
+    ok = verify_ui_award_screen( ) && ok;
+    ok = verify_ui_font_wrap( ) && ok;
+    ok = verify_ui_screen_inputs( ) && ok;
     ok = verify_ui_common_screen( ) && ok;
     ok = verify_ui_message_box_frame( ) && ok;
     ok = verify_ui_control_methods( ) && ok;

@@ -5,7 +5,7 @@
 // The font's word wrap (ATG's XMB word-wrap shape), recreated 1:1 from the disassembly (water batch 33): the line finder 0x5A88F0 and its helpers 0x5A8600 0x5A8660 0x5A86C0 0x5A8760 0x5A8870 0x5A88B0.
 // HOOK: the character width 0x537EF0 (the font's glyph lookup, a callback here). `flags` is the static 0x7359FC (bit 0 the kinsoku table, bit 2 Hangul breaks by word), initial value 1, written by 0x53D274 / 0x53D2BA.
 // A position is an index into the text; -1 is retail's null. The text must hold a word past its terminator: 0x5A8760 reads p[1] unguarded, as retail does.
-// Not wired: the caller 0x537DB0 is the font's wrap, no caller in the game yet.
+// The caller 0x537DB0 and the width 0x537EF0: core/ui glyphs.hxx (ui_font_wrap, ui_font_glyph_width).
 
 struct wrap_kinsoku_t
 {
