@@ -5,6 +5,7 @@
 #include <workspace/core/world/lights.hxx>
 #include <workspace/core/world/instance.hxx>
 #include <workspace/core/world/meshes.hxx>
+#include <workspace/core/world/debris.hxx>
 #include <workspace/core/world/corona.hxx>
 #include <workspace/core/world/wrap.hxx>
 #include <workspace/core/world/primitive.hxx>
@@ -2577,6 +2578,92 @@ inline bool verify_gfx_animated_model( )
 #include <workspace/utility/checks/device.hxx>
 #include <workspace/utility/checks/hudpass.hxx>
 
+// Case debris_component: world/debris.hxx's decision and build against retail's 0x543640 + 0x5436B0 (0x51F1C0 real) on seeded components. Removes / updates: 0x543640 takes it off the draw manager when it ends (we hold no such list: the state is the
+// list), 0x5436B0 updates it when the aabb moved: both follow from the words compared, and the row's counts are held to that.
+inline bool verify_debris_component( )
+{
+    anim_cursor_t g;
+    g.w = g_golden_gdc_words;
+    g.size = g_golden_gdc_size;
+    g.where = "debris_component";
+    const auto real = []( std::uint32_t u ) { float f; std::memcpy( &f, &u, 4 ); return f; };
+    const auto bits = []( float f ) { std::uint32_t u; std::memcpy( &u, &f, 4 ); return u; };
+    const unsigned rows = g.take( );
+    int steps_run = 0, ended = 0;
+    for ( unsigned r = 0; r < rows; ++r )
+    {
+        const std::size_t stop = g.take( );
+        const std::size_t end = g.at + stop;
+        static breakable_draw_t props;
+        props.gravity = real( g.take( ) );
+        race_debris_t d;
+        d.m_props = &props;
+        d.m_bound = true;
+        d.m_draw.m_life = real( g.take( ) );
+        d.m_state = g.take( );
+        std::uint32_t box[ 8 ];
+        for ( std::uint32_t& w : box )
+            w = g.take( );
+        std::memcpy( d.m_draw.m_min, box, 16 );
+        std::memcpy( d.m_draw.m_max, box + 4, 16 );
+        const unsigned count = g.take( );
+        d.m_parts.resize( count );
+        std::vector< std::array< float, 8 > > aabbs( count );
+        for ( unsigned i = 0; i < count; ++i )
+        {
+            for ( unsigned k = 0; k < 53; ++k )
+            {
+                const std::uint32_t w = g.take( );
+                std::memcpy( d.m_parts[ i ].image + 4 + 4 * k, &w, 4 );
+            }
+            for ( float& f : aabbs[ i ] )
+                f = real( g.take( ) );
+            d.m_parts[ i ].model_aabb = aabbs[ i ].data( );
+        }
+        const unsigned steps = g.take( );
+        for ( unsigned s = 0; s < steps; ++s )
+        {
+            const float dt = real( g.take( ) );
+            const std::uint32_t before = d.m_state;
+            d.decision( dt );
+            g.eq( d.m_state, g.take( ) );
+            g.eq( bits( d.m_draw.m_life ), g.take( ) );
+            std::uint32_t was[ 8 ];
+            std::memcpy( was, d.m_draw.m_min, 16 );
+            std::memcpy( was + 4, d.m_draw.m_max, 16 );
+            d.build( dt );
+            g.eq( d.m_state, g.take( ) );
+            std::uint32_t now[ 8 ];
+            std::memcpy( now, d.m_draw.m_min, 16 );
+            std::memcpy( now + 4, d.m_draw.m_max, 16 );
+            for ( std::uint32_t w : now )
+                g.eq( w, g.take( ) );
+            g.eq( before == 1u && d.m_state == 2u ? 1u : 0u, g.take( ) );
+            g.eq( d.m_state == 1u && count != 0u ? 1u : 0u, g.take( ) );
+            ended += before == 1u && d.m_state == 2u;
+            ++steps_run;
+        }
+        for ( unsigned i = 0; i < count; ++i )
+            for ( unsigned k = 0; k < 53; ++k )
+            {
+                std::uint32_t w;
+                std::memcpy( &w, d.m_parts[ i ].image + 4 + 4 * k, 4 );
+                g.eq( w, g.take( ) );
+            }
+        if ( g.at != end )
+        {
+            LOG_ERROR( "debris_component: row %u used %zu of %zu words", r, g.at + stop - end, stop );
+            ++g.failed;
+            g.at = end;
+        }
+    }
+    if ( g.failed )
+        LOG_ERROR( "debris_component: %d of %d words differ", g.failed, g.compared );
+    if ( !g.failed && g.compared )
+        LOG_SUCCESS( "debris_component matches retail's 0x543640 + 0x5436B0 on %u components, %d steps, %d ended: %d words exact", rows, steps_run, ended, g.compared );
+    return !g.failed && g.compared;
+}
+
 inline bool verify_render_all( )
 {
     bool ok = true;
@@ -2595,6 +2682,7 @@ inline bool verify_render_all( )
     ok = verify_gfx_corona_entity( ) && ok;
     ok = verify_text_word_wrap( ) && ok;
     ok = verify_gfx_sort_life( ) && ok;
+    ok = verify_debris_component( ) && ok;
     ok = verify_gfx_device( ) && ok;
     ok = verify_ui_record_draws( ) && ok;
     ok = verify_boost_record( ) && ok;

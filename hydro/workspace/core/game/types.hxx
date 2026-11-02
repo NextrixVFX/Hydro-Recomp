@@ -1172,6 +1172,48 @@ struct model_draw_state_t
     model_draw_t defaults;
 };
 
+// Vu3dDrawBreakableModelComponent (ctor 0x542D70, vtable 0x74D9D0): the nodes the debris reads, in the ctor's order (schema.hxx's 16 rows; the two Ang Vel nodes are vtable 0x73D24C, degrees in the file).
+constexpr std::uint32_t k_breakable_model_component_vtable = 0x74D9D0u;
+
+struct breakable_draw_t
+{
+    std::uint8_t reflect = 0;                  // +0x1C
+    std::string model_asset;                   // +0x44
+    float draw_distance = draw_bits( 0x7F7FFFFFu ), rejection = 1.0f;   // +0x5C +0x60
+    std::uint8_t dynamic_lighting = 0;         // +0x64
+    float fade_delay = 0.0f, fade_time = 2.0f; // +0x68 +0x6C
+    float lin_min[ 4 ] = { draw_bits( 0xC0A00000u ), draw_bits( 0xC0A00000u ), draw_bits( 0x40A00000u ), 0.0f };   // +0x90
+    float lin_max[ 4 ] = { draw_bits( 0x40A00000u ), draw_bits( 0x40A00000u ), draw_bits( 0x41200000u ), 0.0f };   // +0xA0
+    float ang_min[ 4 ] = { draw_bits( 0xC0490FDBu ), draw_bits( 0xC0490FDBu ), draw_bits( 0xC0490FDBu ), 0.0f };   // +0xB0
+    float ang_max[ 4 ] = { draw_bits( 0x40490FDBu ), draw_bits( 0x40490FDBu ), draw_bits( 0x40490FDBu ), 0.0f };   // +0xC0
+    float damping_min = 0.0f, damping_max = 0.0f;   // +0xD0 +0xD4
+    float gravity = draw_bits( 0x411CE560u );  // +0xD8
+};
+
+struct breakable_draw_state_t
+{
+    breakable_draw_t value;
+    breakable_draw_t defaults;
+};
+
+inline void breakable_draw_load( breakable_draw_t& c, const value_t& p, const breakable_draw_t& d )
+{
+    property_bool( p, "Reflect", c.reflect, d.reflect );
+    property_string( p, "Model Asset", c.model_asset, d.model_asset );
+    property_float( p, "Draw Distance", c.draw_distance, d.draw_distance, false );
+    property_float( p, "Rejection Scale Modifier", c.rejection, d.rejection, false );
+    property_bool( p, "Dynamic Lighting", c.dynamic_lighting, d.dynamic_lighting );
+    property_float( p, "Fade Delay", c.fade_delay, d.fade_delay, false );
+    property_float( p, "Fade Time", c.fade_time, d.fade_time, false );
+    transform_property( p, "Min Piece Lin Vel", c.lin_min, d.lin_min, false );
+    transform_property( p, "Max Piece Lin Vel", c.lin_max, d.lin_max, false );
+    transform_property( p, "Min Piece Ang Vel", c.ang_min, d.ang_min, true );
+    transform_property( p, "Max Piece Ang Vel", c.ang_max, d.ang_max, true );
+    property_float( p, "Min Velocity Damping", c.damping_min, d.damping_min, false );
+    property_float( p, "Max Velocity Damping", c.damping_max, d.damping_max, false );
+    property_float( p, "Gravity", c.gravity, d.gravity, false );
+}
+
 // VuRigidBodyComponent (engine entity/rigid.hxx): its targets and each node's default.
 constexpr std::uint32_t k_rigid_body_component_vtable = 0x74DAE4u;
 
@@ -1202,6 +1244,12 @@ inline void entity_load_component( entity_t& owner, entity_component_t& componen
         rigid_component_load( s->value, properties, s->defaults );
         return;   // postLoad 0x545010: no body yet - nothing (entity/rigid.hxx)
     }
+    if ( component.m_vtable == k_breakable_model_component_vtable && component.m_state )
+    {
+        breakable_draw_state_t* s = static_cast< breakable_draw_state_t* >( component.m_state.get( ) );
+        breakable_draw_load( s->value, properties, s->defaults );
+        return;
+    }
     if ( component.m_vtable == k_static_model_component_vtable || component.m_vtable == k_animated_model_component_vtable )
     {
         model_draw_state_t* s = static_cast< model_draw_state_t* >( component.m_state.get( ) );
@@ -1225,6 +1273,12 @@ inline void entity_load_component( entity_t& owner, entity_component_t& componen
 // a hook.
 inline void entity_mark_component( entity_t&, entity_component_t& component )
 {
+    if ( component.m_vtable == k_breakable_model_component_vtable && component.m_state )
+    {
+        breakable_draw_state_t* s = static_cast< breakable_draw_state_t* >( component.m_state.get( ) );
+        s->defaults = s->value;
+        return;
+    }
     if ( component.m_vtable == k_rigid_body_component_vtable )
     {
         rigid_component_state_t* s = static_cast< rigid_component_state_t* >( component.m_state.get( ) );
@@ -1645,6 +1699,8 @@ inline std::vector< entity_component_t > entity_components_constructed( const st
             state->defaults = state->value;
             c.m_state = state;
         }
+        else if ( c.m_vtable == k_breakable_model_component_vtable )
+            c.m_state = std::make_shared< breakable_draw_state_t >( );
         else if ( c.m_vtable == k_rigid_body_component_vtable )
         {
             auto state = std::make_shared< rigid_component_state_t >( );

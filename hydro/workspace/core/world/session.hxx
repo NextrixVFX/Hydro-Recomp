@@ -41,6 +41,7 @@
 #include <workspace/core/world/pfxsim.hxx>
 #include <workspace/core/world/dynprop.hxx>
 #include <workspace/core/boat/effects.hxx>
+#include <workspace/core/world/debris.hxx>
 #include <workspace/core/world/race.hxx>
 #include <workspace/core/world/rules.hxx>
 #include <workspace/core/world/start.hxx>
@@ -186,6 +187,8 @@ struct race_world_t
     // The 3D draw manager's add / remove of an owner's static model component (g 0x7590B8 vt+0x28 / +0x2C; the
     // component's +0x1E) - the renderer's: c_world's static draws. Null: not hidden (logged).
     std::function< void( const entity_t& owner, bool on ) > prop_drawn;
+    // The model a breakable component names, for its debris (the renderer's: c_world over gfx_retail_t). Null, or null back: the break keeps its state, no pieces.
+    std::function< const gfx_scene_view_t*( const std::string& asset ) > debris_model;
     // An entity's output plug fired (VuScriptComponent findPlug 0x504770 + the plug's vt+8 = 0x5023A0): c_world's graph.
     std::function< void( const entity_t& owner, const char* plug ) > fire;
     // An entity's transform moved by a motion component (its owner's draw matrix re-made: the animated prop's 0x61DA50 /
@@ -349,7 +352,7 @@ struct race_session_t
         std::uint8_t break_request = 0;
         const void* break_target = nullptr;
         float break_velocity[ 3 ] = { };
-        std::uint32_t break_state = 0;
+        race_debris_t debris;              // the breakable component (+0x184): its +0xE4 is debris.m_state
         race_session_t* session = nullptr;
     };
     std::vector< std::unique_ptr< dyn_prop_t > > dyn_props;
@@ -366,7 +369,7 @@ struct race_session_t
         std::uint8_t request = 0;          // +0xD0
         float velocity[ 3 ] = { };         // +0xD4
         const void* target = nullptr;      // the weak ref's object (+0xF0): the other body's owner (a session boat's body here)
-        std::uint32_t state = 0;           // the breakable component's +0xE4 (0 whole, 1 broken / debris live, 2 done)
+        race_debris_t debris;              // the breakable component (+0x80): its +0xE4 is debris.m_state
         race_session_t* session = nullptr;
     };
     std::vector< std::unique_ptr< breakable_live_t > > breakables;
@@ -1517,22 +1520,62 @@ inline void race_session_control( race_session_t& s, entity_t& e )
 }
 
 // VuBreakablePropEntity's Decision tick 0x434A20 (dt), read whole (world/breakable.hxx's head): the breakable
-// component's 0x543640(dt) - its debris fade timer (+0xE8, state +0xE4 1 -> 2 below 0, the debris draw removed): the
-// component's own properties and debris are the renderer's (0x51E790 / 0x5436B0 not recreated), so only the state is
-// kept here. With a request (+0xD0): unless the component's state is already non-zero - 0x546A20 (the static draw off,
-// the body out of the world when added), the debris start 0x51E790 (UNKNOWN: the renderer's), state 1, the draw add;
+// component's 0x543640(dt) - its debris fade timer (+0xE8, state +0xE4 1 -> 2 below 0, the debris draw removed):
+// world/debris.hxx. With a request (+0xD0): unless the component's state is already non-zero - 0x546A20 (the static draw off,
+// the body out of the world when added), the debris start (0x51E790, state 1, the draw add);
 // with a target: "OnBreak" (its entity parameter not carried by our fire), "OnCameraShake" {Magnitude, Duration,
 // Falloff, Frequency} and "OnRumble" {Low, High} to the target's event map (0x501160; a session boat's: boat events.hxx);
 // the pfx by Pfx Name (0x52BCD0; slot 10 discarded; slot 2 setMatrix the transform world, slot 3 the kept velocity
 // +0xD4 (its 4th word UNKNOWN: 0 here), slot 11 start); FMOD by Sfx Name (platform). Then +0xD0 = 0 and the weak ref
 // released either way.
-inline void race_session_breakable_tick( void* user, float )
+inline void race_session_debris_bind( race_session_t& s, const entity_t& e, race_debris_t& d )
+{
+    if ( d.m_bound || !s.world.debris_model )
+        return;
+    for ( const entity_component_t& c : e.m_components )
+        if ( c.m_vtable == k_breakable_model_component_vtable && c.m_state )
+        {
+            const breakable_draw_t& props = static_cast< const breakable_draw_state_t* >( c.m_state.get( ) )->value;
+            if ( const gfx_scene_view_t* v = props.model_asset.empty( ) ? nullptr : s.world.debris_model( props.model_asset ) )
+                d.bind( props, *v );
+        }
+}
+
+// The start's +0xEC: the static model component's colour +0xA4.
+inline void race_session_debris_start( race_session_t& s, entity_t& e, race_debris_t& d, const float* velocity )
+{
+    std::uint32_t colour = 0xFFFFFFFFu;
+    for ( const entity_component_t& c : e.m_components )
+        if ( c.m_vtable == k_static_model_component_vtable && c.m_state )
+            colour = static_cast< const model_draw_state_t* >( c.m_state.get( ) )->value.color;
+    const transform_component_t* t = entity_transform( e );
+    if ( t )
+    {
+        d.start( t->world, velocity, colour, s.random );
+        LOG_INFO( "race: debris of %s: %d pieces, life %.2f", e.m_name.c_str( ), static_cast< int >( d.m_parts.size( ) ), d.m_draw.m_life );
+    }
+    else
+    {
+        race_unwired( s, "a breakable with no transform: its debris start 0x51E790 - UNKNOWN, not run" );
+        d.m_state = 1;
+    }
+}
+
+// 0x434D90, "Build": 0x5436B0.
+inline void race_session_breakable_build( void* user, float dt )
+{
+    static_cast< race_session_t::breakable_live_t* >( user )->debris.build( dt );
+}
+
+inline void race_session_breakable_tick( void* user, float dt )
 {
     race_session_t::breakable_live_t& b = *static_cast< race_session_t::breakable_live_t* >( user );
     race_session_t& s = *b.session;
+    race_session_debris_bind( s, *b.entity, b.debris );
+    b.debris.decision( dt );   // 0x543640
     if ( !b.request )
         return;
-    if ( b.state == 0 )
+    if ( b.debris.m_state == 0 )
     {
         if ( s.world.prop_drawn )
             s.world.prop_drawn( *b.entity, false );
@@ -1541,8 +1584,7 @@ inline void race_session_breakable_tick( void* user, float )
             vu_dynamics_remove_rigid_body( s.dynamics->impl, b.body->body );
             b.body->in_world = false;
         }
-        race_unwired( s, "a breakable's debris 0x51E790 / its draw (Vu3dDrawBreakableModelComponent - the renderer's, not recreated)" );
-        b.state = 1;
+        race_session_debris_start( s, *b.entity, b.debris, b.velocity );
         ++s.breaks;
         if ( b.target )
         {
@@ -1600,11 +1642,10 @@ inline void race_session_breakable_tick( void* user, float )
 }
 
 // VuBreakableDynamicGamePropEntity's Decision tick (vt+0x40 slot 16 0x433890, dt), read whole: the breakable component's
-// (+0x184) 0x543640(dt) - its debris fade (the renderer's, as for VuBreakablePropEntity: only the state is kept). With
+// (+0x184) 0x543640(dt) - its debris fade (world/debris.hxx). With
 // a request (+0x164): unless the component's state (+0xE4) is already set - the hide vt+0x34 (slot 13 0x438220:
-// race_session_mine_hide - the step callback out, the draw off, the body out of the world), the debris start 0x51E790
-// (the renderer's: UNKNOWN), state 1 (+0xE8 / +0xEC its fade from the component's own +0x68 / +0x6C / the draw
-// component's +0xA4 - not modelled), the draw add; "OnBreak" with the weak ref's object as its entity parameter
+// race_session_mine_hide - the step callback out, the draw off, the body out of the world), the debris start 0x51E790,
+// state 1, the draw add; "OnBreak" with the weak ref's object as its entity parameter
 // (0x505150 - not carried by our fire); the pfx by Breakable Pfx Name (+0x188: 0x52BCD0 on g 0x75905C, the serial bump,
 // slot 10 discarded, then lookup -> slot 2 setMatrix(the transform world), slot 3 the kept velocity +0x1A0, slot 11
 // start). Then +0x164 = 0 and the weak ref released either way; then the base Decision 0x438260 (+0x164 is 0 by now).
@@ -1612,13 +1653,14 @@ inline void race_session_breakable_dynamic_tick( void* user, float dt )
 {
     race_session_t::dyn_prop_t& d = *static_cast< race_session_t::dyn_prop_t* >( user );
     race_session_t& s = *d.session;
+    race_session_debris_bind( s, *d.entity, d.debris );
+    d.debris.decision( dt );   // 0x543640
     if ( d.break_request )
     {
-        if ( d.break_state == 0 )
+        if ( d.debris.m_state == 0 )
         {
             race_session_mine_hide( d );
-            race_unwired( s, "a breakable dynamic prop's debris 0x51E790 / its draw (Vu3dDrawBreakableModelComponent - the renderer's, not recreated)" );
-            d.break_state = 1;
+            race_session_debris_start( s, *d.entity, d.debris, d.break_velocity );
             ++s.breaks;
             if ( s.world.fire )
                 s.world.fire( *d.entity, "OnBreak" );
@@ -1654,6 +1696,22 @@ inline void race_session_breakable_dynamic_tick( void* user, float dt )
         d.break_target = nullptr;
     }
     race_session_dyn_prop_decision( user, dt );
+}
+
+// VuBreakableDynamicGamePropEntity's Build 0x433AE0: 0x5436B0, then the base 0x546130.
+inline void race_session_breakable_dynamic_build( void* user, float dt )
+{
+    static_cast< race_session_t::dyn_prop_t* >( user )->debris.build( dt );
+    race_session_dyn_prop_build( user, dt );
+}
+
+// The debris live this frame into the sort: the draw manager's walk reaches these through 0x543790.
+inline void race_session_debris_draw( race_session_t& s, gfx_sort_t& sort, const gfx_draw_params_t& p )
+{
+    for ( const auto& b : s.breakables )
+        b->debris.draw( sort, p );
+    for ( const auto& d : s.dyn_props )
+        d->debris.draw( sort, p );
 }
 
 // One dynamic game prop's gameInitialize (world/dynprop.hxx, verified by the cases dynamic_prop_bodies /
@@ -1774,7 +1832,7 @@ inline bool race_session_dynamic_prop( race_session_t& s, entity_t& e, const bod
     if ( d->mine )
         tick_register( s.ticks, { dp, race_session_mine_tick, dp }, "Decision" );
     if ( d->init.build_tick )
-        tick_register( s.ticks, { dp, race_session_dyn_prop_build, dp }, "Build" );
+        tick_register( s.ticks, { dp, d->breakable ? race_session_breakable_dynamic_build : race_session_dyn_prop_build, dp }, "Build" );
     s.level_bodies.push_back( std::move( b ) );
     s.dyn_props.push_back( std::move( d ) );
     return true;
@@ -1913,7 +1971,7 @@ inline void race_session_level_bodies( race_session_t& s, entity_t& tree, const 
         if ( bp->in_world )
             ++added;
         // VuBreakablePropEntity's slot 6 0x434620: 0x546910 above, then the "Decision" tick 0x434A20 and the "Build" tick
-        // 0x434D90 (the debris draw 0x5436B0 - the renderer's: not registered).
+        // 0x434D90 (0x5436B0, world/debris.hxx).
         if ( breakable && ok )
         {
             auto br = std::make_unique< race_session_t::breakable_live_t >( );
@@ -1923,6 +1981,7 @@ inline void race_session_level_bodies( race_session_t& s, entity_t& tree, const 
             br->body = bp;
             br->session = &s;
             tick_register( s.ticks, { br.get( ), race_session_breakable_tick, br.get( ) }, "Decision" );
+            tick_register( s.ticks, { br.get( ), race_session_breakable_build, br.get( ) }, "Build" );
             s.breakables.push_back( std::move( br ) );
         }
         s.level_bodies.push_back( std::move( b ) );

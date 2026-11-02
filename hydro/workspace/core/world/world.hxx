@@ -1558,6 +1558,8 @@ public:
                 item.retail->m_bones = m_retail->palette_id( palette->data( ) );
                 item.retail->draw( sort, item.world, p );
             }
+            if ( m_race.active )
+                race_session_debris_draw( m_race, sort, p );
             if ( !p.m_reflecting )
                 for ( retail_geom_t& g : m_retail_geoms )
                 {
@@ -1642,6 +1644,7 @@ public:
         m_race.world.pfx_ops = m_pfx.manager_ops( );
         m_race.world.view = &m_water_view;
         m_race.world.water_tick = [ this ]( float step ) { water_frame( step ); };
+        m_race.world.debris_model = [ this ]( const std::string& asset ) { return m_retail ? m_retail->model( asset ) : nullptr; };
         m_race.world.triggers = [ this ] { race_triggers( ); };
         m_race.world.prop_draw = [ this ]( const entity_t& owner ) { prop_draw( owner ); };
         m_race.world.prop_drawn = [ this ]( const entity_t& owner, bool on ) {
