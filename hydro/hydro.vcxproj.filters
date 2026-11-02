@@ -324,6 +324,9 @@
     <ClInclude Include="workspace\core\ui\leaves.hxx">
       <Filter>workspace\core\ui</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\core\ui\loading.hxx">
+      <Filter>workspace\core\ui</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\core\ui\map.hxx">
       <Filter>workspace\core\ui</Filter>
     </ClInclude>

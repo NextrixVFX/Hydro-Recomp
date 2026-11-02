@@ -200,6 +200,7 @@
     <ClInclude Include="workspace\core\ui\ladder.hxx" />
     <ClInclude Include="workspace\core\ui\leave.hxx" />
     <ClInclude Include="workspace\core\ui\leaves.hxx" />
+    <ClInclude Include="workspace\core\ui\loading.hxx" />
     <ClInclude Include="workspace\core\ui\map.hxx" />
     <ClInclude Include="workspace\core\ui\message.hxx" />
     <ClInclude Include="workspace\core\ui\navigate.hxx" />

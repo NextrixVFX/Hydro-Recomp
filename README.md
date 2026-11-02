@@ -27,9 +27,9 @@ Measured, not estimated: see **[docs/INVENTORY.md](docs/INVENTORY.md)** (summary
 
 | retail functions | 8,638 |
 |---|---:|
-| **verified** - retail executed in an oracle case and recreated here | **3,682** |
+| **verified** - retail executed in an oracle case and recreated here | **3,688** |
 | callee - executed inside a checked case, not recreated on its own (CRT / STL / engine helpers) | 760 |
-| cited - recreated or referenced here, but no oracle case runs it yet | 634 |
+| cited - recreated or referenced here, but no oracle case runs it yet | 628 |
 | absent | 3,562 |
 
 Verified so far, by area: Bullet physics (collision, broadphase, the constraint solver, integration - 154
