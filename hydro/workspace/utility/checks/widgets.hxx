@@ -2,9 +2,11 @@
 
 #include <workspace/core/ui/bind.hxx>
 #include <workspace/core/ui/champ.hxx>
+#include <workspace/core/ui/common.hxx>
 #include <workspace/core/ui/controls.hxx>
 #include <workspace/core/ui/message.hxx>
 #include <workspace/core/ui/pages.hxx>
+#include <workspace/core/ui/paused.hxx>
 #include <workspace/core/ui/remap.hxx>
 #include <workspace/core/ui/slider.hxx>
 
@@ -1659,6 +1661,261 @@ inline bool verify_ui_remap_draw( )
     return failed == 0;
 }
 
+// The binding's glue for the batch 28 leaves, ROUTING and not a retail comparison
+// (the functions it reaches are verify_ui_page_layout_tick / verify_ui_remap_logic's):
+// on OUR Screens/Credits and Screens/ControlsGamepad trees the broadcast OnUITick
+// reaches the page's tick (the scroll against the same ticks run directly, bit for
+// bit), and OnUISetFocus / OnUIEvent reach a row: focus by id, InputUp only while
+// selected fires its NavUp sound path through ui_remap_event.
+inline bool verify_ui_wired_bind( )
+{
+    const ui_loaded_t& loaded = ui_loaded( );
+    const auto root_of = [ & ]( const char* asset ) -> entity_t*
+    {
+        for ( std::size_t p = 0; p < g_golden_ui_projects_count; ++p )
+            if ( std::strcmp( g_golden_ui_projects[ p ].m_asset, asset ) == 0 && !loaded.trees[ p ].empty( ) )
+                return const_cast< entity_t* >( loaded.trees[ p ][ 0 ].second );
+        return nullptr;
+    };
+    int failed = 0, ticks = 0, pages = 0, rows = 0;
+    float dt = 0.1f;
+    {
+        entity_t* root = root_of( "Screens/Credits" );
+        ui_bind_hooks_t hooks;
+        hooks.m_delta = [ &dt ] { return dt; };
+        c_ui_binding binding( *root, hooks );
+        const auto visit = [ & ]( const auto& self, const entity_t& e ) -> void
+        {
+            if ( ui_page_layout_t* page = binding.page( e ) )
+            {
+                ui_page_layout_t direct = *page;
+                ui_crop_t crop;
+                page->m_active = direct.m_active = 1;
+                page->m_total = direct.m_total = 0.05f;
+                for ( int k = 0; k < 40; ++k )
+                {
+                    binding.post( fsm_hash( "OnUITick" ), ui_params_t( ) );
+                    ui_page_layout_tick( direct, crop, dt, nullptr );
+                    ++ticks;
+                    if ( std::memcmp( &direct.m_scroll, &page->m_scroll, 4 ) != 0 || direct.m_ended != page->m_ended )
+                        ++failed;
+                }
+                ++pages;
+            }
+            for ( const auto& child : e.m_children )
+                self( self, *child );
+        };
+        visit( visit, *root );
+    }
+    {
+        entity_t* root = root_of( "Screens/ControlsGamepad" );
+        ui_bind_hooks_t hooks;
+        hooks.m_font_db = &ui_font_db( 0 );
+        c_ui_binding binding( *root, hooks );
+        const auto visit = [ & ]( const auto& self, const entity_t& e ) -> void
+        {
+            if ( ui_remap_t* row = binding.remap( e ) )
+            {
+                ui_params_t focus;
+                ui_params_add( focus, 1, ui_entity_id( ui_long_name( e ) ) );
+                binding.post( fsm_hash( "OnUISetFocus" ), focus );
+                if ( binding.remap_state( e )->m_focus != 1u )
+                    ++failed;
+                ui_params_t other;
+                ui_params_add( other, 1, 0x12345678u );
+                binding.post( fsm_hash( "OnUISetFocus" ), other );
+                if ( binding.remap_state( e )->m_focus != 0u )
+                    ++failed;
+                ui_params_t select;
+                select.add_string( "InputSelect" );
+                row->m_selected = 0;
+                binding.post( fsm_hash( "OnUIEvent" ), select );
+                if ( binding.remap_state( e )->m_select != 0u )
+                    ++failed;
+                row->m_selected = 1;
+                binding.post( fsm_hash( "OnUIEvent" ), select );
+                if ( binding.remap_state( e )->m_select != 1u )
+                    ++failed;
+                ++rows;
+            }
+            for ( const auto& child : e.m_children )
+                self( self, *child );
+        };
+        visit( visit, *root );
+    }
+    if ( pages == 0 || rows == 0 )
+        ++failed;
+    if ( failed == 0 )
+        LOG_SUCCESS( "c_ui_binding routes the page layout tick on %d pages (%d ticks, the scroll bit for bit against the direct tick) and the remapping rows' focus / event on %d rows",
+                     pages, ticks, rows );
+    else
+        LOG_ERROR( "the batch 28 binding glue FAILED %d checks", failed );
+    return failed == 0;
+}
+
+// c_ui_pause_menu (core/ui paused.hxx) against retail's pause menu (oracle case
+// pause_menu: ctor 0x4BAE80, then the handlers, tick 0x4BB540 and draw 0x4BB5E0 on a
+// script): each step's calls in order, the FSM state, every field after.
+inline bool verify_ui_pause_menu( )
+{
+    int failed = 0, calls = 0;
+    pause_menu_t gate;
+    const golden_pmn_step_t* step = nullptr;
+    std::string log;
+    bool game = false;
+    std::uint32_t key = 0;
+    const auto say = [ &log, &calls ]( const std::string& what ) { log += ( log.empty( ) ? "" : ";" ) + what; ++calls; };
+    const auto flag = [ &step ]( char c ) { return std::strchr( step->m_flags, c ) != nullptr; };
+    const auto word = []( float f ) { std::uint32_t b; std::memcpy( &b, &f, 4 ); return b; };
+    ui_pause_hooks_t hooks;
+    hooks.m_play = [ & ]( const char* event ) { say( std::string( "play " ) + event ); };
+    hooks.m_tick_paused = [ & ]( bool paused ) { say( paused ? "tick_pause" : "tick_resume" ); };
+    hooks.m_category_paused = [ & ]( bool paused ) { say( paused ? "category 1" : "category 0" ); };
+    hooks.m_game_paused = [ & ]( bool paused ) { game = paused; };
+    hooks.m_analytics = [ & ]( const char* name, const std::string& screen ) { say( std::string( "analytics " ) + name + " " + screen ); };
+    hooks.m_delta = [ & ] { float dt; std::memcpy( &dt, &step->m_dt, 4 ); return dt; };
+    hooks.m_popup = [ & ] { return flag( 'p' ); };
+    hooks.m_busy = [ & ] { return flag( 'b' ); };
+    hooks.m_input = [ & ]( const char* name ) { say( std::string( "input " ) + name ); return flag( 'i' ); };
+    hooks.m_touches = [ & ] { return flag( 't' ) ? 1 : 0; };
+    hooks.m_input_type = [ & ] { return flag( 'y' ) ? 2 : 0; };
+    hooks.m_open = [ & ]( const std::string& name )
+    {
+        say( "load " + name );
+        if ( flag( 'n' ) )
+            return false;
+        say( "add" );
+        say( "init" );
+        say( "event OnProjectInitialized" );
+        return true;
+    };
+    hooks.m_close = [ & ] { say( "release" ); say( "remove" ); say( "delete" ); };
+    hooks.m_screen = [ ] { return true; };
+    hooks.m_screen_tick = [ & ]( float dt, bool input )
+    {
+        char text[ 48 ];
+        std::snprintf( text, sizeof( text ), "screen_tick 0x%08X %d", word( dt ), input ? 1 : 0 );
+        say( text );
+    };
+    hooks.m_screen_draw = [ & ] { say( "screen_draw 0x3F800000" ); };
+    hooks.m_background = [ & ]( std::uint32_t colour )
+    {
+        char text[ 96 ];
+        std::snprintf( text, sizeof( text ), "solid 0x%08X 0x%08X 0x%08X 0x%08X 0x%08X 0x%08X", colour, word( k_ui_pause_depth ), word( k_ui_pause_rect[ 0 ] ), word( k_ui_pause_rect[ 1 ] ),
+                       word( k_ui_pause_rect[ 2 ] ), word( k_ui_pause_rect[ 3 ] ) );
+        say( text );
+    };
+    hooks.m_sort_key = [ & ] { key = ui_pause_key( key ); };
+    c_ui_pause_menu menu( gate, hooks, g_golden_pmn_colour );
+    for ( std::size_t k = 0; k < g_golden_pmn_steps_count; ++k )
+    {
+        const golden_pmn_step_t& g = g_golden_pmn_steps[ k ];
+        step = &g;
+        log.clear( );
+        const std::string op = g.m_op;
+        if ( op == "tick" )
+            menu.tick( );
+        else if ( op == "draw" )
+            menu.draw( );
+        else if ( op == "pause" )
+            pause_on_pause( gate );
+        else if ( op == "resume" )
+            menu.on_resume( );
+        else if ( op == "set" )
+            menu.on_set_screen( g.m_arg );
+        else if ( op == "push" )
+            menu.on_push_screen( g.m_arg );
+        else if ( op == "pop" )
+            menu.on_pop_screen( );
+        else if ( op == "reload" )
+            menu.on_reload_screen( );
+        else if ( op == "settings" )
+            menu.on_settings_command( g.m_arg );
+        else if ( op == "allow" )
+        {
+            ui_params_t p;
+            const std::uint32_t words[ 2 ] = { 3u, static_cast< std::uint32_t >( std::atoi( g.m_arg ) ) };
+            std::memcpy( p.m_bytes, words, 8 );
+            p.m_size = 8;
+            pause_on_set_allow( gate, p );
+        }
+        const c_fsm& f = menu.fsm( );
+        const bool same = log == g.m_log && f.m_current == g.m_state && gate.paused == ( g.m_paused != 0 ) && gate.allow == ( g.m_allow != 0 ) && gate.next == g.m_next && menu.loaded( ) == g.m_loaded &&
+                          static_cast< int >( menu.stack( ).size( ) ) == g.m_stack && menu.project( ) == ( g.m_project != 0 ) && menu.depth( ) == g.m_depth && word( f.m_time ) == g.m_time &&
+                          game == ( g.m_game != 0 ) && key == g.m_key;
+        if ( !same && ++failed <= 8 )
+            LOG_ERROR( "ui pause menu: step %d %s %s: [%s] state %d depth %d next '%s' loaded '%s' time 0x%08X key 0x%08X; retail [%s] state %d depth %d next '%s' loaded '%s' time 0x%08X key 0x%08X",
+                       static_cast< int >( k ), g.m_op, g.m_arg, log.c_str( ), f.m_current, menu.depth( ), gate.next.c_str( ), menu.loaded( ).c_str( ), word( f.m_time ), key, g.m_log, g.m_state, g.m_depth, g.m_next,
+                       g.m_loaded, g.m_time, g.m_key );
+    }
+    if ( failed == 0 )
+        LOG_SUCCESS( "c_ui_pause_menu matches retail's pause menu 0x4BAE80 / 0x4BB540 / 0x4BB5E0 and its handlers on %d script steps: %d hook calls in order, the FSM and every field after each",
+                     static_cast< int >( g_golden_pmn_steps_count ), calls );
+    else
+        LOG_ERROR( "the pause menu FAILED %d steps against retail's", failed );
+    return failed == 0;
+}
+
+// c_ui_common_screen (core/ui common.hxx) against retail's VuCommonScreen slots 1..4
+// 0x480A50 / 0x480AB0 / 0x480AE0 / 0x480B40 (oracle case common_screen) on every
+// Screens/* and HUDs/* root: both states of the root's bit 2 and no project: the
+// recorded calls of each slot in order, and the root's vtable.
+inline bool verify_ui_common_screen( )
+{
+    const ui_loaded_t& loaded = ui_loaded( );
+    int failed = 0, slots = 0;
+    float dt;
+    std::memcpy( &dt, &g_golden_cmn_dt, 4 );
+    for ( std::size_t k = 0; k < g_golden_cmn_runs_count; ++k )
+    {
+        const golden_cmn_run_t& g = g_golden_cmn_runs[ k ];
+        const entity_t* root = nullptr;
+        for ( std::size_t p = 0; p < g_golden_ui_projects_count && !root; ++p )
+            if ( std::strcmp( g_golden_ui_projects[ p ].m_asset, g.m_project ) == 0 && !loaded.trees[ p ].empty( ) )
+                root = loaded.trees[ p ][ 0 ].second;
+        if ( !root || !root->m_ctor || root->m_ctor->m_vtable != g.m_vtable )
+        {
+            if ( ++failed <= 8 )
+                LOG_ERROR( "ui common screen: %s's root is not retail's 0x%X", g.m_project, g.m_vtable );
+            continue;
+        }
+        std::string log, slot;
+        const auto say = [ &slot ]( const std::string& what ) { slot += ( slot.empty( ) ? "" : ";" ) + what; };
+        ui_common_ops_t ops;
+        ops.m_repository_add = [ & ] { say( "add" ); };
+        ops.m_repository_remove = [ & ] { say( "remove" ); };
+        ops.m_initialize = [ & ] { say( "init" ); say( "event OnProjectInitialized" ); };
+        ops.m_release = [ & ] { say( "release" ); };
+        ops.m_tick = [ & ]( float d )
+        {
+            std::uint32_t bits;
+            std::memcpy( &bits, &d, 4 );
+            char text[ 40 ];
+            std::snprintf( text, sizeof( text ), "tick 0x%08X 15", bits );   // the 0xF: input allowed
+            say( text );
+        };
+        ops.m_draw = [ & ] { say( "draw 0x3F800000" ); };
+        c_ui_common_screen s( g.m_has_project ? root : nullptr, ops, g.m_bit != 0 );
+        const auto end_slot = [ & ]( bool last ) { log += slot + ( last ? "" : "|" ); slot.clear( ); ++slots; };
+        s.open( );
+        end_slot( false );
+        s.exit( );
+        end_slot( false );
+        s.tick( dt );
+        end_slot( false );
+        s.draw( );
+        end_slot( true );
+        if ( log != g.m_log && ++failed <= 8 )
+            LOG_ERROR( "ui common screen: %s bit %d project %d: %s, retail %s", g.m_project, g.m_bit, g.m_has_project, log.c_str( ), g.m_log );
+    }
+    if ( failed == 0 )
+        LOG_SUCCESS( "c_ui_common_screen matches retail's VuCommonScreen 0x480A50 / 0x480AB0 / 0x480AE0 / 0x480B40 on %d runs over the Screens/* and HUDs/* roots: %d slots' calls "
+                     "in order", static_cast< int >( g_golden_cmn_runs_count ), slots );
+    else
+        LOG_ERROR( "the VuCommonScreen slots FAILED %d checks against retail's", failed );
+    return failed == 0;
+}
+
 // ui_champ_draw (core/ui champ.hxx) against retail's VuChampionshipEntity 0x451CA0
 // (oracle case championship_draw) on Screens/Championship: OUR loaded properties
 // against retail's bytes, then hand-built standings through the real entity: every
@@ -2058,6 +2315,9 @@ inline bool verify_ui_widgets_all( )
     ok = verify_ui_championship_draw( ) && ok;
     ok = verify_ui_remap_draw( ) && ok;
     ok = verify_ui_remap_logic( ) && ok;
+    ok = verify_ui_wired_bind( ) && ok;
+    ok = verify_ui_pause_menu( ) && ok;
+    ok = verify_ui_common_screen( ) && ok;
     ok = verify_ui_message_box_frame( ) && ok;
     ok = verify_ui_control_methods( ) && ok;
     ok = verify_ui_page_layout_tick( ) && ok;

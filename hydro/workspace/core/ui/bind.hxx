@@ -12,6 +12,7 @@
 #include <workspace/core/ui/screen.hxx>
 #include <workspace/core/ui/slider.hxx>
 #include <workspace/core/ui/ticker.hxx>
+#include <workspace/core/ui/wired.hxx>
 #include <workspace/core/ui/wiring.hxx>
 
 #include <array>
@@ -95,6 +96,9 @@ inline constexpr std::uint32_t k_ui_button_vtable = 0x73B7B0u;
 inline constexpr std::uint32_t k_ui_event_vtable = 0x6F7308u;
 inline constexpr std::uint32_t k_ui_if_vtable = 0x754CD4u;
 inline constexpr std::uint32_t k_ui_info_vtable = 0x73BC5Cu;
+inline constexpr std::uint32_t k_ui_page_vtable = 0x6F72C4u;
+inline constexpr std::uint32_t k_ui_remap_vtable = 0x73D4F4u;
+inline constexpr std::uint32_t k_ui_throttle_remap_vtable = 0x73D45Cu;
 inline constexpr std::uint32_t k_ui_set_info_vtable = 0x73E818u;
 
 // One step of the frame's trace, at the points retail's case logs them.
@@ -354,6 +358,12 @@ struct ui_bound_t
     ui_leaderboard_hooks_t m_ladder_hooks;
     std::unique_ptr< c_ui_leaderboard > m_ladder;
     bool m_ladder_ticking = false;                          // "Decision" 0x47B640 registered (slot 6) and not yet unregistered (slot 7)
+    // batch 28: VuUIPageLayoutEntity (pages.hxx) and the remapping rows (remap.hxx); the frame's m_page / m_remap read these
+    std::unique_ptr< ui_page_layout_t > m_page;
+    std::unique_ptr< ui_remap_t > m_remap;
+    ui_remap_runtime_t m_remap_state;
+    ui_remap_hooks_t m_remap_hooks;
+    bool m_remap_ticking = false;                           // "Decision" 0x4623D0 registered (slot 6 0x461200) and not yet unregistered (slot 7 0x461290)
 };
 
 struct ui_bind_hooks_t
@@ -391,6 +401,13 @@ struct ui_bind_hooks_t
     const ui_hud_env_t* m_hud = nullptr;
     std::function< std::string( const char* ) > m_string_db;
     std::function< ui_ret_t( entity_t&, const char*, const ui_params_t& ) > m_external;
+    // Batch 28: the page's load 0x62E3B0 (PageLayoutDB, FontDB, the measure / factory hooks; null m_page_db: an empty page) and the rows'
+    // devices (remap.hxx; m_set_focus / m_nav are the binding's own).
+    const value_t* m_page_db = nullptr;
+    const value_t* m_font_db = nullptr;
+    ui_page_env_t m_page_env;
+    ui_page_hooks_t m_page_hooks;
+    ui_remap_hooks_t m_remap_hooks;
     std::function< void( std::uint32_t, const ui_params_t& ) > m_broadcast_out;
     // The race HUD's controls (batch 17): the touch device's callback list
     // (null: no list - the pause tick finds nothing), the crop matrix the touch
@@ -1051,6 +1068,56 @@ private:
             ev.m_fire = [ this, &e ]( const ui_params_t& p ) { fire_named( e, "Trigger", p ); };
             add( b, "OnUIEvent", 0x62E950u, [ &ev ]( const ui_params_t& p ) { ev.on_ui_event( p ); } );
         }
+        else if ( b.m_vtable == k_ui_page_vtable )
+        {
+            // The ctor 0x62CA50: OnUITick 0x62DA30; slot 2's load 0x62E3B0.
+            b.m_page = std::make_unique< ui_page_layout_t >( ui_page_layout_of( e ) );
+            ui_page_layout_t& page = *b.m_page;
+            if ( m_hooks.m_page_db && m_hooks.m_font_db )
+                ui_page_layout_load( page, m_hooks.m_page_db, *m_hooks.m_font_db, m_hooks.m_page_env, m_hooks.m_page_hooks );
+            add( b, "OnUITick", 0x62DA30u, [ this, &page, &e ]( const ui_params_t& )
+            {
+                ui_page_layout_tick( page, hud_crop( ), m_hooks.m_delta ? m_hooks.m_delta( ) : 0.0f, [ this, &e ] { fire_named( e, "OnReachedEnd", ui_params_t( ) ); } );
+            } );
+        }
+        else if ( b.m_vtable == k_ui_remap_vtable || b.m_vtable == k_ui_throttle_remap_vtable )
+        {
+            b.m_remap = std::make_unique< ui_remap_t >( ui_remap_of( e, m_hooks.m_font_db ) );
+            b.m_remap_hooks = m_hooks.m_remap_hooks;
+            const std::uint32_t id = ui_entity_id( ui_long_name( e ) );
+            b.m_remap_hooks.m_set_focus = [ this, id ]
+            {
+                ui_params_t p;
+                ui_params_add( p, 1, id );
+                broadcast( fsm_hash( "OnUISetFocus" ), p );
+            };
+            // 0x462420: the output plug; the browse sound when it has a connection.
+            const std::function< void( const char* ) > sound = m_hooks.m_sound;
+            b.m_remap_hooks.m_nav = [ this, &e, sound ]( const char* plug, std::int32_t arg )
+            {
+                ui_params_t p;
+                ui_params_add( p, 0, static_cast< std::uint32_t >( arg ) );
+                fire_named( e, plug, p );
+                const script_component_t* sc = script_of( e );
+                const int k = plug_index( e, plug );
+                if ( sound && sc && k >= 0 && !sc->m_plugs[ static_cast< std::size_t >( k ) ].m_links.empty( ) )
+                    sound( "Global/UI_and_Menu/menu_browse" );
+            };
+            ui_bound_t* self = &b;
+            add( b, "OnUISetFocus", 0x4613A0u, [ self, id ]( const ui_params_t& p )
+            {
+                ui_params_reader_t r( p );
+                ui_remap_on_focus( self->m_remap_state, ui_params_read( r, 1 ) == id );
+            } );
+            add( b, "OnUITick", 0x4613F0u, [ self ]( const ui_params_t& ) { ui_remap_tick( *self->m_remap, self->m_remap_state, self->m_remap_hooks ); } );
+            add( b, "OnUIEvent", 0x4615A0u, [ self ]( const ui_params_t& p )
+            {
+                ui_params_reader_t r( p );
+                const std::string text = r.read_string( );
+                const std::int32_t arg = static_cast< std::int32_t >( ui_params_read( r, 0 ) );
+                ui_remap_event( *self->m_remap, self->m_remap_state, text, arg, self->m_remap_hooks );
+            } );
+        }
         else if ( b.m_vtable == k_ui_info_vtable )
         {
             b.m_ticker = std::make_unique< ui_info_ticker_t >( ui_info_ticker_of( e ) );
@@ -1279,6 +1346,12 @@ private:
             if ( vt == k_ui_is_circuit_vtable && std::strcmp( plug, "Get" ) == 0 )
                 return true;
         }
+        if ( vt == k_ui_page_vtable )
+            for ( const char* name : { "StartScroll", "StopScroll", "ResetScroll" } )
+                if ( std::strcmp( plug, name ) == 0 )
+                    return true;
+        if ( ( vt == k_ui_remap_vtable || vt == k_ui_throttle_remap_vtable ) && ( std::strcmp( plug, "SetFocus" ) == 0 || std::strcmp( plug, "Hide" ) == 0 ) )
+            return true;
         if ( vt == k_ui_button_vtable )
             for ( const char* name : { "SetFocus", "SetStringID", "Enable", "Disable", "IsEnabled" } )
                 if ( std::strcmp( plug, name ) == 0 )
@@ -1447,7 +1520,14 @@ private:
         else if ( vt == k_ui_multi_delay_vtable )
             trace( ui_trace_kind_t::hook, index_of( e ), "multi_delay_init", 0u, ui_params_t( ), true ); // 0x5E0610 (the world's)
         else
+        {
+            ui_bound_t& bound = *m_bound[ static_cast< std::size_t >( index_of( e ) ) ];
+            if ( bound.m_page )
+                ui_page_layout_initialize( *bound.m_page, nullptr );   // 0x62D9A0 (the touch add: NOT wired, see HANDOFF)
+            if ( bound.m_remap )
+                bound.m_remap_ticking = true;                          // 0x461200's "Decision"
             game_slot( e, vt, true );
+        }
         e.m_flags |= 4u;
     }
 
@@ -1636,6 +1716,24 @@ public:
                 b->m_board->decision( );
             else if ( b->m_ladder && b->m_ladder_ticking )
                 b->m_ladder->decision( );   // batch 23: 0x47B640
+            else if ( b->m_remap && b->m_remap_ticking )
+                ui_remap_decision( *b->m_remap, b->m_remap_state, b->m_remap_hooks );   // batch 28: 0x4623D0
+    }
+    // Batch 28: a bound page / remapping row (the frame's m_page / m_remap draw these), or null.
+    ui_page_layout_t* page( const entity_t& e )
+    {
+        const int index = index_of( e );
+        return index >= 0 ? m_bound[ static_cast< std::size_t >( index ) ]->m_page.get( ) : nullptr;
+    }
+    ui_remap_t* remap( const entity_t& e )
+    {
+        const int index = index_of( e );
+        return index >= 0 ? m_bound[ static_cast< std::size_t >( index ) ]->m_remap.get( ) : nullptr;
+    }
+    ui_remap_runtime_t* remap_state( const entity_t& e )
+    {
+        const int index = index_of( e );
+        return index >= 0 ? &m_bound[ static_cast< std::size_t >( index ) ]->m_remap_state : nullptr;
     }
     // A bound full leaderboard (its FSM / records / touch callbacks; draw( ) for the frame's m_leaderboard), or null.
     c_ui_leaderboard* leaderboard( const entity_t& e )
@@ -1696,6 +1794,30 @@ private:
     {
         ui_ret_t out;
         const std::uint32_t vt = owner.m_ctor ? owner.m_ctor->m_vtable : 0u;
+        if ( vt == k_ui_page_vtable )
+        {
+            // 0x62E0A0 / 0x62E0C0 / 0x62E0E0: VuRetVal 0
+            ui_page_layout_t& page = *m_bound[ static_cast< std::size_t >( index_of( owner ) ) ]->m_page;
+            if ( std::strcmp( plug, "StartScroll" ) == 0 )
+                ui_page_layout_start( page );
+            else if ( std::strcmp( plug, "StopScroll" ) == 0 )
+                ui_page_layout_stop( page );
+            else
+                ui_page_layout_reset( page );
+            out.m_known = false;
+            return out;
+        }
+        if ( vt == k_ui_remap_vtable || vt == k_ui_throttle_remap_vtable )
+        {
+            // SetFocus 0x4612E0, Hide 0x461380
+            ui_bound_t& b = *m_bound[ static_cast< std::size_t >( index_of( owner ) ) ];
+            if ( std::strcmp( plug, "SetFocus" ) == 0 )
+                ui_remap_set_focus( b.m_remap_state, b.m_remap_hooks );
+            else
+                ui_remap_hide( *b.m_remap, b.m_remap_state );
+            out.m_known = false;
+            return out;
+        }
         if ( vt == k_ui_boat_stat_vtable )
         {
             // 0x44FCA0: +0xB0 = the first record as an int; VuRetVal +0 = 0
