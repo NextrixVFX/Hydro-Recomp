@@ -309,9 +309,6 @@
     <ClInclude Include="workspace\core\ui\results.hxx">
       <Filter>workspace\core\ui</Filter>
     </ClInclude>
-    <ClInclude Include="workspace\core\ui\savefile.hxx">
-      <Filter>workspace\core\ui</Filter>
-    </ClInclude>
     <ClInclude Include="workspace\core\ui\schema.hxx">
       <Filter>workspace\core\ui</Filter>
     </ClInclude>

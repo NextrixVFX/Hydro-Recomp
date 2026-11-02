@@ -1,6 +1,6 @@
 #pragma once
 
-#include <workspace/core/ui/savefile.hxx>
+#include <workspace/core/save/cloud.hxx>
 #include <workspace/core/ui/select.hxx>
 #include <workspace/core/ui/standings.hxx>
 
@@ -88,13 +88,16 @@ inline bool ui_progress_boat_was_used( const value_t& document, const std::strin
     return used.tag == 3 && ( used.integer & 0xFF ) != 0;
 }
 
-// The championship entity's save slots over the manager (ui_champ_env_t, standings.hxx): 0x451370's vt+0x70, 0x451540's vt+0x68, the
-// result vt+0x5C and 0x4ABD60.
-inline void ui_champ_save_bind( ui_champ_env_t& env, c_save_manager& manager )
+// The three strings of the corrupt save's box (0x4B1430, 0x4AC480): what the owner of cloud_hooks_t::corrupt_box shows.
+inline constexpr const char* k_ui_save_corrupt_box[ 3 ] = { "SaveGame_Corrupt_Heading", "SaveGame_Corrupt_Body", "MessageBox_OK" };
+
+// The championship entity's save slots over the game save (ui_champ_env_t, standings.hxx): 0x451370's vt+0x70, 0x451540's vt+0x68, the
+// result vt+0x5C and 0x4ABD60 = c_cloud_save::save.
+inline void ui_champ_save_bind( ui_champ_env_t& env, c_cloud_save& cloud )
 {
-    c_save_manager* m = &manager;
-    env.m_load = [ m ]( value_t& data ) { ui_progress_champ_load( m->document( ), data ); };
-    env.m_save = [ m ]( const value_t& data ) { ui_progress_champ_save( m->document( ), data ); };
-    env.m_result = [ m ]( const std::string& name, std::int32_t place ) { ui_progress_champ_result( m->document( ), name, place ); };
-    env.m_commit = [ m ] { m->request( ); };
+    c_cloud_save* m = &cloud;
+    env.m_load = [ m ]( value_t& data ) { ui_progress_champ_load( m->data, data ); };
+    env.m_save = [ m ]( const value_t& data ) { ui_progress_champ_save( m->data, data ); };
+    env.m_result = [ m ]( const std::string& name, std::int32_t place ) { ui_progress_champ_result( m->data, name, place ); };
+    env.m_commit = [ m ] { m->save( ); };
 }
