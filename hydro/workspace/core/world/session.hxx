@@ -124,6 +124,8 @@ struct race_session_boat_t
     // The hull draw (c_world): each model instance's placements, the one shown.
     std::vector< int > placements[ 3 ];
     int shown = -2;
+    bool hull_refused = false;
+    int hull_geometry = -1;      // instance 0's streamed clone: the skinned draw 0x532AD0's pose reaches it by CPU skinning
     // Ours: the session this boat is in (the transform watcher's 0x536350 reaches the trigger manager through it).
     struct race_session_t* owner = nullptr;
     int index = -1;

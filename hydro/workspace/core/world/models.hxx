@@ -291,6 +291,101 @@ inline const std::vector< c_world::cached_part_t >& c_world::model_for( const st
     return m_models.emplace( asset, std::move( cached ) ).first->second;
 }
 
+// The level's VuFoliageEntity (world/foliage.hxx): properties, transform (+0x80 the position, +0xB0 / +0xB8 the scale), slot 6
+// 0x5E7000's bucket. Ours, flagged: each bucket is one streamed mesh with one placement, drawn in the opaque pass with the same
+// state as retail's type 4 (blend off, depth write on); retail writes the quads into the sort's memory (flush 0x5BBAA0 ->
+// callback 0x5BBDD0). The texture is the id texture_for answers + 1 (0: the property holds none).
+inline void c_world::foliage_build( const entity_t& root )
+{
+    const auto walk = [ & ]( const auto& self, const entity_t& e ) -> void
+    {
+        if ( e.m_type == "VuFoliageEntity" && e.m_state )
+        {
+            const foliage_state_t& s = *static_cast< const foliage_state_t* >( e.m_state.get( ) );
+            const transform_component_t* t = entity_transform( const_cast< entity_t& >( e ) );
+            if ( t && !e.m_world_unknown )
+            {
+                foliage_entity_t f;
+                std::memcpy( f.m_position, t->world + 12, 16 );
+                f.m_scale_x = t->scale[ 0 ];
+                f.m_scale_z = t->scale[ 2 ];
+                f.m_fog = s.fog;
+                f.m_color = s.color;
+                std::memcpy( f.m_uv, s.uv, 16 );
+                f.m_draw_distance = s.draw_distance;
+                if ( !s.texture.empty( ) )
+                    f.m_texture = static_cast< std::uint32_t >( texture_for( s.texture ) + 1 );
+                f.transform_changed( );
+                m_foliage_entities.push_back( f );
+            }
+        }
+        for ( const auto& child : e.m_children )
+            self( self, *child );
+    };
+    walk( walk, root );
+    for ( foliage_entity_t& f : m_foliage_entities )
+        f.game_initialize( m_foliage );
+    const float identity[ 16 ] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
+    for ( int l = 0; l < 2; ++l )
+        for ( foliage_bucket_t& b : m_foliage.m_lists[ l ] )
+        {
+            foliage_draw_t d;
+            d.bucket = &b;
+            d.capacity = b.m_references;
+            d.scratch.resize( static_cast< std::size_t >( d.capacity ) * 4u );
+            std::vector< unsigned short > indices;
+            for ( int q = 0; q < d.capacity; ++q )
+                for ( const int corner : { 0, 1, 2, 2, 3, 0 } )
+                    indices.push_back( static_cast< unsigned short >( q * 4 + corner ) );
+            d.geometry = c_engine::geometry( d.scratch.data( ), static_cast< int >( d.scratch.size( ) ), indices.data( ), static_cast< int >( indices.size( ) ) );
+            c_engine::place( d.geometry, static_cast< int >( b.m_texture ) - 1, 0, static_cast< int >( indices.size( ) ), identity, nullptr, l ? 13 : 12, nullptr, -1 );
+            m_foliage_draws.push_back( std::move( d ) );
+        }
+    LOG_INFO( "foliage: %d VuFoliageEntity, %d buckets", static_cast< int >( m_foliage_entities.size( ) ), static_cast< int >( m_foliage_draws.size( ) ) );
+}
+
+// 0x5E71E0 on each entity, then the quads' vertices 0x5BBE30 tinted as the flush 0x5BBAA0 does: the tint is the level's "Foliage
+// Tint" as loaded. Ours, flagged: whether [ebx + 0xA8] follows the blended settings is unread. A bucket's unused quads collapse.
+inline void c_world::foliage_frame( )
+{
+    if ( m_foliage_draws.empty( ) )
+        return;
+    for ( foliage_entity_t& f : m_foliage_entities )
+        f.draw( m_eye, m_eye );
+    const float k = 0.0039215689f;   // 0x6F75BC
+    const float tint[ 3 ] = { static_cast< float >( m_foliage_tint & 0xFFu ) * k, static_cast< float >( ( m_foliage_tint >> 8 ) & 0xFFu ) * k,
+                              static_cast< float >( ( m_foliage_tint >> 16 ) & 0xFFu ) * k };
+    for ( foliage_draw_t& d : m_foliage_draws )
+    {
+        int count = 0;
+        mesh_vertex_t* out = c_engine::edit( d.geometry, count );
+        if ( !out )
+            continue;
+        std::memset( out, 0, static_cast< std::size_t >( count ) * sizeof( mesh_vertex_t ) );
+        int at = 0;
+        for ( const foliage_quad_t& q : d.bucket->m_quads )
+        {
+            std::uint8_t bytes[ 0x60 ];
+            foliage_vertices( q, tint, bytes );
+            for ( int v = 0; v < 4; ++v, ++at )
+            {
+                const std::uint8_t* p = bytes + v * 0x18;
+                mesh_vertex_t& o = out[ at ];
+                std::memcpy( o.position, p, 12 );
+                o.normal[ 2 ] = 1.0f;
+                float uv[ 2 ];
+                std::memcpy( uv, p + 12, 8 );
+                o.uv[ 0 ] = uv[ 0 ];
+                o.uv[ 1 ] = 1.0f - uv[ 1 ];   // the Foliage vertex shader's ( u, 1 - v )
+                for ( int c = 0; c < 4; ++c )
+                    o.color[ c ] = static_cast< float >( p[ 20 + c ] ) * k;
+            }
+        }
+        d.bucket->m_quads.clear( );
+        c_engine::stream( d.geometry );
+    }
+}
+
 // `geometry_override` swaps in a per-instance streamed clone while keeping
 // every part's own texture, material tag, detail map and node matrix. The
 // animated props need exactly that: each prop model turned out to have a
