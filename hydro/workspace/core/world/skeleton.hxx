@@ -235,8 +235,11 @@ inline bool skel_skeleton_read( scene_reader_t& r, skel_skeleton_t& s )
 {
     s = skel_skeleton_t{ };
     std::uint32_t count = scene_u32( r );
-    if ( r.bad || count > 0x10000u )   // OURS: retail allocates whatever the word says
+    if ( r.bad )
         return false;
+    // 0x52F420 new[ ] x 5: 32, 4, 48, 48, 64 x count, a byte size past 32 bits asking for -1, which operator new throws. Retail has no other limit.
+    if ( static_cast< std::uint64_t >( count ) * 64u > 0xFFFFFFFFu )
+        throw std::bad_alloc( );
     s.count = static_cast< int >( count );
     s.names.assign( 32u * count + 1u, 0 );   // OURS: one trailing NUL - a full 32-byte last name ends there
     s.parents.assign( count, 0 );
