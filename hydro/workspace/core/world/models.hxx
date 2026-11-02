@@ -511,13 +511,11 @@ inline void c_world::prop_draw( const entity_t& owner )
         transform_draw_matrix( *t, matrix );
         const auto box = m_scene_aabbs.find( item.draw.model_asset );
         scene_component_aabb( item.aabb, box != m_scene_aabbs.end( ) ? box->second.data( ) : scene_zero_aabb( ), matrix, false );
-        for ( int instance = 0; instance < 3; ++instance )
-            for ( std::size_t k = 0; k < item.placements[ instance ].size( ) && k < item.nodes[ instance ].size( ); ++k )
-            {
-                float placed[ 16 ];
-                math_multiply( placed, matrix, item.nodes[ instance ][ k ].data( ) );
-                c_engine::move( item.placements[ instance ][ k ], placed );
-            }
+        if ( item.retail )
+        {
+            std::memcpy( item.retail->m_matrix, matrix, 64 );
+            std::memcpy( item.retail->m_min, item.aabb, 32 );
+        }
     }
 }
 

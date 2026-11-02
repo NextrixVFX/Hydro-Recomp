@@ -350,18 +350,25 @@ inline void c_world::load_entity_tree( const char* asset, const value_t& project
                 // nothing (0x520130: +0x10 null -> return).
                 static_draw_item_t item{};
                 item.draw = m;
-                const std::string* names[ 3 ] = { &m.model_asset, &m.lod1_model_asset, &m.lod2_model_asset };
-                for ( int instance = 0; instance < 3; ++instance )
+                if ( !m_retail )
+                    retail_attach( );
+                const std::string* names[ 4 ] = { &m.model_asset, &m.lod1_model_asset, &m.lod2_model_asset, &m.reflection_model_asset };
+                item.retail = std::make_unique< gfx_static_component_t >( );
+                std::memcpy( item.retail->m_matrix, matrix, 64 );
+                for ( int instance = 0; instance < 4; ++instance )
                     if ( !names[ instance ]->empty( ) )
-                        place_model( *names[ instance ], matrix, 0, -1, tint, nullptr, -1, &item.placements[ instance ], &item.nodes[ instance ] );
+                    {
+                        model_for( *names[ instance ] );   // m_scene_aabbs; the placements are gone
+                        if ( m_retail )
+                            if ( const gfx_scene_view_t* v = m_retail->model( *names[ instance ] ) )
+                                gfx_scene_view_attach( item.retail->m_lods[ instance ], *v );
+                    }
                 item.owner = &e;
                 // 0x531D10 with the LOD 0 instance's scene aabb (its +0x10 scene's +0x5C), or the zero aabb
                 // 0x7593F0 when it holds no scene; +0x1E's draw-manager hand-off is the renderer's (a hook).
                 const auto box = m_scene_aabbs.find( m.model_asset );
                 scene_component_aabb( item.aabb, box != m_scene_aabbs.end( ) ? box->second.data( ) : scene_zero_aabb( ), matrix, false );
-                for ( int instance = 0; instance < 3; ++instance )
-                    for ( int handle : item.placements[ instance ] )
-                        c_engine::show( handle, false );
+                std::memcpy( item.retail->m_min, item.aabb, 32 );
                 m_static_draws.push_back( std::move( item ) );
                 continue;
             }

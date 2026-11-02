@@ -61,6 +61,7 @@
 // Screens/Background. Static models keep the transforms from their
 // VuTransformComponent, and the front-end camera is the one stored on
 // VuSetFrontEndCameraEntity.
+#include <workspace/core/world/stage.hxx>
 #include <workspace/core/world/waterpass.hxx>
 
 class c_world
@@ -1417,6 +1418,29 @@ public:
         std::memcpy( view.m_statics.m_decal_ambient, &record[ 15 ], 4 );
         std::memcpy( view.m_statics.m_decal_diffuse, &record[ 16 ], 4 );
         m_stage.frame( dt, m_grid_frame, view );
+        if ( m_retail )
+            m_retail->frame( dt, record, m_far, m_lights );
+    }
+    // The static model components on retail's path: the frame's walk, each component's draw 0x5B0730. The list stands for the draw manager's tree.
+    void retail_attach( )
+    {
+        void* device = nullptr;
+        void* context = nullptr;
+        void* mirror = nullptr;
+        c_engine::device( device, context, mirror );
+        if ( device == nullptr )
+            return;   // the self-test's scenes have no window
+        m_retail = std::make_unique< gfx_retail_t >( device, context );
+        m_retail->m_read = [ this ]( const std::string& entry, std::vector< std::uint8_t >& out ) { return m_archive.read( entry.c_str( ), out ); };
+        m_retail->m_draw = [ this ]( gfx_sort_t& sort, const gfx_draw_params_t& p ) {
+            for ( static_draw_item_t& item : m_static_draws )
+                if ( item.retail && !item.off && ( ( p.m_reflecting & item.draw.reflect ) == p.m_reflecting ) )
+                {
+                    item.retail->m_draw = &item.draw;
+                    item.retail->draw( sort, p );
+                }
+        };
+        c_engine::stage_pass( &gfx_retail_t::engine_pass, m_retail.get( ) );
     }
     const track_manager_t* track( ) const
     {
@@ -1742,6 +1766,7 @@ private:
     water_grid_frame_t m_grid_frame{};
     water_stage_t m_stage{};
     bool m_stage_attached = false, m_stage_bound = false;
+    std::unique_ptr< gfx_retail_t > m_retail;
     std::uint32_t m_gfx_record[ 22 ] = { };   // the settings entity applied at load, its +0x70 record (0x41B400's order)
     // Loaded VuTimedEventAssets, keyed by asset name. A control points into
     // this, so entries are only ever added.
@@ -1763,6 +1788,7 @@ private:
         const entity_t* owner = nullptr;
         std::vector< std::array< float, 16 > > nodes[ 3 ];
         bool off = false;   // the component off the 3D draw manager (its +0x1E cleared: a hide 0x545F20)
+        std::unique_ptr< gfx_static_component_t > retail;   // its instances over stage.hxx's models
     };
 
     // One Vu3dDrawAnimatedModelComponent instance. The clip and phase are

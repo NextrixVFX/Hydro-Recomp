@@ -83,6 +83,8 @@ public:
     // The running game's water (hydro world/waterpass.hxx): the pass called in the transparent stage, a texture's view, the device, the context, the planar target's view,
     // the camera the pass draws with. Pointers are void* because this header has no D3D11.
     static void water_pass( void ( *pass )( void* ), void* user );
+    // The game's retail scene (hydro world/stage.hxx): called once per view after the opaque placements, `reflecting` on the mirror pass.
+    static void stage_pass( void ( *pass )( void*, bool ), void* user );
     static void* texture_view( int texture );
     static void device( void*& device, void*& context, void*& mirror );
     static void matrices( float* view, float* projection, float* eye );
