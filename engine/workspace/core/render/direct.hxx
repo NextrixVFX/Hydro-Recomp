@@ -4,6 +4,7 @@
 // description structs hold D3D11's layouts, asserted below. WebGL will be a sibling of this file, not a change to gfx.hxx.
 
 #include <workspace/core/render/gfx.hxx>
+#include <workspace/utility/drawstats.hxx>
 
 #include <impl/host.hxx>
 
@@ -116,14 +117,15 @@ struct gfx_direct_t final : gfx_api_t
 
     void vs_constants( gfx_handle_t b ) override { ID3D11Buffer* p = as< ID3D11Buffer >( b ); m_context->VSSetConstantBuffers( 0, 1, &p ); }
     // A start slot past D3D11's 128 is 0x540B50's null branch (gfx.hxx, its TRAP): OURS, the call is dropped, the live runtime stomps state otherwise. Samplers below the same.
-    void ps_views( std::uint32_t s, gfx_handle_t v ) override { if ( s >= 128u ) return; ID3D11ShaderResourceView* p = as< ID3D11ShaderResourceView >( v ); m_context->PSSetShaderResources( s, 1, &p ); }
-    void ps_shader( gfx_handle_t s ) override { m_context->PSSetShader( as< ID3D11PixelShader >( s ), nullptr, 0 ); }
+    void ps_views( std::uint32_t s, gfx_handle_t v ) override { if ( s >= 128u ) return; ++drawstats::at( ).textures; ID3D11ShaderResourceView* p = as< ID3D11ShaderResourceView >( v ); m_context->PSSetShaderResources( s, 1, &p ); }
+    void ps_shader( gfx_handle_t s ) override { ++drawstats::at( ).shaders; m_context->PSSetShader( as< ID3D11PixelShader >( s ), nullptr, 0 ); }
     void ps_samplers( std::uint32_t s, gfx_handle_t v ) override { if ( s >= 16u ) return; ID3D11SamplerState* p = as< ID3D11SamplerState >( v ); m_context->PSSetSamplers( s, 1, &p ); }
-    void vs_shader( gfx_handle_t s ) override { m_context->VSSetShader( as< ID3D11VertexShader >( s ), nullptr, 0 ); }
-    void draw_indexed( std::uint32_t c, std::uint32_t s, std::int32_t b ) override { m_context->DrawIndexed( c, s, b ); }
-    void draw( std::uint32_t c, std::uint32_t s ) override { m_context->Draw( c, s ); }
+    void vs_shader( gfx_handle_t s ) override { ++drawstats::at( ).shaders; m_context->VSSetShader( as< ID3D11VertexShader >( s ), nullptr, 0 ); }
+    void draw_indexed( std::uint32_t c, std::uint32_t s, std::int32_t b ) override { drawstats::counts_t& n = drawstats::at( ); ++n.draws; n.indices += c; m_context->DrawIndexed( c, s, b ); }
+    void draw( std::uint32_t c, std::uint32_t s ) override { drawstats::counts_t& n = drawstats::at( ); ++n.draws; n.indices += c; m_context->Draw( c, s ); }
     void* map( gfx_handle_t r, std::uint32_t t ) override
     {
+        ++drawstats::at( ).constants;
         D3D11_MAPPED_SUBRESOURCE m{ };
         m_context->Map( as< ID3D11Resource >( r ), 0, static_cast< D3D11_MAP >( t ), 0, &m );
         return m.pData;
@@ -141,15 +143,16 @@ struct gfx_direct_t final : gfx_api_t
     void topology( std::uint32_t v ) override { m_context->IASetPrimitiveTopology( static_cast< D3D11_PRIMITIVE_TOPOLOGY >( v ) ); }
     void set_targets( std::uint32_t n, gfx_handle_t v, gfx_handle_t d ) override
     {
+        ++drawstats::at( ).targets;
         ID3D11RenderTargetView* p = as< ID3D11RenderTargetView >( v );
         m_context->OMSetRenderTargets( n, n ? &p : nullptr, as< ID3D11DepthStencilView >( d ) );
     }
-    void set_blend( gfx_handle_t s ) override { m_context->OMSetBlendState( as< ID3D11BlendState >( s ), nullptr, 0xFFFFFFFFu ); }
-    void set_depth( gfx_handle_t s ) override { m_context->OMSetDepthStencilState( as< ID3D11DepthStencilState >( s ), 0 ); }
-    void set_raster( gfx_handle_t s ) override { m_context->RSSetState( as< ID3D11RasterizerState >( s ) ); }
+    void set_blend( gfx_handle_t s ) override { ++drawstats::at( ).states; m_context->OMSetBlendState( as< ID3D11BlendState >( s ), nullptr, 0xFFFFFFFFu ); }
+    void set_depth( gfx_handle_t s ) override { ++drawstats::at( ).states; m_context->OMSetDepthStencilState( as< ID3D11DepthStencilState >( s ), 0 ); }
+    void set_raster( gfx_handle_t s ) override { ++drawstats::at( ).states; m_context->RSSetState( as< ID3D11RasterizerState >( s ) ); }
     void set_viewport( const gfx_viewport_t& v ) override { m_context->RSSetViewports( 1, reinterpret_cast< const D3D11_VIEWPORT* >( &v ) ); }
     void set_scissor( const gfx_rect_t& r ) override { m_context->RSSetScissorRects( 1, reinterpret_cast< const D3D11_RECT* >( &r ) ); }
-    void update_texture( gfx_handle_t t, std::uint32_t l, const void* d, std::uint32_t r, std::uint32_t s ) override { m_context->UpdateSubresource( as< ID3D11Resource >( t ), l, nullptr, d, r, s ); }
+    void update_texture( gfx_handle_t t, std::uint32_t l, const void* d, std::uint32_t r, std::uint32_t s ) override { ++drawstats::at( ).constants; m_context->UpdateSubresource( as< ID3D11Resource >( t ), l, nullptr, d, r, s ); }
     void clear_target( gfx_handle_t v, const float* c ) override { m_context->ClearRenderTargetView( as< ID3D11RenderTargetView >( v ), c ); }
     void clear_depth( gfx_handle_t v, std::uint32_t f, float d, std::uint8_t s ) override { m_context->ClearDepthStencilView( as< ID3D11DepthStencilView >( v ), f, d, s ); }
     void get_targets( gfx_handle_t& v, gfx_handle_t& d ) override

@@ -672,6 +672,7 @@ struct gfx_ui_pass_t final : gfx_sort_hooks_t, ui_record_device_t, ui_boost_devi
     {
         gfx_viewport_t v{ 0.0f, 0.0f, static_cast< float >( m_width ), static_cast< float >( m_height ), 0.0f, 1.0f };
         m_direct.set_viewport( v );
+        const drawstats::scope_t pass( drawstats::k_ui );   // ours: --draw-stats
         m_sort.flip( );
         m_boosts.clear( );
         m_maps.clear( );

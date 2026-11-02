@@ -1,6 +1,7 @@
 #pragma once
 
 #include <workspace/core/ui/draw.hxx>
+#include <workspace/utility/drawstats.hxx>
 
 #include <algorithm>
 #include <cstdint>
@@ -389,6 +390,21 @@ struct gfx_sort_t : ui_gfx_sort_t
             m_hooks.profile( 0x18 );
     }
 
+    // Ours: drawstats' reading of a command. Only the world's sort (gfx_retail_t) sets m_stat_passes; the others keep their caller's scope.
+    bool m_stat_passes = false;
+    static drawstats::pass_t stat_pass( std::uint32_t hi, std::uint32_t callback )
+    {
+        if ( callback == 0x5BC6F0u || callback == 0x5BC7D0u || ( hi >> 27 ) >= 2u )   // the copy, the radial blur, layer 2 up
+            return drawstats::k_post;
+        if ( ( hi & 0x800000u ) == 0u )
+            return drawstats::k_mirror;
+        if ( callback == 0x594D70u )
+            return drawstats::k_water;
+        if ( callback == 0x58BA20u || callback == 0x58CE30u || callback == 0x5E8410u )   // pfx quads, trails, coronas
+            return drawstats::k_pfx;
+        return drawstats::k_scene;
+    }
+
     // 0x53ACC0: what the render thread runs for a frame.
     void draw_frame( )
     {
@@ -445,6 +461,8 @@ struct gfx_sort_t : ui_gfx_sort_t
         for ( const std::uint32_t at : m_order )
         {
             const ui_gfx_command_t& c = list[ at ];
+            if ( m_stat_passes )   // ours: drawstats' pass from the key (0x800000 clear = the reflection's view) and the callback
+                drawstats::set( stat_pass( c.m_words[ 1 ], c.m_words[ 2 ] ) );
             const std::uint32_t material = c.m_words[ 4 ], chunk = c.m_words[ 5 ];
             if ( material != last_material )
             {

@@ -87,6 +87,7 @@ struct gfx_retail_t final : gfx_composer_hooks_t
         m_device.create_dynamic( );
         m_sort.reserve( );
         m_sort.m_single_thread = false;
+        m_sort.m_stat_passes = true;   // ours: --draw-stats
         m_backend.m_has_light = true;
         m_backend.m_light_flip = [ this ]( ) { m_dynamic.m_fill ^= 1u; m_dynamic.m_render ^= 1u; };
         m_backend.m_asset = [ this ]( std::uint32_t kind, const std::string& name ) { return texture( kind, name ); };
