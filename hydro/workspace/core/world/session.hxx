@@ -1336,7 +1336,7 @@ inline void race_session_motion_update( race_session_t& rs, entity_t& target, bo
         }
         return;
     }
-    if ( cls != "VuPropEntity" && cls != "VuBreakablePropEntity" && cls != "VuAnimatedPropEntity" )
+    if ( cls != "VuPropEntity" && cls != "VuRampEntity" && cls != "VuBreakablePropEntity" && cls != "VuAnimatedPropEntity" )
     {
         race_unwired( rs, "a motion target of class " + cls + " - its motion IF slot 0 is not read (UNKNOWN, not run)" );
         return;
@@ -1850,7 +1850,8 @@ inline void race_session_level_bodies( race_session_t& s, entity_t& tree, const 
             return;
         }
         const bool breakable = e.m_type == "VuBreakablePropEntity";
-        if ( e.m_type != "VuPropEntity" && !breakable )
+        const bool ramp = e.m_type == "VuRampEntity";    // slot 6 0x43E3F0: 0x546910, then +0xD8 |= 0x10 (below)
+        if ( e.m_type != "VuPropEntity" && !breakable && !ramp )
         {
             ++unknown[ e.m_type.empty( ) ? std::string( "(UNKNOWN node)" ) : e.m_type ];
             return;
@@ -1883,6 +1884,9 @@ inline void race_session_level_bodies( race_session_t& s, entity_t& tree, const 
             c.word_f4 = 1;
             c.flags_d8 |= 1u;
         }
+        // VuRampEntity's create 0x43E340: the rigid component's +0xF4 = its +0x7C part (contact callback 0x43E420).
+        if ( ramp )
+            c.word_f4 = 1;
         const bool ok = bodies_prop_game_initialize( *bp, c, visible, asset, t->world, t->scale, id, hooks, [] { /* g 0x7590B8 vt+0x28: the renderer */ },
             [ & ]( level_body_t& lb ) {
                 d.objects[ &lb.body ] = &lb.collision;
@@ -1891,6 +1895,11 @@ inline void race_session_level_bodies( race_session_t& s, entity_t& tree, const 
             why );
         if ( !ok )
             race_unwired( s, "VuPropEntity '" + e.m_name + "': " + why + " (UNKNOWN, no body)" );
+        if ( ramp && ok )
+        {
+            c.flags_d8 |= 0x10u;
+            body_word( bp->body, 0x2D0 ) = c.flags_d8;
+        }
         if ( bp->in_world )
             ++added;
         // VuBreakablePropEntity's slot 6 0x434620: 0x546910 above, then the "Decision" tick 0x434A20 and the "Build" tick
