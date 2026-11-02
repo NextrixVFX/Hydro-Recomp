@@ -7,6 +7,7 @@
 #include <workspace/core/save/seam.hxx>
 #include <workspace/core/save/writer.hxx>
 #include <workspace/core/world/ghost.hxx>
+#include <workspace/core/world/ghostgame.hxx>
 
 #include <chrono>
 #include <filesystem>
@@ -594,6 +595,188 @@ inline bool verify_save_script( )
     return bad == 0;
 }
 
+// world/ghostgame.hxx against retail's VuGhostGame handlers (case ghost_game): 0x486060's table, 0x486660, 0x486880 + 0x486CE0's results and
+// achievement, 0x486EC0's progress, PUT, leaderboard and voice. The PUT goes through the real seam: the file's text is retail's.
+inline bool verify_ghost_game( )
+{
+    save_words_t c{ g_golden_ghost_game_words };
+    const unsigned n = c.next( );
+    save_check_dir_t dir;
+    int bad = 0, puts = 0;
+    struct boat_image_t
+    {
+        std::vector< std::uint8_t > bytes;
+        race_results_entry_t entry;
+    };
+    const auto boat = [ & ]( ) {
+        boat_image_t b;
+        b.bytes.assign( 0x600, 0 );
+        b.entry.human = c.next( ) != 0;
+        b.entry.local = c.next( ) != 0;
+        const auto word = [ & ]( int at ) {
+            const unsigned u = c.next( );
+            std::memcpy( b.bytes.data( ) + at, &u, 4 );
+        };
+        word( 0x4B4 );
+        word( 0x4B8 );
+        word( 0x4CC );
+        word( 0x4D4 );
+        word( 0x328 );
+        b.bytes[ 0x32D ] = static_cast< std::uint8_t >( c.next( ) );
+        b.bytes[ 0x32F ] = static_cast< std::uint8_t >( c.next( ) );
+        b.bytes[ 0x334 ] = static_cast< std::uint8_t >( c.next( ) );
+        b.entry.driver_name = c.str( );
+        b.entry.boat_class = c.str( );
+        b.entry.boat_name = c.str( );
+        return b;
+    };
+    struct want_log_t
+    {
+        unsigned tag = 0;
+        std::string text, data;
+        unsigned a = 0, b = 0;
+    };
+    const auto logs = [ & ]( ) {
+        std::vector< want_log_t > out( c.next( ) );
+        for ( want_log_t& e : out )
+        {
+            e.tag = c.next( );
+            if ( e.tag == 2 || e.tag == 6 )
+                e.text = c.str( );
+            else if ( e.tag == 3 || e.tag == 5 )
+            {
+                e.text = c.str( );
+                e.a = c.next( );
+                e.b = c.next( );
+            }
+            else if ( e.tag == 4 )
+            {
+                e.a = c.next( );
+                e.b = c.next( );
+                e.text = c.str( );
+                e.data = c.str( );
+            }
+        }
+        return out;
+    };
+    const auto same = []( const std::vector< want_log_t >& got, const std::vector< want_log_t >& want ) {
+        if ( got.size( ) != want.size( ) )
+            return false;
+        for ( std::size_t k = 0; k < got.size( ); ++k )
+            if ( got[ k ].tag != want[ k ].tag || got[ k ].text != want[ k ].text || got[ k ].data != want[ k ].data || got[ k ].a != want[ k ].a || got[ k ].b != want[ k ].b )
+                return false;
+        return true;
+    };
+    const char* const root_doc = "VUJB\0\0\0\1\0\0\0\6\0\0\0\1\0\0\0\5Other\0\0\0\1\0\0\0\3";
+    const std::vector< std::uint8_t > root_blob( root_doc, root_doc + 33 );
+    for ( unsigned v = 0; v < n; ++v )
+    {
+        ghost_game_t g;
+        g.boats = static_cast< std::int32_t >( c.next( ) );
+        g.circuit = static_cast< std::uint8_t >( c.next( ) );
+        const std::uint64_t xuid = static_cast< std::uint64_t >( c.next( ) ) | static_cast< std::uint64_t >( c.next( ) ) << 32;
+        boat_image_t human = boat( );
+        g.human = human.bytes.data( );
+        g.human_entry = human.entry;
+        g.track = "Hydroelectric";
+        g.entries.resize( c.next( ) );
+        for ( ghost_entry_t& e : g.entries )
+        {
+            e.name = c.str( );
+            e.loaded = c.next( ) != 0;
+        }
+        const unsigned nr = c.next( );
+        std::vector< boat_image_t > images;
+        images.reserve( nr );
+        for ( unsigned k = 0; k < nr; ++k )
+        {
+            ghost_game_record_t r;
+            r.index = static_cast< int >( c.next( ) );
+            r.frames = static_cast< std::int32_t >( c.next( ) );
+            const unsigned last = c.next( );
+            std::memcpy( &r.last_time, &last, 4 );
+            images.push_back( boat( ) );
+            r.boat = images.back( ).bytes.data( );
+            r.entry = images.back( ).entry;
+            g.records.push_back( r );
+        }
+        ghost_data_t recording;
+        recording.boat = c.str( );
+        recording.skin = c.str( );
+        recording.driver = c.str( );
+        const std::string frames = c.str( );
+        recording.count = static_cast< std::int32_t >( frames.size( ) / 24 );
+        recording.frames.assign( frames.begin( ), frames.end( ) );
+        const auto fresh = [ & ]( ) {
+            value_t root;
+            c_reader::read_at_start( root_blob, root );
+            return root;
+        };
+        const auto check = [ & ]( const char* step, const value_t& root, const std::vector< want_log_t >& got, const std::string& dump, const std::vector< want_log_t >& want ) {
+            std::string d;
+            vujb_dump( root, d );
+            if ( ( d != dump || !same( got, want ) ) && bad++ < 8 )
+                LOG_ERROR( "ghost_game vector %u %s: dump %s, hooks %zu / %zu", v, step, d == dump ? "same" : "differs", got.size( ), want.size( ) );
+        };
+        {
+            value_t root = fresh( );
+            const std::string dump = c.str( );
+            const auto want = logs( );
+            ghost_game_table( root, g );
+            check( "table", root, { }, dump, want );
+        }
+        {
+            value_t root = fresh( );
+            const std::string dump = c.str( );
+            const auto want = logs( );
+            ghost_game_table( root, g );
+            ghost_game_table_erase( root );
+            check( "erase", root, { }, dump, want );
+        }
+        {
+            value_t root = fresh( );
+            const std::string dump = c.str( );
+            const auto want = logs( );
+            std::vector< want_log_t > got;
+            ghost_game_end( root, g, [ & ]( const char* name ) { got.push_back( { 2, name, { }, 0, 0 } ); } );
+            got.push_back( { 0 } );
+            got.push_back( { 1 } );
+            check( "end", root, got, dump, want );
+        }
+        {
+            value_t root = fresh( );
+            const std::string dump = c.str( );
+            const auto want = logs( );
+            std::vector< want_log_t > got;
+            ghost_game_post_t h;
+            h.progress = [ & ]( const std::string& track, std::int32_t place, float time ) {
+                unsigned bits;
+                std::memcpy( &bits, &time, 4 );
+                got.push_back( { 3, track, { }, static_cast< unsigned >( place ), bits } );
+            };
+            h.store = [ & ]( const std::vector< std::uint8_t >& blob ) {
+                dir.reset( );
+                ++puts;
+                ghost_store_best( blob, xuid, g.track );
+                std::string text;
+                dir.get( ( "titlestorage/" + std::to_string( xuid ) + "/ghost/" + g.track ).c_str( ), text );
+                got.push_back( { 4, "ghost/" + g.track, text, static_cast< unsigned >( xuid ), static_cast< unsigned >( xuid >> 32 ) } );
+            };
+            h.leaderboard = [ & ]( const std::string& name, std::int64_t score ) {
+                got.push_back( { 5, name, { }, static_cast< unsigned >( score ), static_cast< unsigned >( score >> 32 ) } );
+            };
+            h.voice = [ & ]( const char* line ) { got.push_back( { 6, line, { }, 0, 0 } ); };
+            ghost_game_post( g, 1, recording, h );
+            check( "post", root, got, dump, want );
+        }
+    }
+    if ( bad == 0 )
+        LOG_SUCCESS( "ghost game matches retail's 0x486060 0x486660 0x486880 0x486CE0 0x486EC0, PUT through the seam: %u vectors, %d PUTs", n, puts );
+    else
+        LOG_ERROR( "ghost_game FAILED %d", bad );
+    return bad == 0;
+}
+
 inline bool verify_save_all( )
 {
     bool ok = verify_save_vujb( );
@@ -602,5 +785,6 @@ inline bool verify_save_all( )
     ok = verify_save_ghost( ) && ok;
     ok = verify_save_cloud( ) && ok;
     ok = verify_save_script( ) && ok;
+    ok = verify_ghost_game( ) && ok;
     return ok;
 }
