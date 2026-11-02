@@ -300,10 +300,16 @@
     <ClInclude Include="workspace\core\ui\paused.hxx">
       <Filter>workspace\core\ui</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\core\ui\progress.hxx">
+      <Filter>workspace\core\ui</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\core\ui\remap.hxx">
       <Filter>workspace\core\ui</Filter>
     </ClInclude>
     <ClInclude Include="workspace\core\ui\results.hxx">
+      <Filter>workspace\core\ui</Filter>
+    </ClInclude>
+    <ClInclude Include="workspace\core\ui\savefile.hxx">
       <Filter>workspace\core\ui</Filter>
     </ClInclude>
     <ClInclude Include="workspace\core\ui\schema.hxx">
@@ -324,7 +330,13 @@
     <ClInclude Include="workspace\core\ui\split.hxx">
       <Filter>workspace\core\ui</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\core\ui\standings.hxx">
+      <Filter>workspace\core\ui</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\core\ui\ticker.hxx">
+      <Filter>workspace\core\ui</Filter>
+    </ClInclude>
+    <ClInclude Include="workspace\core\ui\typeset.hxx">
       <Filter>workspace\core\ui</Filter>
     </ClInclude>
     <ClInclude Include="workspace\core\ui\wired.hxx">
