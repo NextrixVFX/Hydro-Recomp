@@ -16,7 +16,7 @@
 // A frame: +0 the record clock, +4 .. +0xC the transform's position, +0x10 .. +0x14 its rotation x 0x6F7834 (int16s), +0x16 flags.
 // The manager past its record: +0x58 the boat recorded, +0x5C the clock, +0x60 the frame accumulator, +0x64 the ghosts.
 //
-// NOT RECREATED (hooks / UNKNOWN): 0x4AF640 (a ghost's VuGhostBoatEntity from its blob: the entity, its load) - the caller's;
+// 0x4AF640 (a ghost's VuGhostBoatEntity from its blob) and the entity: boat/ghost.hxx. NOT RECREATED (hooks / UNKNOWN):
 // the tick registration's own phase is g_vutickmanager's (0x4AF9C0 is run by whoever registered it).
 //
 // The blob (the leaderboard / cloud payload - the service is a platform hook, the bytes are retail's): 16 bytes
@@ -223,7 +223,7 @@ inline void ghost_start( ghost_manager_t& m, const std::string& boat, const std:
 }
 
 // 0x4AF490 (thiscall the manager) on the record: the boat string emptied, the frames freed, count = capacity = 0. The ghosts
-// (+0x64: each entity's 0x500B80 and refcount, its data, the record) are the caller's: none exist until 0x4AF640 is recreated.
+// (+0x64: each entity's 0x500B80 and refcount, its data, the record) are the caller's (boat/ghost.hxx ghost_record_t).
 inline void ghost_clear( ghost_manager_t& m )
 {
     m.record.boat.clear( );
