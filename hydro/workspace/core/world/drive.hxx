@@ -626,10 +626,24 @@ inline void race_boat_debris_bind( race_session_t& s, race_session_boat_t& b )
         }
 }
 
+// The boat's broadphase proxy, retail's body +0xC8 (nothing while the body is out of the world: 0x41E010's slot 18 tore it
+// down, as removeCollisionObject clears +200), for 0x41DA90 and 0x41FF70's writes of the mask to proxy +6. Our proxy is a
+// C++ object, its mask not at +6 on x64: the view is based so that its +6 lands on the mask. The broadphase's overlap
+// filter reads the proxy's copy, never the body's +0x2CC.
+inline std::uint8_t* race_drive_proxy( race_drive_t& r )
+{
+    race_session_boat_t& b = race_drive_boat( r );
+    if ( !r.session->dynamics || !b.collision.proxied )
+        return nullptr;
+    dbvt_proxy_t* p = r.session->dynamics->collision.broadphase->proxies[ b.collision.proxy ].get( );
+    return reinterpret_cast< std::uint8_t* >( &p->mask ) - 6;
+}
+
 inline void race_drive_respawn( void* user )
 {
     race_drive_t& r = race_drive_of( user );
     std::memcpy( &r.respawn.checkpoint, r.d.driver + 0x78, 4 );
+    r.respawn.proxy = race_drive_proxy( r );
     boat_respawn( *r.session->track, r.respawn, r.respawn_hooks );
 }
 
@@ -1214,6 +1228,7 @@ inline void race_drive_decision( race_session_t& s, std::size_t boat, float dt )
         race_unwired( s, "a VuWater surface height is NaN - 0x52A670's order (the floor) is UNKNOWN" );
     r.d.local_players = s.world.viewports;
     r.human_driver.env.control_method = s.world.control_method;
+    r.d.proxy = race_drive_proxy( r );
     boat_decision_tick( r.d, dt, r.hooks );
 }
 
