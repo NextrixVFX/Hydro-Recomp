@@ -1499,6 +1499,29 @@ inline bool race_event_dispatch( race_session_t& s, const std::string& entity, c
             dp->request = 1;
             return true;
         }
+    // VuDynamicGamePropEntity's "Activate" 0x438160 and VuBreakablePropEntity's "Break" 0x4349F0.
+    if ( plug == "Activate" )
+        for ( const auto& dp : s.dyn_props )
+        {
+            std::string path;
+            for ( const entity_t* e = dp->entity; e && e->m_parent; e = e->m_parent )
+                path = path.empty( ) ? e->m_name : e->m_name + "/" + path;
+            if ( path != entity )
+                continue;
+            dynamic_prop_activate( dp->body ? reinterpret_cast< std::uint8_t* >( &dp->body->body ) : nullptr );
+            return true;
+        }
+    if ( plug == "Break" )
+        for ( const auto& br : s.breakables )
+        {
+            std::string path;
+            for ( const entity_t* e = br->entity; e && e->m_parent; e = e->m_parent )
+                path = path.empty( ) ? e->m_name : e->m_name + "/" + path;
+            if ( path != entity )
+                continue;
+            breakable_on_break( br->request, br->target );
+            return true;
+        }
     // VuBreakableDynamicGamePropEntity's "Break" (the ctor's plug 0x433BA0, method 0x433860): the weak ref +0x168 released
     // (vt+0), +0x164 = 1, VuRetVal 0.
     if ( plug == "Break" )
@@ -1622,13 +1645,7 @@ inline void race_session_game_mode( void* user, float dt )
         // race time +0x4B4; the checkpoint's +0x8A finish byte; the game's +0x4C laps; the +0x67C machine (rules.hxx).
         // VuTimeTrialGame's slot 15 0x490D70 is the same code (its split vector at +0x720; case timetrial_split), and so is
         // VuSlalomGame's 0x48E500 (its split vector at +0x750: byte-compared with 0x490D70 - 16 bytes differ, all offsets /
-        // string addresses; not oracle-run).
-        if ( s.start.ghost )
-        {
-            // VuGhostGame's slot 15 0x487640 is its own (the +0x6C4 / +0x6D0 ghost split times, +0x728) - not recreated.
-            race_unwired( s, "VuGhostGame slot 15 0x487640 (the ghost split) - not recreated, not run (UNKNOWN)" );
-            return;
-        }
+        // string addresses; not oracle-run). VuGhostGame's 0x487640 too (its split vector at +0x728; case ghost_split).
         const race_rules_boat_t& rb = s.rules_boats[ static_cast< std::size_t >( boat ) ];
         ui_race_split_boat_t sb;
         sb.m_human = rb.human;

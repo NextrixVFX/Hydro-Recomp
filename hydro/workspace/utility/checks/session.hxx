@@ -963,6 +963,8 @@ inline bool verify_game_split( const unsigned* words, const char* const* texts, 
 // The same against VuSlalomGame slot 15 0x48E500 (case slalom_split: its split vector at +0x750).
 inline bool verify_timetrial_split( ) { return verify_game_split( g_golden_tts_words, g_golden_tts_text, "VuTimeTrialGame slot 15 0x490D70" ); }
 inline bool verify_slalom_split( ) { return verify_game_split( g_golden_sls_words, g_golden_sls_text, "VuSlalomGame slot 15 0x48E500" ); }
+// And VuGhostGame slot 15 0x487640 (case ghost_split: its split vector at +0x728).
+inline bool verify_ghost_split( ) { return verify_game_split( g_golden_gts_words, g_golden_gts_text, "VuGhostGame slot 15 0x487640" ); }
 
 // The course system (world/slalom.hxx slalom_course_start / slalom_gates_tick / slalom_recovered) against retail's
 // VuSlalomGame slot 5 0x48C660, the gates tick 0x48E6E0 (0x43FC70 / 0x48E910 / 0x48EA40 / 0x48EBB0) and OnBoatRecovered
@@ -1658,9 +1660,318 @@ inline bool verify_ghost_manager( )
     return failed == 0;
 }
 
+// VuTireTrackManager (world/tiretrack.hxx) against retail (case tire_track): the init on the real SurfaceTableDB / SurfaceDB
+// (pool counts, list ends and links, every skin), 0x5C5190 on synthetic objects, and the tick over 5 steps of hand-built lists
+// (the three lists in order, the counts and tails, each live track's bounds, chain and alphas).
+inline bool verify_tire_track( )
+{
+    const unsigned* p = g_golden_ttm_words;
+    auto bytes = [ & ]( ) {
+        const unsigned n = *p++;
+        std::vector< std::uint8_t > t;
+        for ( unsigned k = 0; k < n; ++k )
+            t.push_back( static_cast< std::uint8_t >( *p++ ) );
+        return t;
+    };
+    auto list = [ & ]( ) {
+        const unsigned n = *p++;
+        std::vector< unsigned > t( p, p + n );
+        p += n;
+        return t;
+    };
+    auto word = []( float f ) {
+        std::uint32_t u;
+        std::memcpy( &u, &f, 4 );
+        return u;
+    };
+    auto skin_ok = [ & ]( const tire_skin_t& s, const unsigned* g ) {
+        return ( s.present ? 1u : 0u ) == g[ 0 ] && word( s.tex0 ) == g[ 1 ] && word( s.tex1 ) == g[ 2 ] && word( s.ambient[ 0 ] ) == g[ 3 ] &&
+               word( s.ambient[ 1 ] ) == g[ 4 ] && word( s.ambient[ 2 ] ) == g[ 5 ] && word( s.diffuse[ 0 ] ) == g[ 6 ] &&
+               word( s.diffuse[ 1 ] ) == g[ 7 ] && word( s.diffuse[ 2 ] ) == g[ 8 ];
+    };
+    int failed = 0;
+    // the init
+    {
+        const std::vector< std::uint8_t > sdb = bytes( ), tdb = bytes( );
+        surface_table_t st;
+        const value_t sv = c_reader( sdb ).parse( );
+        const value_t tv = c_reader( tdb ).parse( );
+        surface_table_build( st, &sv );
+        tire_track_manager_t m;
+        tire_track_init( m, st, tv );
+        bool bad = *p++ != 1u;
+        const unsigned w[ 6 ] = { static_cast< unsigned >( m.track_pool.size( ) ), static_cast< unsigned >( m.segment_pool.size( ) ), static_cast< unsigned >( m.surfaces ),
+                                  static_cast< unsigned >( m.free_count ), static_cast< unsigned >( m.active_count ), static_cast< unsigned >( m.free_segment_count ) };
+        for ( unsigned x : w )
+            bad = *p++ != x || bad;
+        auto ti = [ & ]( const tire_track_t* t ) { return t ? static_cast< unsigned >( t - m.track_pool.data( ) ) : ~0u; };
+        auto si = [ & ]( const tire_segment_t* s ) { return s ? static_cast< unsigned >( s - m.segment_pool.data( ) ) : ~0u; };
+        bad = *p++ != ti( m.free_head ) || bad;
+        bad = *p++ != ti( m.free_tail ) || bad;
+        bad = *p++ != si( m.free_segment_head ) || bad;
+        bad = *p++ != si( m.free_segment_tail ) || bad;
+        for ( unsigned k : { 0u, 1u, 62u, 63u } )
+        {
+            bad = *p++ != ti( m.track_pool[ k ].next ) || bad;
+            bad = *p++ != ti( m.track_pool[ k ].prev ) || bad;
+        }
+        for ( unsigned k : { 0u, 1u, 1022u, 1023u } )
+        {
+            bad = *p++ != si( m.segment_pool[ k ].next ) || bad;
+            bad = *p++ != si( m.segment_pool[ k ].prev ) || bad;
+        }
+        ++p;   // batch_on: the render batch's register (a device hook)
+        const unsigned n = *p++;
+        bad = n != m.skins.size( ) || bad;
+        for ( unsigned k = 0; k < n; ++k, p += 9 )
+            bad = !skin_ok( m.skins[ k ], p ) || bad;
+        failed += bad ? 1 : 0;
+    }
+    const unsigned ns = *p++;
+    for ( unsigned k = 0; k < ns; ++k, p += 9 )
+    {
+        const std::vector< std::uint8_t > blob = bytes( );
+        tire_skin_t s;
+        tire_skin_load( s, c_reader( blob ).parse( ) );
+        if ( !skin_ok( s, p ) )
+        {
+            ++failed;
+            if ( failed < 4 )
+                LOG_ERROR( "tire skin %u: present %d / %u, tex %f %f / %x %x, ambient %x %x %x / %x %x %x", k, s.present ? 1 : 0, p[ 0 ], s.tex0, s.tex1, p[ 1 ], p[ 2 ],
+                           word( s.ambient[ 0 ] ), word( s.ambient[ 1 ] ), word( s.ambient[ 2 ] ), p[ 3 ], p[ 4 ], p[ 5 ] );
+        }
+    }
+    const unsigned nv = *p++;
+    int steps = 0;
+    for ( unsigned v = 0; v < nv; ++v )
+    {
+        bool bad = false;
+        const unsigned nt = *p++;
+        tire_track_manager_t m;
+        m.track_pool.assign( 8, tire_track_t{ } );
+        m.segment_pool.assign( 48, tire_segment_t{ } );
+        auto ti = [ & ]( const tire_track_t* t ) { return t ? static_cast< unsigned >( t - m.track_pool.data( ) ) : ~0u; };
+        auto si = [ & ]( const tire_segment_t* s ) { return s ? static_cast< unsigned >( s - m.segment_pool.data( ) ) : ~0u; };
+        unsigned next_segment = 0;
+        for ( unsigned t = 0; t < nt; ++t )
+        {
+            tire_track_t& tr = m.track_pool[ t ];
+            std::memcpy( &tr.width, p++, 4 );
+            std::memcpy( &tr.fade, p++, 4 );
+            tr.ending = *p++ != 0u;
+            const unsigned n = *p++;
+            for ( unsigned k = 0; k < n; ++k, p += 4 )
+            {
+                tire_segment_t& s = m.segment_pool[ next_segment++ ];
+                std::memcpy( s.position, p, 12 );
+                std::memcpy( &s.alpha, p + 3, 4 );
+                s.next = nullptr;
+                s.prev = tr.tail;
+                ( tr.tail ? tr.tail->next : tr.head ) = &s;
+                tr.tail = &s;
+                ++tr.count;
+            }
+            tire_track_t* tail = m.active_tail;
+            tr.prev = tail;
+            ( tail ? tail->next : m.active_head ) = &tr;
+            m.active_tail = &tr;
+            ++m.active_count;
+        }
+        for ( unsigned t = nt; t < 8u; ++t )
+            tire_push( &m.track_pool[ t ], m.free_head, m.free_tail, m.free_count );
+        for ( unsigned k : list( ) )
+            tire_push( &m.segment_pool[ k ], m.free_segment_head, m.free_segment_tail, m.free_segment_count );
+        const unsigned ticks = *p++;
+        for ( unsigned k = 0; k < ticks; ++k, ++steps )
+        {
+            float dt;
+            std::memcpy( &dt, p++, 4 );
+            tire_track_tick( m, dt );
+            const std::vector< unsigned > active = list( ), free_t = list( ), free_s = list( );
+            std::size_t i = 0;
+            for ( const tire_track_t* t = m.active_head; t; t = t->next, ++i )
+                bad = i >= active.size( ) || ti( t ) != active[ i ] || bad;
+            bad = i != active.size( ) || bad;
+            i = 0;
+            for ( const tire_track_t* t = m.free_head; t; t = t->next, ++i )
+                bad = i >= free_t.size( ) || ti( t ) != free_t[ i ] || bad;
+            bad = i != free_t.size( ) || bad;
+            i = 0;
+            for ( const tire_segment_t* s = m.free_segment_head; s; s = s->next, ++i )
+                bad = i >= free_s.size( ) || si( s ) != free_s[ i ] || bad;
+            bad = i != free_s.size( ) || bad;
+            bad = *p++ != static_cast< unsigned >( m.free_count ) || bad;
+            bad = *p++ != static_cast< unsigned >( m.active_count ) || bad;
+            bad = *p++ != static_cast< unsigned >( m.free_segment_count ) || bad;
+            bad = *p++ != ti( m.active_tail ) || bad;
+            bad = *p++ != ti( m.free_tail ) || bad;
+            bad = *p++ != si( m.free_segment_tail ) || bad;
+            for ( unsigned a : active )
+            {
+                const tire_track_t& t = m.track_pool[ a < 8u ? a : 0u ];
+                bad = *p++ != static_cast< unsigned >( t.count ) || bad;
+                bad = *p++ != si( t.tail ) || bad;
+                for ( int q = 0; q < 3; ++q )
+                    bad = p[ q ] != word( t.aabb_min[ q ] ) || p[ 4 + q ] != word( t.aabb_max[ q ] ) || bad;
+                p += 8;   // +0x34 / +0x44: a stale stack word in retail (the reset's second movq) - not compared
+                const std::vector< unsigned > seg = list( ), alpha = list( );
+                std::size_t j = 0;
+                for ( const tire_segment_t* s = t.head; s; s = s->next, ++j )
+                    bad = j >= seg.size( ) || si( s ) != seg[ j ] || word( s->alpha ) != alpha[ j ] || bad;
+                bad = j != seg.size( ) || bad;
+            }
+        }
+        if ( bad )
+        {
+            ++failed;
+            if ( failed < 4 )
+                LOG_ERROR( "tire run %u failed", v );
+        }
+    }
+    if ( failed == 0 )
+        LOG_SUCCESS( "VuTireTrackManager (init 0x5C40C0's CPU half, 0x5C46D0, 0x5C5190, tick 0x5C4940, 0x5C4860) matches retail: the real tables, %u skins, %u runs over %d steps", ns, nv, steps );
+    else
+        LOG_ERROR( "the tire track manager FAILED on %d (init + %u skins + %u runs)", failed, ns, nv );
+    return failed == 0;
+}
+
+// The pause menu's gate (world/pause.hxx) against retail (case pause_gate): OnSetAllowPause 0x4BB900 on every record shape, then
+// OnPauseActionGame 0x4BB660 on every pre-state: the byte +0x31 (zero or not: its readers test it) and the VuString +0x38.
+inline bool verify_pause_gate( )
+{
+    const unsigned* p = g_golden_pgt_words;
+    const unsigned nv = *p++;
+    int failed = 0;
+    for ( unsigned v = 0; v < nv; ++v )
+    {
+        ui_params_t params;
+        params.m_size = static_cast< int >( *p++ );
+        const unsigned n = *p++;
+        for ( unsigned k = 0; k < n; ++k )
+            params.m_bytes[ k ] = static_cast< std::uint8_t >( *p++ );
+        pause_menu_t m;
+        m.paused = *p++ != 0u;
+        m.allow = *p++ != 0u;
+        pause_on_set_allow( m, params );
+        const bool allow = *p++ != 0u;
+        pause_on_pause( m );
+        const unsigned nn = *p++;
+        std::string next;
+        for ( unsigned k = 0; k < nn; ++k )
+            next.push_back( static_cast< char >( *p++ ) );
+        if ( m.allow != allow || m.next != next )
+            ++failed;
+    }
+    if ( failed == 0 )
+        LOG_SUCCESS( "the pause menu's gate (OnSetAllowPause 0x4BB900, OnPauseActionGame 0x4BB660) matches retail on %u vectors", nv );
+    else
+        LOG_ERROR( "the pause menu's gate FAILED on %d of %u vectors", failed, nv );
+    return failed == 0;
+}
+
+// VuGame's results / awards names (world/awards.hxx) against retail (case game_awards): slot 11 of the four games; Awards' enter
+// 0x484320 whole with slots 9 and 10: the ordered log of every service call with its arguments, and +0x88.
+inline bool verify_game_awards( )
+{
+    int failed = 0;
+    for ( unsigned k = 0; k < g_golden_gaw_name_count; ++k )
+    {
+        const std::string mode = g_golden_gaw_names[ 2 * k ];
+        if ( mode != g_golden_gaw_names[ 2 * k + 1 ] && std::string( vugame_results_project( mode, k % 2 != 0 ) ) != g_golden_gaw_names[ 2 * k + 1 ] )
+            ++failed;
+    }
+    for ( unsigned v = 0; v < g_golden_gaw_count; ++v )
+    {
+        const char* const* t = g_golden_gaw_text + 5 * v;
+        const unsigned* w = g_golden_gaw_words + 6 * v;
+        const std::string mode = t[ 0 ], track = t[ 1 ];
+        vugame_award_boat_t b;
+        b.name = t[ 2 ];
+        b.boat_class = t[ 3 ];
+        b.tier = static_cast< std::int32_t >( w[ 0 ] );
+        std::string log;
+        const auto add = [ & ]( const std::string& e ) { log += log.empty( ) ? e : ";" + e; };
+        const auto joined = []( const std::vector< std::string >& n ) {
+            std::string out;
+            for ( std::size_t k = 0; k < n.size( ); ++k )
+                out += ( k ? "," : "" ) + n[ k ];
+            return out;
+        };
+        vugame_award_hooks_t h;
+        h.hidden_found = [ & ]( const std::string& x ) { add( "hidden|" + x ); return w[ 2 ] != 0u; };
+        h.progress = [ & ]( const std::string& x ) { add( "progress|" + x ); };
+        h.unlock_value = [ & ]( std::uint32_t slot, const std::string& c, std::int32_t tier ) {
+            add( "slot9|" + std::to_string( slot ) + "|" + c + "|" + std::to_string( tier ) );
+            return static_cast< std::int32_t >( w[ 3 ] );
+        };
+        h.unlock_show = [ & ]( std::int32_t value, const std::vector< std::string >& n ) {
+            add( "show|" + std::to_string( value ) + "|" + joined( n ) );
+            return w[ 4 ] != 0u;
+        };
+        h.award_open = [ & ]( const char* project, std::int32_t tier, const std::string& c, std::int32_t value, const std::vector< std::string >& n ) {
+            add( std::string( "screen|" ) + project );
+            add( "open|" + std::to_string( tier ) + "|" + c + "|" + std::to_string( value ) + "|" + joined( n ) );
+            return true;
+        };
+        const bool opened = vugame_awards_enter( mode, track, w[ 1 ] != 0u, b, h );
+        if ( opened != ( w[ 5 ] != 0u ) || log != t[ 4 ] )
+        {
+            if ( failed < 2 )
+                LOG_ERROR( "game_awards run %u: %s vs %s", v, log.c_str( ), t[ 4 ] );
+            ++failed;
+        }
+    }
+    if ( failed == 0 )
+        LOG_SUCCESS( "VuGame's results / awards (slot 11 x4, Awards' enter 0x484320, slots 9 / 10 x4, 0x4830B0) match retail on %u names, %u runs", g_golden_gaw_name_count, g_golden_gaw_count );
+    else
+        LOG_ERROR( "VuGame's awards FAILED on %d (of %u names + %u runs)", failed, g_golden_gaw_name_count, g_golden_gaw_count );
+    return failed == 0;
+}
+
+// The two prop plugs against retail (case prop_plugs): "Activate" 0x438160 on every flag / state pair, "Break" 0x4349F0.
+inline bool verify_prop_plugs( )
+{
+    const unsigned* p = g_golden_ppl_words;
+    const unsigned na = *p++;
+    int failed = 0;
+    for ( unsigned k = 0; k < na; ++k, p += 6 )
+    {
+        solver_rigid_t b{ };
+        std::memcpy( reinterpret_cast< std::uint8_t* >( &b ) + 0xD8, &p[ 0 ], 4 );
+        std::memcpy( reinterpret_cast< std::uint8_t* >( &b ) + 0xE4, &p[ 1 ], 4 );
+        const unsigned two = 0x40000000u;
+        std::memcpy( reinterpret_cast< std::uint8_t* >( &b ) + 0xE8, &two, 4 );
+        unsigned state, time;
+        dynamic_prop_activate( p[ 2 ] ? reinterpret_cast< std::uint8_t* >( &b ) : nullptr );
+        std::memcpy( &state, reinterpret_cast< std::uint8_t* >( &b ) + 0xE4, 4 );
+        std::memcpy( &time, reinterpret_cast< std::uint8_t* >( &b ) + 0xE8, 4 );
+        if ( state != p[ 3 ] || time != p[ 4 ] || p[ 5 ] != 0u )
+            ++failed;
+    }
+    const unsigned nb = *p++;
+    for ( unsigned k = 0; k < nb; ++k, p += 4 )
+    {
+        std::uint8_t request = static_cast< std::uint8_t >( p[ 0 ] );
+        int x = 0;
+        const void* target = &x;
+        breakable_on_break( request, target );
+        if ( request != p[ 1 ] || target != nullptr || p[ 2 ] != 1u || p[ 3 ] != 0u )
+            ++failed;
+    }
+    if ( failed == 0 )
+        LOG_SUCCESS( "the prop plugs (Activate 0x438160, Break 0x4349F0) match retail on %u + %u vectors", na, nb );
+    else
+        LOG_ERROR( "the prop plugs FAILED on %d of %u vectors", failed, na + nb );
+    return failed == 0;
+}
+
 inline bool verify_session_all( )
 {
     bool ok = true;
+    ok = verify_prop_plugs( ) && ok;
+    ok = verify_game_awards( ) && ok;
+    ok = verify_pause_gate( ) && ok;
+    ok = verify_tire_track( ) && ok;
     ok = verify_slalom_gate_draw( ) && ok;
     ok = verify_boat_pfx_draw( ) && ok;
     ok = verify_ghost_manager( ) && ok;
@@ -1674,6 +1985,7 @@ inline bool verify_session_all( )
     ok = verify_timetrial_results( ) && ok;
     ok = verify_slalom_results( ) && ok;
     ok = verify_timetrial_split( ) && ok;
+    ok = verify_ghost_split( ) && ok;
     ok = verify_slalom_split( ) && ok;
     ok = verify_timetrial_place( ) && ok;
     ok = verify_slalom_place( ) && ok;

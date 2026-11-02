@@ -128,6 +128,27 @@ inline std::shared_ptr< void > dynamic_prop_state_for( const std::string& cls )
     return s;
 }
 
+// VuDynamicGamePropEntity's input "Activate" 0x438160 (the ctor 0x4367E0's plug; thiscall entity, VuRetVal*, params; retn 8): the
+// rigid component's body (+0x70 +0x100, null: nothing), unless it is static / kinematic (+0xD8 & 3): activation +0xE4 = 1 unless it
+// is 4 / 5, then the deactivation time +0xE8 = 0. VuRetVal 0.
+inline void dynamic_prop_activate( std::uint8_t* body )
+{
+    if ( !body )
+        return;
+    std::uint32_t flags, state;
+    std::memcpy( &flags, body + 0xD8, 4 );
+    std::memcpy( &state, body + 0xE4, 4 );
+    if ( ( flags & 3u ) != 0u )
+        return;
+    if ( state != 4u && state != 5u )
+    {
+        const std::uint32_t one = 1u;
+        std::memcpy( body + 0xE4, &one, 4 );
+    }
+    const std::uint32_t zero = 0u;
+    std::memcpy( body + 0xE8, &zero, 4 );
+}
+
 // ---- VuExplosionEntity (create -> ctor 0x5E6150; vtable 0x755488; world batch 29) ---------------------------------
 // The ctor: VuEntity's 0x500710, a VuTransformComponent (+0x50), a Vu3dLayoutComponent, a VuScriptComponent (+0x60), the
 // explosion part at +0x64 (defaults 0x438BA0, nodes 0x5476D0 - the mine's part: nine VuBasicProperty<float> +0x74 ..
