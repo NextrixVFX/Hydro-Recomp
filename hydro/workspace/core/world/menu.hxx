@@ -65,6 +65,9 @@ inline void c_world::action_exit( )
         m_menu_util = m_race.util;   // a race from the command line: no front end built the root
     else
         ui_json_child( m_menu_util, "GameResults" ) = member( m_race.util, "GameResults" );
+    m_pause_menu.reset( );
+    m_pause_binding.reset( );
+    m_pause_root.reset( );
     if ( m_race.active )
         race_session_end( m_race );
     m_action.reset( );
@@ -93,6 +96,7 @@ inline ui_bind_hooks_t c_world::menu_hooks( )
         return ui_ret_t{ };
     };
     hooks.m_input = [ this ]( int pad, const char* name ) { return m_menu_input && m_menu_input->manager.pressed( pad, name ); };
+    hooks.m_touch_device = &m_touch;
     hooks.m_settings = &m_settings.ui;
     hooks.m_settings_platform = &m_settings_platform;
     hooks.m_champ = &m_champ_env;

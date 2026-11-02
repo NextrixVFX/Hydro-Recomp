@@ -9,6 +9,7 @@
 #include <workspace/core/game/packages.hxx>
 #include <workspace/core/game/settings.hxx>
 #include <workspace/core/ui/award.hxx>
+#include <workspace/core/ui/paused.hxx>
 #include <workspace/core/world/tiretrack.hxx>
 #include <workspace/core/world/pause.hxx>
 #include <workspace/core/boat/construct.hxx>
@@ -2609,7 +2610,7 @@ inline void race_session_slalom_start( race_session_t& s, const race_session_dbs
 inline void race_session_game_events( race_session_t& s, const std::string& mode )
 {
     s.bus.ticks = &s.ticks;
-    // The pause menu's ctor 0x4BAE80 (the action mode's ctor, before any game): its two gate events. Its others: not built.
+    // The pause menu's ctor 0x4BAE80 (the action mode's ctor, before any game): its two gate events. Its others: c_world::pause_bind.
     race_bus_subscribe( s.bus, "OnPauseActionGame", 0x4BB660u, "VuPauseMenu", [ &s ]( const ui_params_t& ) { pause_on_pause( s.pause ); } );
     race_bus_subscribe( s.bus, "OnSetAllowPause", 0x4BB900u, "VuPauseMenu", [ &s ]( const ui_params_t& p ) { pause_on_set_allow( s.pause, p ); } );
     race_bus_subscribe( s.bus, "OnUserNext", 0x483170u, "VuGame", [ &s ]( const ui_params_t& ) {

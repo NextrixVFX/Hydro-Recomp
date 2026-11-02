@@ -136,6 +136,8 @@ inline void c_world::action_start( value_t& game_data, const race_session_dbs_t&
     h.loading_more = [ ] { return false; };
     h.game_tick = [ this ]( float dt ) {
         race_session_game_mode( &m_race, dt );
+        if ( m_pause_menu )
+            m_pause_menu->tick( );   // 0x4BAB88
         return m_race.game_answer;
     };
     h.display = [ this ]( int& w, int& hh ) {
@@ -145,6 +147,8 @@ inline void c_world::action_start( value_t& game_data, const race_session_dbs_t&
     h.draw = [ this ]( const char* which ) {
         if ( std::strcmp( which, "0x4B9C10" ) == 0 && m_race.active )
             race_game_draw( m_race.rules );
+        if ( std::strcmp( which, "0x4B9C10" ) == 0 && m_pause_menu )
+            m_pause_menu->draw( );   // 0x4B9C8B
     };
     h.broadcast_float = [ ]( const char* name, float v ) { LOG_VERBOSE( "action mode: %s %.3f (no subscriber: the loading screen is not loaded)", name, v ); };
     m_action = std::make_unique< c_action_mode >( m_fade, dev.tag == 3 && dev.integer != 0, h );

@@ -594,6 +594,12 @@ private:
     ui_champ_env_t m_champ_env;
     void settings_start( );
     void unlock_bind( );
+    // VuActionGameMode +0x60 past its gate (ui/paused.hxx, world/huds.hxx pause_bind).
+    void pause_bind( );
+    std::unique_ptr< c_ui_pause_menu > m_pause_menu;
+    ui_touch_device_t m_touch;                          // g 0x759070: its callback list; no touches reach it (a hook)
+    std::unique_ptr< entity_t > m_pause_root;
+    std::unique_ptr< c_ui_binding > m_pause_binding;
     // The game modes (world/mode.hxx, menu.hxx).
     friend class c_menu_mode;
     friend class c_title_mode;
