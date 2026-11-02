@@ -97,6 +97,7 @@ inline constexpr std::uint32_t k_ui_event_vtable = 0x6F7308u;
 inline constexpr std::uint32_t k_ui_if_vtable = 0x754CD4u;
 inline constexpr std::uint32_t k_ui_info_vtable = 0x73BC5Cu;
 inline constexpr std::uint32_t k_ui_page_vtable = 0x6F72C4u;
+inline constexpr std::uint32_t k_ui_results_vtable = 0x73DA38u;
 inline constexpr std::uint32_t k_ui_remap_vtable = 0x73D4F4u;
 inline constexpr std::uint32_t k_ui_throttle_remap_vtable = 0x73D45Cu;
 inline constexpr std::uint32_t k_ui_set_info_vtable = 0x73E818u;
@@ -170,7 +171,7 @@ inline constexpr ui_game_slot_t k_ui_game_slots[] = {
     { 0x73D724u, 0x463220u, 0x401560u },  // VuLoadingProgressBarEntity
     { 0x73D7E0u, 0x401560u, 0x464060u },  // VuMessageBoxEntity
     { 0x73D8E4u, 0x466C60u, 0x466D80u },  // VuMessageBoxScreenEntity
-    { 0x73DA38u, 0x469B10u, 0x401560u },  // VuRaceResultsTableEntity (results.hxx ui_results_initialize: not called here)
+    { 0x73DA38u, 0x469B10u, 0x401560u },  // VuRaceResultsTableEntity (results.hxx ui_results_initialize, given m_root)
     { 0x73DAA8u, 0x46BE00u, 0x46BE10u },  // VuSellScreen
     { 0x73DE6Cu, 0x46DE30u, 0x4253D0u },  // VuUIFlipIntervalSettingEntity
     { 0x73DED4u, 0x46DA70u, 0x4253D0u },  // VuUIFidelitySettingEntity
@@ -364,6 +365,8 @@ struct ui_bound_t
     ui_remap_runtime_t m_remap_state;
     ui_remap_hooks_t m_remap_hooks;
     bool m_remap_ticking = false;                           // "Decision" 0x4623D0 registered (slot 6 0x461200) and not yet unregistered (slot 7 0x461290)
+    // batch 29: VuRaceResultsTableEntity (results.hxx): the frame's m_results reads this
+    std::unique_ptr< ui_results_table_t > m_results;
 };
 
 struct ui_bind_hooks_t
@@ -405,6 +408,7 @@ struct ui_bind_hooks_t
     // devices (remap.hxx; m_set_focus / m_nav are the binding's own).
     const value_t* m_page_db = nullptr;
     const value_t* m_font_db = nullptr;
+    const value_t* m_dev_game_data = nullptr;   // batch 29: g 0x75901C slot 6 "ActionGameData" (0x469B10), null: none
     ui_page_env_t m_page_env;
     ui_page_hooks_t m_page_hooks;
     ui_remap_hooks_t m_remap_hooks;
@@ -1068,6 +1072,8 @@ private:
             ev.m_fire = [ this, &e ]( const ui_params_t& p ) { fire_named( e, "Trigger", p ); };
             add( b, "OnUIEvent", 0x62E950u, [ &ev ]( const ui_params_t& p ) { ev.on_ui_event( p ); } );
         }
+        else if ( b.m_vtable == k_ui_results_vtable )
+            b.m_results = std::make_unique< ui_results_table_t >( ui_results_table_of( e ) );
         else if ( b.m_vtable == k_ui_page_vtable )
         {
             // The ctor 0x62CA50: OnUITick 0x62DA30; slot 2's load 0x62E3B0.
@@ -1522,8 +1528,6 @@ private:
         else
         {
             ui_bound_t& bound = *m_bound[ static_cast< std::size_t >( index_of( e ) ) ];
-            if ( bound.m_page )
-                ui_page_layout_initialize( *bound.m_page, nullptr );   // 0x62D9A0 (the touch add: NOT wired, see HANDOFF)
             if ( bound.m_remap )
                 bound.m_remap_ticking = true;                          // 0x461200's "Decision"
             game_slot( e, vt, true );
@@ -1569,6 +1573,68 @@ private:
         return m_hooks.m_inverse ? m_hooks.m_inverse : k_identity;
     }
 
+    // Batch 29: slot 6 0x62D9A0 (the touch add inside ui_page_layout_initialize) / slot 7 0x62DA10. The callback {entity + 0x5C, 0}:
+    // down 0x62DD20, up 0x62DED0, move 0x62DEF0 = the device's touch 0 (never written: indeterminate in retail, a fault here).
+    void page_slot( ui_page_layout_t& page, bool init )
+    {
+        ui_touch_device_t& device = *m_hooks.m_touch_device;
+        if ( !init )
+        {
+            ui_page_layout_release( page, [ & ] { ui_touch_remove( device, &page ); device.m_handlers.erase( &page ); } );
+            return;
+        }
+        ui_page_layout_initialize( page, [ this, &page, &device ]
+        {
+            ui_touch_add( device, &page, 0u );
+            ui_touch_handler_t h;
+            h.m_down = [ this, &page ]( const float p[ 2 ] ) { ui_page_layout_touch_down( page, hud_crop( ), touch_inverse( ), p ); };
+            h.m_up = [ &page ]( const float* ) { ui_page_layout_touch_up( page ); };
+            h.m_move = [ this, &page, &device ]
+            {
+                float p[ 2 ];
+                if ( ui_touch_point( device, 0u, p ) )
+                    ui_page_layout_touch_move( page, hud_crop( ), touch_inverse( ), p );
+                else
+                    ++m_config_faults;
+            };
+            device.m_handlers[ &page ] = h;
+        } );
+    }
+    // Batch 29: slot 6 0x461200 (the touch add; "Decision" is game_initialize's) / slot 7 0x461290: the remove, the unregister, the
+    // open box's release. Callback down 0x461760, up 0x4617F0, move 0x461800.
+    void remap_slot( ui_bound_t& b, bool init )
+    {
+        ui_touch_device_t& device = *m_hooks.m_touch_device;
+        ui_remap_t* row = b.m_remap.get( );
+        ui_remap_runtime_t* state = &b.m_remap_state;
+        if ( !init )
+        {
+            ui_touch_remove( device, row );
+            device.m_handlers.erase( row );
+            b.m_remap_ticking = false;
+            if ( state->m_box )
+            {
+                if ( b.m_remap_hooks.m_close_box )
+                    b.m_remap_hooks.m_close_box( );
+                state->m_box = false;
+            }
+            return;
+        }
+        ui_touch_add( device, row, 0u );
+        ui_touch_handler_t h;
+        h.m_down = [ this, row, state ]( const float p[ 2 ] ) { ui_remap_touch_down( *row, *state, touch_inverse( ), p ); };
+        h.m_up = [ row, state ]( const float* ) { ui_remap_touch_up( *row, *state ); };
+        h.m_move = [ this, state, &device ]
+        {
+            float p[ 2 ];
+            if ( ui_touch_point( device, 0u, p ) )
+                ui_remap_touch_point( *state, touch_inverse( ), p );
+            else
+                ++m_config_faults;
+        };
+        device.m_handlers[ row ] = h;
+    }
+
     void game_slot( entity_t& e, std::uint32_t vt, bool init )
     {
         const ui_game_slot_t* row = nullptr;
@@ -1596,6 +1662,10 @@ private:
             known = true;
         else if ( vt == k_ui_leaderboard_vtable && b && b->m_ladder )
             known = true;
+        else if ( b && ( b->m_page || b->m_remap ) && m_hooks.m_touch_device )
+            known = true;   // batch 29: 0x62D9A0 / 0x62DA10, 0x461200 / 0x461290
+        else if ( b && b->m_results && init && m_hooks.m_root )
+            known = true;   // batch 29: 0x469B10
         else if ( !init && ( vt == k_ui_game_config_vtable || ( vt == k_ui_boat_config_vtable && m_hooks.m_root ) ) && b && b->m_config )
             known = true;   // batch 26: slot 7 0x45D080 / 0x44D090 (slot 6 stays config_setup( )'s)
         trace( ui_trace_kind_t::game, index, std::string( ), address, ui_params_t( ), known );
@@ -1604,7 +1674,13 @@ private:
             ++m_unknown_slots;
             return;
         }
-        if ( vt == k_ui_screen_vtable )
+        if ( b && b->m_results )
+            ui_results_initialize( *b->m_results, *m_hooks.m_root, m_hooks.m_dev_game_data );
+        else if ( b && b->m_page )
+            page_slot( *b->m_page, init );
+        else if ( b && b->m_remap )
+            remap_slot( *b, init );
+        else if ( vt == k_ui_screen_vtable )
         {
             if ( init )
                 m_screen.screen_enter( );
@@ -1718,6 +1794,20 @@ public:
                 b->m_ladder->decision( );   // batch 23: 0x47B640
             else if ( b->m_remap && b->m_remap_ticking )
                 ui_remap_decision( *b->m_remap, b->m_remap_state, b->m_remap_hooks );   // batch 28: 0x4623D0
+    }
+    // Batch 29: a bound front-end button's +0x188 / +0x198 (the frame's m_button); default 0 / 0.
+    void button_state( const entity_t& e, std::uint8_t& focused, std::uint32_t& press )
+    {
+        const int index = index_of( e );
+        const c_ui_button* button = index >= 0 ? m_bound[ static_cast< std::size_t >( index ) ]->m_button.get( ) : nullptr;
+        focused = button && button->m_focused ? 1u : 0u;
+        press = button ? button->m_press : 0u;
+    }
+    // Batch 29: a bound race results table (the frame's m_results draws it), or null.
+    ui_results_table_t* results( const entity_t& e )
+    {
+        const int index = index_of( e );
+        return index >= 0 ? m_bound[ static_cast< std::size_t >( index ) ]->m_results.get( ) : nullptr;
     }
     // Batch 28: a bound page / remapping row (the frame's m_page / m_remap draw these), or null.
     ui_page_layout_t* page( const entity_t& e )

@@ -63,7 +63,8 @@ enum class ui_frame_kind_t
     message_box,       // VuMessageBoxScreenEntity: 0x4675A0 (message.hxx: the box, then its children walked like a container's; needs m_message_box)
     page,              // VuUIPageLayoutEntity: 0x62E120 (pages.hxx ui_page_layout_draw over its runtime page; needs m_page)
     remap,             // VuInputRemappingEntity / VuThrottleRemappingEntity: 0x45FB90 (remap.hxx ui_remap_draw; needs m_remap)
-    champ              // VuChampionshipEntity: 0x451CA0 (champ.hxx ui_champ_draw over the standings; needs m_champ)
+    champ,             // VuChampionshipEntity: 0x451CA0 (champ.hxx ui_champ_draw over the standings; needs m_champ)
+    results            // VuRaceResultsTableEntity: 0x46A500 (results.hxx ui_results_draw over GameResults; needs m_results)
 };
 
 struct ui_draw_target_t
@@ -127,7 +128,7 @@ inline const ui_draw_target_t k_ui_draw_targets[ ] = {
     { 0x0073D4F4u, 0x0045FB90u, 0x0045FB90u, ui_frame_kind_t::remap, 0x00000000u },   // Screens/ControlsGamepad (14 loaded)
     { 0x0073D724u, 0x004632E0u, 0x004632E0u, ui_frame_kind_t::bar, 0x00000000u },   // Screens/LoadingChamp (7 loaded)
     { 0x0073D8E4u, 0x004675A0u, 0x004675A0u, ui_frame_kind_t::message_box, 0x00000000u },   // Screens/MessageBox (1 loaded)
-    { 0x0073DA38u, 0x0046A500u, 0x0046A500u, ui_frame_kind_t::other, 0x00000000u },   // Screens/RaceResults (2 loaded)
+    { 0x0073DA38u, 0x0046A500u, 0x0046A500u, ui_frame_kind_t::results, 0x00000000u },   // Screens/RaceResults (2 loaded)
     { 0x0073DE6Cu, 0x004390BEu, 0x00475B10u, ui_frame_kind_t::combo_box, 0x00000000u },   // Screens/SettingsGraphics (1 loaded)
     { 0x0073DED4u, 0x004390BEu, 0x00475B10u, ui_frame_kind_t::combo_box, 0x00000000u },   // Screens/Settings (2 loaded)
     { 0x0073DF3Cu, 0x004390BEu, 0x00475B10u, ui_frame_kind_t::combo_box, 0x00000000u },   // Screens/Settings (2 loaded)
@@ -248,6 +249,8 @@ struct ui_frame_inputs_t
     std::function< bool( const entity_t&, ui_gfx_sort_t&, const ui_font_draw_env_t&, float alpha ) > m_page;
     std::function< bool( const entity_t&, ui_gfx_sort_t&, const ui_font_draw_env_t&, float alpha ) > m_remap;
     std::function< bool( const entity_t&, ui_gfx_sort_t&, const ui_font_draw_env_t&, float alpha ) > m_champ;
+    // Batch 29: the race results table over the game-data root (c_ui_binding::results; alpha unread by 0x46A500). Null: unrecreated.
+    std::function< bool( const entity_t&, ui_gfx_sort_t&, const ui_font_draw_env_t&, float alpha ) > m_results;
 };
 
 // A loaded entity's own / its first UI draw component's property bits.
@@ -509,6 +512,8 @@ inline bool ui_frame_emit( ui_gfx_sort_t& sort, const ui_impl_t& impl, const ui_
         return in.m_remap( e, sort, env, d.m_alpha );
     if ( d.m_kind == ui_frame_kind_t::champ )
         return in.m_champ( e, sort, env, d.m_alpha );
+    if ( d.m_kind == ui_frame_kind_t::results )
+        return in.m_results( e, sort, env, d.m_alpha );
     return true;
 }
 
@@ -545,6 +550,8 @@ inline bool ui_frame_ready( ui_frame_kind_t kind, const ui_frame_inputs_t* in )
         return in && in->m_remap;
     case ui_frame_kind_t::champ:
         return in && in->m_champ;
+    case ui_frame_kind_t::results:
+        return in && in->m_results;
     default:
         return true;
     }

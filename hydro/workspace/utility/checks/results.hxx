@@ -741,6 +741,12 @@ inline bool verify_ui_screen_game_init( )
             std::string t = "E";
             for ( const auto& c : device.m_callbacks )
             {
+                // Batch 29: the page's / rows' entries: the case stubs their slot 6 (0x62D9A0 / 0x461200), so retail's list has none.
+                bool stubbed = false;
+                for ( const auto& b : bind.m_bound )
+                    stubbed = stubbed || ( b->m_page && b->m_page.get( ) == c.first ) || ( b->m_remap && b->m_remap.get( ) == c.first );
+                if ( stubbed )
+                    continue;
                 std::snprintf( word, sizeof word, "%d,0,%u;", owner_of( c.first ), c.second );
                 t += word;
             }
