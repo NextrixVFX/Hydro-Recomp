@@ -452,7 +452,7 @@ address,size,ida_name,classes,vtable_slots,subsystem,status,cited_in,thunk,libra
 0x41D570,305,sub_41D570,,,boat (by address),verified,hydro/workspace/core/boat/effects.hxx; hydro/workspace/core/boat/hull.hxx; hydro/workspace/core/boat/pilots.hxx; hydro/workspace/core/boat/state.hxx; hydro/workspace/core/boat/tick.hxx; hydro/workspace/core/world/drive.hxx; hydro/workspace/core/world/pfxsim.hxx; hydro/workspace/core/world/spray.hxx; hydro/workspace/utility/fluid.hxx,False,False,race
 0x41D6B0,209,sub_41D6B0,,,boat (by address),verified,hydro/workspace/core/boat/human.hxx; hydro/workspace/utility/checks/race.hxx,False,False,race
 0x41D790,765,sub_41D790,,,boat (by address),verified,hydro/workspace/core/boat/respawn.hxx; hydro/workspace/core/boat/state.hxx; hydro/workspace/core/boat/track.hxx; hydro/workspace/core/world/drive.hxx; hydro/workspace/utility/checks/race.hxx,False,False,race
-0x41DA90,1066,sub_41DA90,,,boat (by address),verified,hydro/workspace/core/boat/respawn.hxx; hydro/workspace/core/trigger/volume.hxx; hydro/workspace/core/world/world.hxx; hydro/workspace/utility/checks/race.hxx,False,False,race
+0x41DA90,1066,sub_41DA90,,,boat (by address),verified,hydro/workspace/core/boat/respawn.hxx; hydro/workspace/core/trigger/volume.hxx; hydro/workspace/core/world/drive.hxx; hydro/workspace/core/world/world.hxx; hydro/workspace/utility/checks/race.hxx,False,False,race
 0x41DEC0,322,sub_41DEC0,,,unattributed,verified,hydro/workspace/core/boat/human.hxx; hydro/workspace/utility/checks/race.hxx,False,False,race
 0x41E010,72,sub_41E010,,,unattributed,verified,hydro/workspace/core/boat/effects.hxx; hydro/workspace/core/boat/state.hxx; hydro/workspace/core/world/drive.hxx,False,False,race
 0x41E060,160,sub_41E060,,,unattributed,cited,hydro/workspace/core/boat/ai.hxx; hydro/workspace/core/boat/human.hxx; hydro/workspace/core/world/drive.hxx,False,False,race
@@ -474,7 +474,7 @@ address,size,ida_name,classes,vtable_slots,subsystem,status,cited_in,thunk,libra
 0x41F740,649,sub_41F740,,,boat (by address),verified,hydro/workspace/core/boat/state.hxx; hydro/workspace/core/world/tree.hxx; hydro/workspace/utility/checks/boat.hxx,False,False,race
 0x41F9D0,972,sub_41F9D0,,,boat (by address),verified,hydro/workspace/core/boat/state.hxx; hydro/workspace/utility/checks/boat.hxx,False,False,race
 0x41FDA0,463,sub_41FDA0,,,unattributed,verified,hydro/workspace/core/boat/state.hxx; hydro/workspace/utility/checks/boat.hxx,False,False,race
-0x41FF70,148,sub_41FF70,,,unattributed,verified,hydro/workspace/core/boat/state.hxx; hydro/workspace/utility/checks/boat.hxx,False,False,race
+0x41FF70,148,sub_41FF70,,,unattributed,verified,hydro/workspace/core/boat/state.hxx; hydro/workspace/core/world/drive.hxx; hydro/workspace/utility/checks/boat.hxx,False,False,race
 0x420010,203,sub_420010,,,unattributed,verified,hydro/workspace/core/boat/state.hxx; hydro/workspace/utility/checks/boat.hxx,False,False,race
 0x4200E0,1205,sub_4200E0,,,unattributed,verified,hydro/workspace/core/world/build.hxx; hydro/workspace/core/world/drive.hxx; hydro/workspace/core/world/session.hxx; hydro/workspace/utility/checks/world.hxx,False,False,race
 0x4205A0,1232,VuBoatDB_readDefaultSection,VuBoatEntity; VuGhostBoatEntity,VuBoatEntity+15; VuGhostBoatEntity+15,boat,verified,hydro/workspace/core/boat/load.hxx; hydro/workspace/core/boat/sections.hxx; hydro/workspace/utility/checks/boat.hxx,False,False,race
