@@ -2,6 +2,7 @@
 
 #include <workspace/core/assets/archive.hxx>
 #include <workspace/core/assets/reader.hxx>
+#include <workspace/core/input/device.hxx>
 #include <workspace/core/input/manager.hxx>
 
 #include <string>
@@ -233,4 +234,208 @@ inline bool verify_input_manager( )
     else
         LOG_ERROR( "VuInputManagerImpl FAILED %d checks of %u", failed, compared );
     return failed == 0;
+}
+
+// c_input_device + c_input_manager against retail's own gamepad, keyboard, control method and manager on the real InputDB
+// (case input_device, boat batch 31): the name tables, the key table, the lookups, the dead zone, then frames of fake XInput
+// and key events through the four "Input" ticks, down to the channels VuHumanDriver reads.
+struct input_device_check_t
+{
+    bool connected[ 4 ] = { };
+    input_xinput_state_t state[ 4 ];
+    unsigned sub[ 4 ] = { };
+    float real_dt = 0.0f;
+    std::vector< unsigned > events;
+};
+
+inline bool verify_input_device( )
+{
+    const unsigned* w = g_golden_input_device_words;
+    const auto next = [ & ]( ) { return *w++; };
+    const auto text = [ & ]( ) {
+        const unsigned n = *w++;
+        std::string out( reinterpret_cast< const char* >( w ), n );
+        w += ( n + 3 ) / 4;
+        return out;
+    };
+    int failed = 0;
+    unsigned compared = 0;
+    const auto same = [ & ]( const char* what, unsigned at, unsigned ours, unsigned retail ) {
+        ++compared;
+        if ( ours != retail && ++failed <= 10 )
+            LOG_ERROR( "input_device %s %u: ours 0x%X, retail 0x%X", what, at, ours, retail );
+    };
+    const auto word = []( float f ) {
+        unsigned v;
+        std::memcpy( &v, &f, 4 );
+        return v;
+    };
+
+    const unsigned axes = next( );
+    same( "axis count", 0, 6, axes );
+    for ( unsigned k = 0; k < axes; ++k )
+    {
+        const std::string name = text( );
+        const unsigned hash = next( ), low = next( ), high = next( );
+        same( "axis name", k, name == g_input_axis_names[ k ].name, 1 );
+        same( "axis hash", k, input_hash( g_input_axis_names[ k ].name ), hash );
+        same( "axis minimum", k, word( g_input_axis_names[ k ].minimum ), low );
+        same( "axis maximum", k, word( 1.0f ), high );
+    }
+    const unsigned buttons = next( );
+    same( "button count", 0, 16, buttons );
+    for ( unsigned k = 0; k < buttons; ++k )
+    {
+        const std::string name = text( );
+        const unsigned hash = next( );
+        same( "button name", k, name == g_input_button_names[ k ], 1 );
+        same( "button hash", k, input_hash( g_input_button_names[ k ] ), hash );
+    }
+    for ( unsigned k = 0; k < 256; ++k )
+        same( "key table", k, g_input_key_table[ k ], next( ) );
+    for ( unsigned n = next( ), k = 0; k < n; ++k )
+    {
+        const std::string name = text( );
+        same( "axis index", k, static_cast< unsigned >( c_input_device::axis_index( name.c_str( ) ) ), next( ) );
+        same( "button index", k, static_cast< unsigned >( c_input_device::button_index( name.c_str( ) ) ), next( ) );
+    }
+    for ( unsigned n = next( ), k = 0; k < n; ++k )
+    {
+        input_controller_t c;
+        c.subtype = static_cast< std::int32_t >( next( ) );
+        std::memcpy( c.axes, w, 24 );
+        w += 6;
+        c_input_device::dead_zone( c );
+        for ( int a = 0; a < 6; ++a )
+            same( "dead zone", k * 10 + a, word( c.axes[ a ] ), next( ) );
+    }
+
+    c_archive archive;
+    std::vector< std::uint8_t > bytes;
+    const std::string pack = package_check_pack( );
+    if ( pack.empty( ) || !archive.open( pack.c_str( ) ) || !archive.read( "VuDBAsset/InputDB", bytes ) )
+    {
+        LOG_ERROR( "verify_input_device: the pack's InputDB is not readable" );
+        return false;
+    }
+    const value_t document = c_reader( bytes ).parse( );
+    c_input_manager manager;
+    c_input_device device;
+    static input_device_check_t s_c;
+    s_c = input_device_check_t{ };
+    device.hooks.get_state = []( void*, int p, input_xinput_state_t* out ) -> std::uint32_t {
+        if ( !s_c.connected[ p ] )
+            return 0x48Fu;
+        *out = s_c.state[ p ];
+        return 0u;
+    };
+    device.hooks.get_caps = []( void*, int p, std::uint8_t* caps ) -> std::uint32_t {
+        caps[ 1 ] = static_cast< std::uint8_t >( s_c.sub[ p ] );
+        return 0u;
+    };
+    device.hooks.real_dt = []( void* ) { return s_c.real_dt; };
+    device.hooks.pad_event = []( void*, bool on, int p ) {
+        s_c.events.push_back( input_hash( on ? "OnGamePadConnected" : "OnGamePadDisconnected" ) );
+        s_c.events.push_back( static_cast< unsigned >( p ) );
+    };
+    device.hooks.method_event = []( void* ) {
+        s_c.events.push_back( 0xC0u );
+        s_c.events.push_back( 0u );
+    };
+    device.bind( manager );
+    s_c.connected[ 0 ] = true;
+    s_c.sub[ 0 ] = 1;
+    manager.init( document );
+    device.initialize( );
+
+    std::vector< std::string > ax, bt;
+    for ( unsigned n = next( ), k = 0; k < n; ++k )
+        ax.push_back( text( ) );
+    for ( unsigned n = next( ), k = 0; k < n; ++k )
+        bt.push_back( text( ) );
+
+    const unsigned frames = next( );
+    for ( unsigned f = 0; f < frames; ++f )
+    {
+        for ( int p = 0; p < 4; ++p )
+        {
+            s_c.connected[ p ] = next( ) != 0;
+            input_xinput_state_t& s = s_c.state[ p ];
+            s.buttons = static_cast< std::uint16_t >( next( ) );
+            s.left_trigger = static_cast< std::uint8_t >( next( ) );
+            s.right_trigger = static_cast< std::uint8_t >( next( ) );
+            s.left_x = static_cast< std::int16_t >( next( ) );
+            s.left_y = static_cast< std::int16_t >( next( ) );
+            s.right_x = static_cast< std::int16_t >( next( ) );
+            s.right_y = static_cast< std::int16_t >( next( ) );
+            s_c.sub[ p ] = next( );
+        }
+        s_c.events.clear( );
+        for ( unsigned n = next( ), k = 0; k < n; ++k )
+        {
+            const unsigned down = next( ), key = next( );
+            if ( down != 0 )
+                device.key_down( static_cast< int >( key ) );
+            else
+                device.key_up( static_cast< int >( key ) );
+        }
+        const unsigned rdt = next( ), dt = next( );
+        std::memcpy( &s_c.real_dt, &rdt, 4 );
+        float seconds;
+        std::memcpy( &seconds, &dt, 4 );
+        device.tick( seconds );
+        for ( int p = 0; p < 4; ++p )
+        {
+            const input_controller_t& c = device.controller( p );
+            same( "connected", f, c.connected, next( ) );
+            same( "subtype", f, static_cast< unsigned >( c.subtype ), next( ) );
+            same( "buttons", f, c.buttons, next( ) );
+            for ( int a = 0; a < 6; ++a )
+                same( "axis", f * 10 + a, word( c.axes[ a ] ), next( ) );
+        }
+        same( "timer", f, word( device.timer( ) ), next( ) );
+        const unsigned char* keys = reinterpret_cast< const unsigned char* >( w );
+        for ( int k = 0; k < 81; ++k )
+        {
+            same( "key down", f, device.down( )[ k ], keys[ k ] );
+            same( "key latch", f, device.latch( )[ k ], keys[ 81 + k ] );
+            same( "key last", f, device.last( )[ k ], keys[ 162 + k ] );
+            same( "key pressed", f, device.pressed( )[ k ], keys[ 243 + k ] );
+        }
+        w += 81;
+        same( "control method", f, static_cast< unsigned >( device.control_method( ) ), next( ) );
+        same( "manager method", f, static_cast< unsigned >( manager.method( ) ), next( ) );
+        const unsigned count = next( );
+        same( "channels", f, static_cast< unsigned >( ( ax.size( ) * 2 + bt.size( ) * 2 ) * 2 ), count );
+        for ( int c = 0; c < 2; ++c )
+        {
+            for ( const std::string& n : ax )
+            {
+                same( "value", f, word( manager.value( c, n.c_str( ) ) ), next( ) );
+                same( "raw", f, word( manager.raw( c, n.c_str( ) ) ), next( ) );
+            }
+            for ( const std::string& n : bt )
+            {
+                same( "held", f, manager.held( c, n.c_str( ) ) ? 1u : 0u, next( ) );
+                same( "pressed", f, manager.pressed( c, n.c_str( ) ) ? 1u : 0u, next( ) );
+            }
+        }
+        const unsigned events = next( );
+        same( "event count", f, static_cast< unsigned >( s_c.events.size( ) / 2 ), events );
+        for ( unsigned k = 0; k < events; ++k )
+        {
+            const unsigned kind = next( ), pad = next( );
+            if ( k * 2 + 1 >= s_c.events.size( ) )
+                continue;
+            same( "event", f, s_c.events[ k * 2 ], kind );
+            same( "event pad", f, s_c.events[ k * 2 + 1 ], pad );
+        }
+    }
+    if ( failed != 0 )
+    {
+        LOG_ERROR( "verify_input_device: %d of %u mismatches", failed, compared );
+        return false;
+    }
+    LOG_SUCCESS( "c_input_device matches retail's pad, keyboard and control method over %u frames, %u values", frames, compared );
+    return true;
 }
