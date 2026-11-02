@@ -1851,6 +1851,12 @@ public:
         const int index = index_of( e );
         return index >= 0 ? m_bound[ static_cast< std::size_t >( index ) ]->m_results.get( ) : nullptr;
     }
+    // A bound settings slider (the frame's m_slider draws it), or null.
+    c_ui_slider* slider( const entity_t& e )
+    {
+        const int index = index_of( e );
+        return index >= 0 ? m_bound[ static_cast< std::size_t >( index ) ]->m_slider.get( ) : nullptr;
+    }
     // Batch 28: a bound page / remapping row (the frame's m_page / m_remap draw these), or null.
     ui_page_layout_t* page( const entity_t& e )
     {

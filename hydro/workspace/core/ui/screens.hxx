@@ -36,6 +36,7 @@ struct ui_screen_env_t
     ui_page_hooks_t m_page;                                                        // the page draw's hooks
     ui_page_env_t m_page_env;                                                      // m_draw is replaced by each leaf's
     std::function< ui_remap_inputs_t( const entity_t& ) > m_remap;                 // a row's textures and fonts
+    std::function< ui_slider_draw_inputs_t( const entity_t& ) > m_slider;          // a slider's textures, font, strings; m_value is filled here
     const value_t* m_root = nullptr;                                               // gameutil +0x50 (GameResults)
     const ui_champ_env_t* m_champ = nullptr;                                       // the championship's (m_boat_db, the award's draw)
 };
@@ -83,6 +84,15 @@ inline ui_frame_inputs_t ui_screen_inputs( c_ui_binding& binding, ui_screen_env_
     {
         const ui_remap_t* row = b->remap( e );
         return row && env.m_remap && ui_remap_draw( sort, draw, env.m_db, *row, env.m_remap( e ), alpha );
+    };
+    in.m_slider = [ b, env ]( const entity_t& e, ui_gfx_sort_t& sort, const ui_font_draw_env_t& draw, float alpha )
+    {
+        const c_ui_slider* slider = b->slider( e );
+        if ( !slider || !env.m_slider )
+            return false;
+        ui_slider_draw_inputs_t inputs = env.m_slider( e );
+        inputs.m_value = slider->value( );
+        return ui_slider_draw( sort, draw, slider->m_s, slider->m_visible, slider->m_latched, inputs, alpha );
     };
     in.m_results = [ b, env ]( const entity_t& e, ui_gfx_sort_t& sort, const ui_font_draw_env_t& draw, float )
     {
