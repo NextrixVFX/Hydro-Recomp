@@ -160,6 +160,7 @@
     <ClInclude Include="workspace\core\trigger\set.hxx" />
     <ClInclude Include="workspace\core\trigger\volume.hxx" />
     <ClInclude Include="workspace\core\ui\action.hxx" />
+    <ClInclude Include="workspace\core\ui\award.hxx" />
     <ClInclude Include="workspace\core\ui\bind.hxx" />
     <ClInclude Include="workspace\core\ui\board.hxx" />
     <ClInclude Include="workspace\core\ui\button.hxx" />
@@ -179,6 +180,7 @@
     <ClInclude Include="workspace\core\ui\frame.hxx" />
     <ClInclude Include="workspace\core\ui\fsm.hxx" />
     <ClInclude Include="workspace\core\ui\gauge.hxx" />
+    <ClInclude Include="workspace\core\ui\glyphs.hxx" />
     <ClInclude Include="workspace\core\ui\hud.hxx" />
     <ClInclude Include="workspace\core\ui\image.hxx" />
     <ClInclude Include="workspace\core\ui\ladder.hxx" />
@@ -194,6 +196,7 @@
     <ClInclude Include="workspace\core\ui\results.hxx" />
     <ClInclude Include="workspace\core\ui\schema.hxx" />
     <ClInclude Include="workspace\core\ui\screen.hxx" />
+    <ClInclude Include="workspace\core\ui\screens.hxx" />
     <ClInclude Include="workspace\core\ui\select.hxx" />
     <ClInclude Include="workspace\core\ui\slider.hxx" />
     <ClInclude Include="workspace\core\ui\split.hxx" />

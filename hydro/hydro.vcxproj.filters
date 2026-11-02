@@ -204,6 +204,9 @@
     <ClInclude Include="workspace\core\ui\action.hxx">
       <Filter>workspace\core\ui</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\core\ui\award.hxx">
+      <Filter>workspace\core\ui</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\core\ui\bind.hxx">
       <Filter>workspace\core\ui</Filter>
     </ClInclude>
@@ -261,6 +264,9 @@
     <ClInclude Include="workspace\core\ui\gauge.hxx">
       <Filter>workspace\core\ui</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\core\ui\glyphs.hxx">
+      <Filter>workspace\core\ui</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\core\ui\hud.hxx">
       <Filter>workspace\core\ui</Filter>
     </ClInclude>
@@ -304,6 +310,9 @@
       <Filter>workspace\core\ui</Filter>
     </ClInclude>
     <ClInclude Include="workspace\core\ui\screen.hxx">
+      <Filter>workspace\core\ui</Filter>
+    </ClInclude>
+    <ClInclude Include="workspace\core\ui\screens.hxx">
       <Filter>workspace\core\ui</Filter>
     </ClInclude>
     <ClInclude Include="workspace\core\ui\select.hxx">
