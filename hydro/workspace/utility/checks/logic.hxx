@@ -2687,3 +2687,109 @@ inline bool verify_front_props( )
         LOG_ERROR( "front_props FAILED %d", bad );
     return bad == 0;
 }
+
+// VuOneShotPfxEntity against retail (case oneshot_pfx): scripts on a hand manager; the handle, the instance calls, the serials and the reflect bytes after each step.
+inline bool verify_oneshot_pfx( )
+{
+    save_words_t c{ g_golden_oneshot_pfx_words };
+    const unsigned runs = c.next( );
+    int bad = 0, steps = 0;
+    struct run_t
+    {
+        pfx_manager_t* m = nullptr;
+        std::vector< std::vector< unsigned > > log;
+        int answer = -1;
+    };
+    static run_t* cur = nullptr;
+    for ( unsigned v = 0; v < runs; ++v )
+    {
+        pfx_oneshot_t e;
+        e.effect_name = c.str( );
+        std::uint32_t mat[ 16 ];
+        for ( std::uint32_t& w : mat )
+            w = c.next( );
+        e.matrix = reinterpret_cast< const float* >( mat );
+        const std::uint32_t sb = c.next( );
+        std::memcpy( &e.pfx_scale, &sb, 4 );
+        for ( std::uint8_t& b : e.pfx_color )
+            b = static_cast< std::uint8_t >( c.next( ) );
+        e.enable_reflection = static_cast< std::uint8_t >( c.next( ) );
+        pfx_manager_t m;
+        m.capacity = c.next( );
+        m.bits = c.next( );
+        m.serial_cap = c.next( );
+        m.mask = m.capacity - 1u;
+        m.entries.resize( m.capacity );
+        m.table.resize( m.capacity );
+        for ( unsigned k = 0; k < m.capacity; ++k )
+        {
+            m.table[ k ] = static_cast< int >( k );
+            m.entries[ k ].index = k;
+            m.entries[ k ].instance = k;
+            m.entries[ k ].serial = c.next( );
+        }
+        for ( unsigned k = 0; k < m.capacity; ++k )
+            m.entries[ k ].flags = c.next( );
+        run_t R;
+        R.m = &m;
+        cur = &R;
+        pfx_oneshot_ops_t o;
+        o.create = []( void*, const char* ) { return cur->answer; };
+        o.duration = []( void*, std::uint32_t i ) { cur->log.push_back( { 10u, i } ); };
+        o.instance.set_scale = []( void*, std::uint32_t i, float f ) {
+            std::uint32_t w;
+            std::memcpy( &w, &f, 4 );
+            cur->log.push_back( { 4u, i, w } );
+        };
+        o.instance.set_color = []( void*, std::uint32_t i, const float* p ) {
+            std::vector< unsigned > l{ 5u, i };
+            l.resize( 6 );
+            std::memcpy( &l[ 2 ], p, 16 );
+            cur->log.push_back( l );
+        };
+        o.instance.set_matrix = []( void*, std::uint32_t i, const float* p ) {
+            std::vector< unsigned > l{ 2u, i };
+            l.resize( 18 );
+            std::memcpy( &l[ 2 ], p, 64 );
+            cur->log.push_back( l );
+        };
+        o.instance.start = []( void*, std::uint32_t i ) { cur->log.push_back( { 11u, i } ); };
+        o.instance.stop = []( void*, std::uint32_t i, bool immediate ) { cur->log.push_back( { 12u, i, immediate ? 1u : 0u } ); };
+        const unsigned count = c.next( );
+        for ( unsigned k = 0; k < count; ++k )
+        {
+            const unsigned op = c.next( );
+            R.answer = static_cast< int >( c.next( ) );
+            R.log.clear( );
+            if ( op == 0u )
+                pfx_oneshot_start( e, m, o );
+            else
+                pfx_oneshot_stop( e, m, o, op == 2u );
+            bool same = e.handle == c.next( );
+            for ( unsigned j = 0; j < m.capacity; ++j )
+                same = c.next( ) == m.entries[ j ].serial && same;
+            for ( unsigned j = 0; j < m.capacity; ++j )
+                same = c.next( ) == m.entries[ j ].reflect && same;
+            const unsigned nl = c.next( );
+            same = nl == R.log.size( ) && same;
+            for ( unsigned j = 0; j < nl; ++j )
+            {
+                const unsigned nw = c.next( );
+                for ( unsigned w = 0; w < nw; ++w )
+                {
+                    const unsigned x = c.next( );
+                    same = j < R.log.size( ) && w < R.log[ j ].size( ) && R.log[ j ][ w ] == x && same;
+                }
+            }
+            ++steps;
+            if ( !same && bad++ < 8 )
+                LOG_ERROR( "oneshot_pfx run %u step %u (op %u) differs from retail", v, k, op );
+        }
+    }
+    cur = nullptr;
+    if ( bad == 0 )
+        LOG_SUCCESS( "VuOneShotPfxEntity 0x5EA540 0x5EA6A0 0x5EA6F0 match retail: %u runs, %d steps", runs, steps );
+    else
+        LOG_ERROR( "oneshot_pfx FAILED %d", bad );
+    return bad == 0;
+}

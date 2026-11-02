@@ -103,7 +103,7 @@ inline const char* const g_event_resume_action = "OnResumeActionGame";
 inline const char* const g_event_restart_action = "OnRestartActionGame";
 inline const char* const g_event_shutdown = "OnShutdownApp";
 
-// 0x42F050, VuAwardFlowEntity's listener (the event its ctor 0x42ED30 registers; the caller's): a first bool record's byte (no record: false):
+// 0x42F050, VuAwardFlowEntity's "OnAwardScreenBusy" listener (its ctor 0x42EDB0 registers it; here the caller's): a first bool record's byte (no record: false):
 // not zero "Busy", else "NotBusy".
 inline void logic_award_busy( logic_entity_t& e, const ui_params_t& in, const logic_hooks_t& h )
 {
@@ -205,7 +205,7 @@ inline void logic_save_settings( logic_entity_t&, logic_retval_t& out, const ui_
 }
 
 // 0x42E570 VuIsAchievementUnlockedEntity "Trigger": the game save's Achievements[ name ][ "LocalUnlocked" ] a true bool -> "True", else "False", with the
-// params. Local: read the same with online out.
+// params.
 inline void logic_achievement_unlocked( logic_entity_t& e, logic_retval_t& out, const ui_params_t& in, const logic_hooks_t& h )
 {
     out.type = 0u;

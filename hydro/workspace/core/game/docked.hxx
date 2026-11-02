@@ -4,8 +4,8 @@
 // 0x435800) keeps a whole VuBoatEntity at the dock, VuPosterEntity (vtable 0x73ABD0) the selected track's poster. Both read their state from gameutil +0x50.
 // HOOKS, the caller's: the boat's creation 0x436230 (new 0x520 VuBoatEntity, the document, placed at this entity's transform: the same steps as ghost.hxx's make_boat),
 // its removal 0x500B80 + the release, the Skin property's set (0x500630 "Skin", vt+0x10( value, 1 )), its DB 0x41D500, +0x466 the Locked byte, the voice event, the model
-// reload 0x43AF50, the asset test 0x43B080. NOT RECREATED: the dock's "Build" tick 0x436450 (it poses the boat; needs the renderer's front-end boat), the ctor's plug-free
-// shape stands in schema.hxx (Position X, Position Y, Rotation Z at +0x5C +0x60 +0x64).
+// reload 0x43AF50, the asset test 0x43B080. NOT RECREATED: the dock's "Build" tick 0x436450. The properties (Position X, Position Y, Rotation Z at +0x5C +0x60 +0x64) are
+// schema.hxx's.
 
 #include <workspace/core/world/logic.hxx>
 

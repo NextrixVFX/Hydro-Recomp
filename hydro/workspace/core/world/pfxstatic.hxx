@@ -252,3 +252,58 @@ inline pfx_static_ops_t pfx_static_runtime_ops( pfx_manager_binding_t& b )
     };
     return o;
 }
+
+// VuOneShotPfxEntity (vtables 0x755C88 / 0x755C98, create 0x5EA030, ctor 0x5EA0B0; boat batch 34, case oneshot_pfx): +0x68 Effect Name, +0x80 Pfx Scale, +0x84 Pfx Color (bytes),
+// +0x88 Enable Reflection, +0x8C the handle. The motion watcher 0x5EA740 (the transform's euler back from the matrix, then the same setMatrix) is NOT recreated.
+struct pfx_oneshot_t
+{
+    std::string effect_name;
+    float pfx_scale = 1.0f;
+    std::uint8_t pfx_color[ 4 ] = { 255u, 255u, 255u, 255u };
+    std::uint8_t enable_reflection = 0u;
+    const float* matrix = nullptr;      // the transform's +0x50
+    std::uint32_t handle = 0u;
+};
+
+struct pfx_oneshot_ops_t
+{
+    pfx_static_ops_t instance;
+    int ( *create )( void* user, const char* name ) = nullptr;                    // 0x52BCD0: the entry, -1 none
+    void ( *duration )( void* user, std::uint32_t instance ) = nullptr;           // slot 10, its answer discarded
+};
+
+// "Start" 0x5EA540: a fresh effect (a handle, 0 with none), its entry's reflect byte, slots 4 5 2 11.
+inline void pfx_oneshot_start( pfx_oneshot_t& e, pfx_manager_t& m, const pfx_oneshot_ops_t& o )
+{
+    const pfx_static_ops_t& i = o.instance;
+    const int created = o.create( i.user, e.effect_name.c_str( ) );
+    const std::uint32_t h = pfx_manager_handle( m, created );
+    if ( created >= 0 && o.duration )
+        o.duration( i.user, m.entries[ static_cast< std::size_t >( created ) ].instance );
+    e.handle = h;
+    if ( h == 0u )
+        return;
+    const int x = pfx_manager_lookup( m, h );
+    if ( x < 0 )
+        return;
+    pfx_manager_entry_t& entry = m.entries[ static_cast< std::size_t >( x ) ];
+    entry.reflect = e.enable_reflection;
+    i.set_scale( i.user, entry.instance, e.pfx_scale );
+    const std::uint32_t scale_bits = 0x3B808081u;   // 0x6F75BC, 1 / 255
+    float byte_scale;
+    std::memcpy( &byte_scale, &scale_bits, 4 );
+    float rgba[ 4 ];
+    for ( int k = 0; k < 4; ++k )
+        rgba[ k ] = static_cast< float >( e.pfx_color[ k ] ) * byte_scale;
+    i.set_color( i.user, entry.instance, rgba );
+    i.set_matrix( i.user, entry.instance, e.matrix );
+    i.start( i.user, entry.instance );
+}
+
+// "Stop" 0x5EA6A0 (not immediate), "Kill" 0x5EA6F0 (immediate): slot 12 on the live handle.
+inline void pfx_oneshot_stop( const pfx_oneshot_t& e, const pfx_manager_t& m, const pfx_oneshot_ops_t& o, bool immediate )
+{
+    const int x = pfx_manager_lookup( m, e.handle );
+    if ( x >= 0 )
+        o.instance.stop( o.instance.user, m.entries[ static_cast< std::size_t >( x ) ].instance, immediate );
+}
