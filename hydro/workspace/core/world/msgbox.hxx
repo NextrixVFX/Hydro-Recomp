@@ -78,8 +78,17 @@ inline void c_world::boxes_start( )
     h.play = [ this ]( const char* name ) { ui_play( name ); };
     h.pause = [ this ] { m_race.ticks.pause_count += 1; };
     h.resume = [ this ] { m_race.ticks.pause_count -= 1; };
-    h.project_on = [ this ] { m_box_binding->project_initialize( ); };   // 0x500B10 and 0x501260 are one call there
-    h.project_off = [ this ] { m_box_binding->project_release( ); };
+    // VuMessageBoxScreenEntity slot 6 0x466CA2 / 0x466CBE: { this + 0x5C, 0 } on the touch device, then priority 0x8000, so +0x1C reads 0x8000 while a box is up: what stops 0x4BBE30's Pause
+    // and the HUD's 0x4262A0 under a box. Slot 7 0x466E0F takes it off.
+    h.project_on = [ this ] {
+        m_box_binding->project_initialize( );   // 0x500B10 and 0x501260 are one call there
+        ui_touch_add( m_touch, &m_box_screen, 0u );
+        ui_touch_set_priority( m_touch, &m_box_screen, 0x8000u );
+    };
+    h.project_off = [ this ] {
+        ui_touch_remove( m_touch, &m_box_screen );
+        m_box_binding->project_release( );
+    };
     h.project_ready = [ ] { };
 #if HYDRO_UI_PASS
     h.texture_load = [ this ]( const std::string& name ) {
@@ -124,6 +133,19 @@ inline void c_world::boxes_release( screen_state_t& state )
     for ( auto& held : state.boxes )
         msgbox_entity_destroy( held.second );
     state.boxes.clear( );
+}
+
+// What a screen's entities hold dies with its project: 0x464060 marks a held box destroyed, so the manager never runs its callback on the freed entity.
+inline void c_world::screen_state_release( screen_state_t& state )
+{
+    boxes_release( state );
+    for ( auto& held : state.sounds )   // VuAudioEventEntity's dtor 0x5F4220: the emitter's holder release
+    {
+        audio_emitter_t emitter;
+        emitter.holder = held.second;
+        audio_emitter_destroy( emitter, m_sound );
+    }
+    state = screen_state_t{ };
 }
 
 // VuMessageBoxEntity's two inputs (0x464090 "Create", 0x4640D0 "Destroy"), its properties from the UI's loaded slots.

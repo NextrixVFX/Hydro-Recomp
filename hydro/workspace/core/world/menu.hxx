@@ -72,6 +72,7 @@ inline void c_world::action_exit( )
         race_session_end( m_race );
     boxes_release( m_game_screen_state );
     m_game_screen_state = screen_state_t{ };
+    screen_state_release( m_pause_screen_state );
     m_action.reset( );
 }
 
@@ -271,13 +272,7 @@ inline void c_world::menu_bind( )
     m_menu_engine.m_release_project = [ this ]( int id ) {
         menu_project_t& p = m_menu_projects[ id ];
         p.binding->project_release( );
-        boxes_release( p.state );
-        for ( auto& held : p.state.sounds )   // VuAudioEventEntity's dtor 0x5F4220: the emitter's holder release
-        {
-            audio_emitter_t emitter;
-            emitter.holder = held.second;
-            audio_emitter_destroy( emitter, m_sound );
-        }
+        screen_state_release( p.state );
         m_menu_projects.erase( id );
     };
     m_menu_engine.m_is_screen = [ this ]( int id ) { return ui_common_is_screen( *m_menu_projects[ id ].root ); };
