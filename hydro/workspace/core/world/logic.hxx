@@ -10,6 +10,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <string>
 
 // The engine's generic script / logic entities (the 0x5DC890 .. 0x5E56E0 block):
@@ -35,8 +36,8 @@
 // VuString +0x60 empty, capacity 15) - the state here starts from that.
 // NOT here (other areas): VuIfEntity, VuDelayEntity, VuMultiDelayEntity,
 // VuTriggerForwarderEntity, VuOneShotFilterEntity, VuBooleanEntity,
-// VuGenericEventEntity, VuOnProjectInitializedEntity (world, graph.hxx); the
-// VuPersistent* entities (saves: platform, re-made). The three game-tier
+// VuGenericEventEntity, VuOnProjectInitializedEntity (world, graph.hxx). The
+// game tier's script entities are game/scripted.hxx's. The three game-tier
 // filters VuIsTegraEntity / VuIsSkuEntity / VuHumanFilterEntity (0x42C..) are
 // here too, their game environment through logic_game_t (case logic_game).
 
@@ -52,6 +53,7 @@ struct logic_retval_t
 struct logic_entity_t
 {
     std::uint32_t vtable = 0;
+    std::uint8_t head[ 4 ] = { };     // +0x5C .. +0x5F (a class whose script component is not at +0x5C: game/scripted.hxx)
     std::uint32_t words[ 8 ] = { };
     std::string text;
 };
@@ -72,6 +74,21 @@ struct logic_game_t
     int* unrecreated = nullptr;
 };
 
+// The managers game/scripted.hxx's handlers reach (the caller's; each one null: counted unrecreated, nothing happens).
+struct logic_services_t
+{
+    std::function< void( const char* event, const ui_params_t& ) > broadcast;   // VuEventManager_broadcast 0x505690
+    std::function< bool( ) > champ_data;                                        // the progress manager g 0x758FD8 vt+0x74
+    std::function< void( ) > champ_clear;                                       // vt+0x68 ( the null container )
+    std::function< void( const char* which ) > defaults;                        // settings: audio 0x4B4C60, pad 0x4B4E20, keys 0x4B4EA0, tilt 0x4B4F00, graphics 0x4B4FC0
+    std::function< void( int method ) > input_defaults;                         // the input manager g 0x759038 vt+0x40 ( 0, method )
+    std::function< void( ) > save_profile;                                      // 0x5547F0
+    value_t* game_data = nullptr;                                               // gameutil +0x50
+    const value_t* cloud_data = nullptr;                                        // the game save, g 0x758FA0 +0x20
+    value_t* profile_saved = nullptr;                                           // g 0x759084 +8
+    value_t* profile_temp = nullptr;                                            // +0x18
+};
+
 struct logic_hooks_t
 {
     void* user = nullptr;
@@ -80,6 +97,7 @@ struct logic_hooks_t
     // The global VuRand 0x736810 (the same one the particles draw from - world/pfx.hxx pfx_rand_t).
     pfx_rand_t* rand = nullptr;
     const logic_game_t* game = nullptr;
+    const logic_services_t* services = nullptr;
 };
 
 inline void logic_unrecreated( const logic_hooks_t& h )
@@ -536,6 +554,8 @@ inline void logic_human_filter( logic_entity_t& e, logic_retval_t& out, const ui
         logic_fire( e, h, "Out", in );
 }
 
+#include <workspace/core/game/scripted.hxx>
+
 // ---------------------------------------------------------------------------
 // THE TABLE the world's dispatcher calls by the entity's vtable (+0) and the
 // input plug's name; g_logic_outputs gives each class's output plugs and their
@@ -581,6 +601,31 @@ static const logic_plug_t g_logic_plugs[] = {
     { 0x739A84u, "VuIsSkuEntity", "Trigger", 0x42CFF0u, logic_is_sku },
     { 0x739A50u, "VuHumanFilterEntity", "In", 0x42D370u, logic_human_filter },
     { 0x739AD0u, "VuIsEventTypeEntity", "Trigger", 0x42CB00u, logic_is_event_type },
+    // boat batch 34: game/scripted.hxx, case game_plugs
+    { 0x739A1Cu, "VuOncePerLapFilterEntity", "In", 0x42D6E0u, logic_once_per_lap },
+    { 0x73755Cu, "VuSetTrackBranchProbabilities", "Trigger", 0x406690u, logic_track_branch },
+    { 0x7398B0u, "VuAwardFlowEntity", "Next", 0x42EFF0u, logic_announce< g_event_award_next > },
+    { 0x73EB08u, "VuStartActionGameUIAction", "Trigger", 0x470A80u, logic_start_action },
+    { 0x73EAB8u, "VuEndActionGameUIAction", "Trigger", 0x470B80u, logic_announce< g_event_end_action > },
+    { 0x73EA80u, "VuResumeActionGameUIAction", "Trigger", 0x470C70u, logic_announce< g_event_resume_action > },
+    { 0x73EA48u, "VuRestartActionGameUIAction", "Trigger", 0x470D60u, logic_announce< g_event_restart_action > },
+    { 0x73E968u, "VuShutdownAppUIAction", "Trigger", 0x471350u, logic_announce< g_event_shutdown > },
+    { 0x73E9D8u, "VuDoesChampDataExistUIAction", "Trigger", 0x4710D0u, logic_champ_data },
+    { 0x73E750u, "VuDoesChampionshipDataExistUIAction", "Trigger", 0x4723F0u, logic_championship_data },
+    { 0x73E9A0u, "VuClearChampDataUIAction", "Trigger", 0x4712A0u, logic_champ_clear },
+    { 0x73E718u, "VuClearChampionshipDataUIAction", "Trigger", 0x4712A0u, logic_champ_clear },
+    { 0x73E788u, "VuClearGameResultsUIAction", "Trigger", 0x4721A0u, logic_clear_results },
+    { 0x73E1E0u, "VuSetDefaultSettingsEntity", "Trigger", 0x46C210u, logic_default_settings },
+    { 0x73E1ACu, "VuSaveSettingsEntity", "Trigger", 0x46C470u, logic_save_settings },
+    { 0x739918u, "VuIsAchievementUnlockedEntity", "Trigger", 0x42E570u, logic_achievement_unlocked },
+    { 0x755144u, "VuPersistentBooleanEntity", "Set", 0x5E4300u, logic_persist_set_bool },
+    { 0x755144u, "VuPersistentBooleanEntity", "SetTrue", 0x5E3EC0u, logic_persist_true },
+    { 0x755144u, "VuPersistentBooleanEntity", "SetFalse", 0x5E3EF0u, logic_persist_false },
+    { 0x755144u, "VuPersistentBooleanEntity", "Get", 0x5E3F20u, logic_persist_get_bool },
+    { 0x755110u, "VuPersistentIntegerEntity", "Set", 0x5E45B0u, logic_persist_set_int },
+    { 0x755110u, "VuPersistentIntegerEntity", "Get", 0x5E4640u, logic_persist_get_int },
+    { 0x7550DCu, "VuPersistentStringEntity", "Set", 0x5E48A0u, logic_persist_set_string },
+    { 0x7550DCu, "VuPersistentStringEntity", "Get", 0x5E4920u, logic_persist_get_string },
 };
 
 struct logic_output_t
@@ -615,6 +660,9 @@ static const logic_output_t g_logic_outputs[] = {
     { 0x739A84u, "True", 0u }, { 0x739A84u, "False", 0u },
     { 0x739A50u, "Out", 0u },
     { 0x739AD0u, "True", 0u }, { 0x739AD0u, "False", 0u },
+    { 0x739A1Cu, "Out", 0u }, { 0x73755Cu, "Set", 0u }, { 0x7398B0u, "Busy", 0u }, { 0x7398B0u, "NotBusy", 0u },
+    { 0x73E9D8u, "Yes", 0u }, { 0x73E9D8u, "No", 0u }, { 0x73E750u, "Yes", 0u }, { 0x73E750u, "No", 0u },
+    { 0x739918u, "True", 0u }, { 0x739918u, "False", 0u },
 };
 
 inline const logic_output_t* logic_output( std::uint32_t vtable, const char* plug )
@@ -663,6 +711,17 @@ inline logic_entity_t logic_construct( std::uint32_t vtable )
     e.vtable = vtable;
     // VuIsEventTypeEntity's ctor 0x42C850: Type = "AttractEvent" (0x67803C).
     if ( vtable == 0x739AD0u )
+        e.text = "AttractEvent";
+    // game/scripted.hxx's ctors: 0x42D530 +0x60 = -1; 0x4063F0 both bools true, both probabilities 1; VuStartActionGameUIAction's Type "AttractEvent".
+    if ( vtable == 0x739A1Cu )
+        e.words[ 0 ] = 0xFFFFFFFFu;
+    if ( vtable == 0x73755Cu )
+    {
+        e.words[ 0 ] = 0x101u;
+        e.words[ 1 ] = 0x3F800000u;
+        e.words[ 2 ] = 0x3F800000u;
+    }
+    if ( vtable == 0x73EB08u )
         e.text = "AttractEvent";
     return e;
 }

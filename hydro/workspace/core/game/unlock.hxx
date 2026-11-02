@@ -10,8 +10,7 @@
 // feats) unlocks: the callback (retail's functor; 0x4B6600 / 0x4B6540's caller's, VuUnlockCounter 0x4B67F0 for the count) is
 // how the UI hears of them.
 // HOOK: 0x4D3170 (the sku is "StoreBeta"), g_vudevconfig's "UnlockAll" (the init's caller passes it).
-// NOT RECREATED here: the rewards slots 6 - 11 0x4B60B0 .. 0x4B6440 (world/awards.hxx's unlock_value is their caller; the reads
-// are short and will follow it), the event map at +4 (the caller registers listeners).
+// NOT RECREATED here: the event map at +4 (the caller registers listeners).
 
 #include <workspace/core/assets/tree.hxx>
 #include <workspace/core/entity/json.hxx>
@@ -77,13 +76,14 @@ public:
     std::function< bool( ) > store_beta;   // 0x4D3170
 
     // Slot 5 0x4B5F70 (the asset's load is the caller's: `database` its document; null: false, nothing else happens).
-    bool init( const value_t* database, bool dev_unlock_all, const value_t& cloud_data )
+    // `dev_unlock_all`: g_vudevconfig's getParam( "UnlockAll" ), only a true bool counts.
+    bool init( const value_t* database, const value_t& dev_unlock_all, const value_t& cloud_data )
     {
         db = database;
         if ( db == nullptr )
             return false;
         ready = 1;
-        if ( dev_unlock_all )
+        if ( dev_unlock_all.tag == 3 && dev_unlock_all.integer != 0 )
             unlock_all = 1;
         load( member( cloud_data, "Unlock" ) );
         return true;
@@ -95,6 +95,27 @@ public:
         db = nullptr;
         ready = 0;
     }
+
+    // Slots 6 - 9, 11: 0x4B60B0 Race, 0x4B6170 Championship, 0x4B6230 Slalom, 0x4B62F0 TimeTrial, 0x4B6440 Ghost, each reading
+    // Rewards[ mode ][ class ][ tier ] (for Championship the second key is the championship's name): an int, a float (cvttss2si)
+    // or an int64's low word; anything else, 0. awards.hxx's vt+0x18 / +0x20 / +0x24 / +0x2C are the Race, Slalom, TimeTrial, Ghost
+    // ones.
+    std::int32_t reward( const char* mode, const std::string& boat_class, std::int32_t tier ) const
+    {
+        return unlock_int_or_zero( unlock_at( member( member( member( root( ), "Rewards" ), mode ), boat_class.c_str( ) ), tier ) );
+    }
+
+    // Slot 10 0x4B63B0: Rewards.RubberDucky[ k ].
+    std::int32_t reward_ducky( std::int32_t k ) const
+    {
+        return unlock_int_or_zero( unlock_at( member( member( root( ), "Rewards" ), "RubberDucky" ), k ) );
+    }
+
+    // Slot 20 0x4B66B0 / slot 21 0x4B66C0 / slot 29 0x4B6A80 / slot 28 0x4B6A70 (a byte).
+    std::uint64_t get_feats( ) const { return feats; }
+    void set_feats( std::uint64_t f ) { feats = f; }
+    void all_feats( ) { feats = ~std::uint64_t{ 0 }; }
+    void set_unlock_all( std::uint8_t on ) { unlock_all = on; }
 
     // 0x4B7430: Feats[ k ]'s Name exact -> 1 << k (past bit 63: 0, the bts + two cmov pair); no such row: 0.
     std::uint64_t feat_bit( const std::string& name ) const

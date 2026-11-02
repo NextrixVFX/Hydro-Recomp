@@ -7,6 +7,7 @@
 // consumed, the state words / text after, the VuRand after. The "*ctor" rows: logic_construct's words against the ctor's.
 
 #include <workspace/core/assets/reader.hxx>
+#include <workspace/core/game/docked.hxx>
 #include <workspace/core/world/logic.hxx>
 
 #include <string>
@@ -2411,5 +2412,384 @@ inline bool verify_json_write( )
         LOG_SUCCESS( "VuJsonWriter matches retail (writeValue 0x4FFCC0, 0x4FFDA0 0x4FFE10 0x4FFED0 0x4FFF20 0x5001C0 0x500360 0x500150): %u documents x flags, %u characters", n, static_cast< unsigned >( chars ) );
     else
         LOG_ERROR( "json_write FAILED %d", bad );
+    return bad == 0;
+}
+// The game tier's script entities (game/scripted.hxx) against retail (case game_plugs, cases/gameplug.py): per vector the state as retail had it, the plug dispatched
+// through g_logic_plugs, every output fire, every service call, the VuRetVal, the documents after.
+struct game_plug_log_t
+{
+    std::vector< std::string > names;
+    std::vector< ui_params_t > params;
+    std::vector< std::array< unsigned, 2 > > args;
+};
+
+inline bool verify_game_plugs( )
+{
+    save_words_t c{ g_golden_game_plugs_words };
+    const unsigned n = c.next( );
+    int bad = 0, fires = 0;
+    const auto read_doc = [ ]( const std::string& raw, value_t& out ) {
+        out = value_t{ };
+        if ( !raw.empty( ) )
+            c_reader::read_at_start( std::vector< std::uint8_t >( raw.begin( ), raw.end( ) ), out );
+    };
+    for ( unsigned v = 0; v < n; ++v )
+    {
+        int bad0 = bad;
+        const std::string cls = c.str( ), plug = c.str( );
+        const std::uint32_t vt = logic_vtable_of( cls.c_str( ) );
+        logic_entity_t e = logic_construct( vt );
+        const unsigned kind = c.next( );
+        if ( kind & 1u )
+            e.words[ 0 ] = c.next( );
+        if ( kind & 2u )
+        {
+            const unsigned a = c.next( ), b = c.next( );
+            e.words[ 0 ] = a | b << 8;
+            e.words[ 1 ] = c.next( );
+            e.words[ 2 ] = c.next( );
+        }
+        if ( kind & 4u )
+            e.text = c.str( );
+        const unsigned champ = kind & 8u ? c.next( ) : 0u;
+        if ( kind & 16u )
+        {
+            for ( int k = 0; k < 4; ++k )
+                e.head[ k ] = static_cast< std::uint8_t >( c.next( ) );
+            e.words[ 0 ] = c.next( );
+        }
+        if ( kind & 32u )
+            e.head[ 0 ] = static_cast< std::uint8_t >( c.next( ) );
+        value_t doc, doc2;
+        read_doc( c.str( ), doc );
+        read_doc( c.str( ), doc2 );
+        logic_game_check_t L;
+        const unsigned ne = c.next( );
+        for ( unsigned k = 0; k < ne; ++k )
+        {
+            const std::uint32_t hash = c.next( ), entity = c.next( ), vtable = c.next( ), lap = c.next( );
+            L.hashes.push_back( hash );
+            L.entities.push_back( entity );
+            L.words.push_back( { entity, vtable } );
+            L.words.push_back( { entity + 0x4ACu, lap } );
+        }
+        ui_params_t in{ };
+        in.m_size = static_cast< int >( c.next( ) );
+        std::memcpy( in.m_bytes, c.s, 128 );
+        c.s += 32;
+        const unsigned rt = c.next( ), rv = c.next( );
+        const std::string rtext = c.str( );
+        game_plug_log_t log, fire;
+        logic_game_t g;
+        g.user = &L;
+        g.find = []( void* u, std::uint32_t hash ) -> std::uint32_t {
+            logic_game_check_t& l = *static_cast< logic_game_check_t* >( u );
+            for ( std::size_t k = 0; k < l.hashes.size( ); ++k )
+                if ( l.hashes[ k ] == hash )
+                    return l.entities[ k ];
+            return l.entities.empty( ) ? 0u : l.entities[ 0 ];
+        };
+        g.word = []( void* u, std::uint32_t address ) -> std::uint32_t {
+            for ( const auto& w : static_cast< logic_game_check_t* >( u )->words )
+                if ( w.first == address )
+                    return w.second;
+            return 0u;
+        };
+        const auto note = [ & ]( const char* name, unsigned a = 0u, unsigned b = 0u, const ui_params_t& p = ui_params_t{ } ) {
+            log.names.push_back( name );
+            log.args.push_back( { a, b } );
+            log.params.push_back( p );
+        };
+        logic_services_t s;
+        s.broadcast = [ & ]( const char* event, const ui_params_t& p ) { note( "broadcast", event_hash( event ), static_cast< unsigned >( p.m_size ), p ); };
+        s.champ_data = [ & ] { note( "champ?" ); return static_cast< std::uint8_t >( champ ) != 0u; };
+        s.champ_clear = [ & ] { note( "clear", 0x7593A0u ); };
+        s.defaults = [ & ]( const char* which ) { note( which ); };
+        s.input_defaults = [ & ]( int method ) { note( "input", 0u, static_cast< unsigned >( method ) ); };
+        s.save_profile = [ & ] { note( "save" ); };
+        s.game_data = &doc;
+        s.cloud_data = &doc;
+        s.profile_saved = e.head[ 0 ] ? &doc : &doc2;
+        s.profile_temp = e.head[ 0 ] ? &doc2 : &doc;
+        struct user_t
+        {
+            game_plug_log_t* fire;
+        } user{ &fire };
+        logic_hooks_t h;
+        h.user = &user;
+        h.game = &g;
+        h.services = &s;
+        h.fire = []( void* u, logic_entity_t&, const char* name, const ui_params_t& p ) -> logic_retval_t {
+            game_plug_log_t& f = *static_cast< user_t* >( u )->fire;
+            f.names.push_back( name );
+            f.params.push_back( p );
+            return logic_retval_t{ };
+        };
+        logic_retval_t out{ 0xA5A5A5A5u, 0xA5A5A5A5u, nullptr };
+        if ( plug == "*busy" )
+            logic_award_busy( e, in, h );
+        else
+            bad += !logic_dispatch( e, plug.c_str( ), out, in, h );
+        bad += out.type != rt;
+        if ( rt == 4u )
+            bad += rtext != out.text;
+        else if ( rt == 3u )
+            bad += ( out.value & 0xFFu ) != rv;
+        else if ( rt != 0u && rt != 0xA5A5A5A5u )
+            bad += out.value != rv;
+        const unsigned nf = c.next( );
+        bad += nf != fire.names.size( );
+        for ( unsigned k = 0; k < nf; ++k )
+        {
+            const std::string name = c.str( ), bytes = c.str( );
+            ++fires;
+            if ( k < fire.names.size( ) )
+                bad += name != fire.names[ k ] || bytes.size( ) != static_cast< std::size_t >( fire.params[ k ].m_size ) || std::memcmp( bytes.data( ), fire.params[ k ].m_bytes, bytes.size( ) ) != 0;
+        }
+        const unsigned nl = c.next( );
+        bad += nl != log.names.size( );
+        for ( unsigned k = 0; k < nl; ++k )
+        {
+            const std::string name = c.str( );
+            const unsigned a = c.next( ), b = c.next( );
+            const std::string bytes = c.str( );
+            ++fires;
+            if ( k < log.names.size( ) )
+                bad += name != log.names[ k ] || a != log.args[ k ][ 0 ] || b != log.args[ k ][ 1 ] || bytes.size( ) != static_cast< std::size_t >( log.params[ k ].m_size ) ||
+                       std::memcmp( bytes.data( ), log.params[ k ].m_bytes, bytes.size( ) ) != 0;
+        }
+        const unsigned tail = c.next( );
+        if ( tail & 1u )
+            bad += c.next( ) != e.words[ 0 ];
+        if ( tail & 2u )
+        {
+            std::string d;
+            vujb_dump( doc, d );
+            bad += c.str( ) != d;
+        }
+        if ( tail & 4u )
+        {
+            std::string d;
+            vujb_dump( doc2, d );
+            bad += c.str( ) != d;
+        }
+        if ( bad != bad0 && bad0 < 8 )
+            LOG_ERROR( "game_plugs vector %u (%s %s) differs from retail", v, cls.c_str( ), plug.c_str( ) );
+    }
+    if ( bad == 0 )
+        LOG_SUCCESS( "game/scripted.hxx's plugs match retail: %u vectors, %d fires and service calls", n, fires );
+    else
+        LOG_ERROR( "game_plugs FAILED %d", bad );
+    return bad == 0;
+}
+
+// VuDockedBoatEntity and VuPosterEntity against retail (case front_props, cases/frontprops.py): each script step's service log, the boat's Locked byte, the colour, gameutil +0x50's dump.
+inline bool verify_front_props( )
+{
+    save_words_t c{ g_golden_front_props_words };
+    const unsigned runs = c.next( );
+    int bad = 0, steps = 0;
+    for ( unsigned v = 0; v < runs; ++v )
+    {
+        const auto read = [ ]( const std::string& raw, value_t& out ) {
+            out = value_t{ };
+            c_reader::read_at_start( std::vector< std::uint8_t >( raw.begin( ), raw.end( ) ), out );
+        };
+        value_t game, db;
+        read( c.str( ), game );
+        read( c.str( ), db );
+        std::vector< std::string > log;
+        std::map< std::uint32_t, std::uint8_t > locks;
+        std::map< std::uint32_t, unsigned > crazy;
+        const unsigned count = c.next( );
+        std::vector< std::string > made;   // the golden's boat answers are in step order
+        value_t yes, no;
+        no.tag = 6u;
+        no.kind = value_t::kind_t::object;
+        yes = no;
+        value_t& flag = json_member( yes, "IsCrazy" );
+        flag.tag = 3u;
+        flag.kind = value_t::kind_t::integer;
+        flag.integer = 1;
+        std::vector< unsigned > answers;
+        const unsigned na = c.next( );
+        for ( unsigned k = 0; k < na; ++k )
+            answers.push_back( c.next( ) );
+        std::size_t next = 0u;
+        std::uint32_t handle = 0u;
+        docked_hooks_t h;
+        h.game_data = &game;
+        h.boat_db = &db;
+        h.make = [ & ]( const value_t& d ) {
+            std::string t;
+            vujb_dump( d, t );
+            log.push_back( "make " + t );
+            crazy[ ++handle ] = next < answers.size( ) ? answers[ next++ ] : 0u;
+            return handle;
+        };
+        h.drop = [ & ]( std::uint32_t ) { log.push_back( "drop" ); };
+        h.db = [ & ]( std::uint32_t b ) -> const value_t& { return crazy[ b ] ? yes : no; };
+        h.set_skin = [ & ]( std::uint32_t, const value_t& s ) {
+            std::string t;
+            vujb_dump( s, t );
+            log.push_back( "skin " + t + " 1" );
+        };
+        h.set_locked = [ & ]( std::uint32_t b, std::uint8_t l ) { locks[ b ] = l; };
+        h.voice = [ & ]( const char* e ) { log.push_back( std::string( "voice " ) + e ); };
+        h.tick_on = [ & ] { log.push_back( "tick" ); };
+        h.tick_off = [ & ] { log.push_back( "untick" ); };
+        bool has = true;
+        poster_hooks_t ph;
+        ph.game_data = &game;
+        ph.has_asset = [ & ]( const std::string& ) { return has; };
+        ph.reload = [ & ] { log.push_back( "reload" ); };
+        docked_boat_t e;
+        for ( unsigned k = 0; k < count; ++k )
+        {
+            const unsigned op = c.next( );
+            has = c.next( ) != 0u;
+            ui_params_t in{ };
+            in.m_size = static_cast< int >( c.next( ) );
+            std::memcpy( in.m_bytes, c.s, 128 );
+            c.s += 32;
+            const unsigned want_color = c.next( ), want_locked = c.next( );
+            log.clear( );
+            unsigned color = 0u;
+            switch ( op )
+            {
+            case 0: docked_initialize( e, h ); break;
+            case 1: docked_change( e, in, h ); break;
+            case 2: docked_reset( e, h ); break;
+            case 3: poster_change( in, ph ); break;
+            case 4: poster_reset( ph ); break;
+            case 5: color = poster_color( game ); log.push_back( "draw" ); break;
+            default: docked_release( e, h ); break;
+            }
+            const unsigned nl = c.next( );
+            bool same = nl == log.size( );
+            for ( unsigned j = 0; j < nl; ++j )
+            {
+                const std::string t = c.str( );
+                same = j < log.size( ) && log[ j ] == t && same;
+            }
+            const std::string dump = c.str( );
+            std::string got;
+            vujb_dump( game, got );
+            same = same && got == dump && ( op != 5u || color == want_color ) && ( op == 0u || op == 6u || locks[ e.boat ] == want_locked );
+            ++steps;
+            if ( !same && bad++ < 8 )
+                LOG_ERROR( "front_props run %u step %u (op %u) differs from retail", v, k, op );
+        }
+    }
+    if ( bad == 0 )
+        LOG_SUCCESS( "VuDockedBoatEntity and VuPosterEntity match retail: %u runs, %d steps", runs, steps );
+    else
+        LOG_ERROR( "front_props FAILED %d", bad );
+    return bad == 0;
+}
+
+// VuOneShotPfxEntity against retail (case oneshot_pfx): scripts on a hand manager; the handle, the instance calls, the serials and the reflect bytes after each step.
+inline bool verify_oneshot_pfx( )
+{
+    save_words_t c{ g_golden_oneshot_pfx_words };
+    const unsigned runs = c.next( );
+    int bad = 0, steps = 0;
+    struct run_t
+    {
+        pfx_manager_t* m = nullptr;
+        std::vector< std::vector< unsigned > > log;
+        int answer = -1;
+    };
+    static run_t* cur = nullptr;
+    for ( unsigned v = 0; v < runs; ++v )
+    {
+        pfx_oneshot_t e;
+        e.effect_name = c.str( );
+        std::uint32_t mat[ 16 ];
+        for ( std::uint32_t& w : mat )
+            w = c.next( );
+        e.matrix = reinterpret_cast< const float* >( mat );
+        const std::uint32_t sb = c.next( );
+        std::memcpy( &e.pfx_scale, &sb, 4 );
+        for ( std::uint8_t& b : e.pfx_color )
+            b = static_cast< std::uint8_t >( c.next( ) );
+        e.enable_reflection = static_cast< std::uint8_t >( c.next( ) );
+        pfx_manager_t m;
+        m.capacity = c.next( );
+        m.bits = c.next( );
+        m.serial_cap = c.next( );
+        m.mask = m.capacity - 1u;
+        m.entries.resize( m.capacity );
+        m.table.resize( m.capacity );
+        for ( unsigned k = 0; k < m.capacity; ++k )
+        {
+            m.table[ k ] = static_cast< int >( k );
+            m.entries[ k ].index = k;
+            m.entries[ k ].instance = k;
+            m.entries[ k ].serial = c.next( );
+        }
+        for ( unsigned k = 0; k < m.capacity; ++k )
+            m.entries[ k ].flags = c.next( );
+        run_t R;
+        R.m = &m;
+        cur = &R;
+        pfx_oneshot_ops_t o;
+        o.create = []( void*, const char* ) { return cur->answer; };
+        o.duration = []( void*, std::uint32_t i ) { cur->log.push_back( { 10u, i } ); };
+        o.instance.set_scale = []( void*, std::uint32_t i, float f ) {
+            std::uint32_t w;
+            std::memcpy( &w, &f, 4 );
+            cur->log.push_back( { 4u, i, w } );
+        };
+        o.instance.set_color = []( void*, std::uint32_t i, const float* p ) {
+            std::vector< unsigned > l{ 5u, i };
+            l.resize( 6 );
+            std::memcpy( &l[ 2 ], p, 16 );
+            cur->log.push_back( l );
+        };
+        o.instance.set_matrix = []( void*, std::uint32_t i, const float* p ) {
+            std::vector< unsigned > l{ 2u, i };
+            l.resize( 18 );
+            std::memcpy( &l[ 2 ], p, 64 );
+            cur->log.push_back( l );
+        };
+        o.instance.start = []( void*, std::uint32_t i ) { cur->log.push_back( { 11u, i } ); };
+        o.instance.stop = []( void*, std::uint32_t i, bool immediate ) { cur->log.push_back( { 12u, i, immediate ? 1u : 0u } ); };
+        const unsigned count = c.next( );
+        for ( unsigned k = 0; k < count; ++k )
+        {
+            const unsigned op = c.next( );
+            R.answer = static_cast< int >( c.next( ) );
+            R.log.clear( );
+            if ( op == 0u )
+                pfx_oneshot_start( e, m, o );
+            else
+                pfx_oneshot_stop( e, m, o, op == 2u );
+            bool same = e.handle == c.next( );
+            for ( unsigned j = 0; j < m.capacity; ++j )
+                same = c.next( ) == m.entries[ j ].serial && same;
+            for ( unsigned j = 0; j < m.capacity; ++j )
+                same = c.next( ) == m.entries[ j ].reflect && same;
+            const unsigned nl = c.next( );
+            same = nl == R.log.size( ) && same;
+            for ( unsigned j = 0; j < nl; ++j )
+            {
+                const unsigned nw = c.next( );
+                for ( unsigned w = 0; w < nw; ++w )
+                {
+                    const unsigned x = c.next( );
+                    same = j < R.log.size( ) && w < R.log[ j ].size( ) && R.log[ j ][ w ] == x && same;
+                }
+            }
+            ++steps;
+            if ( !same && bad++ < 8 )
+                LOG_ERROR( "oneshot_pfx run %u step %u (op %u) differs from retail", v, k, op );
+        }
+    }
+    cur = nullptr;
+    if ( bad == 0 )
+        LOG_SUCCESS( "VuOneShotPfxEntity 0x5EA540 0x5EA6A0 0x5EA6F0 match retail: %u runs, %d steps", runs, steps );
+    else
+        LOG_ERROR( "oneshot_pfx FAILED %d", bad );
     return bad == 0;
 }

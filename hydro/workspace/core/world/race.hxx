@@ -135,6 +135,40 @@ inline void logic_load_properties( entity_t& e, const value_t& p )
         property_string( p, "SKU", v.text, d.text );
     else if ( c == "VuIsEventTypeEntity" )   // ctor 0x42C850: "Type" (vt 0x74C394: the string loads 0x406C20 / 0x406CD0 / 0x406AB0), "AttractEvent"
         property_string( p, "Type", v.text, d.text );
+    else if ( c == "VuSetTrackBranchProbabilities" )   // ctor 0x4063F0
+    {
+        std::uint8_t a = 0, b = 0;
+        property_bool( p, "Set Branch A", a, static_cast< std::uint8_t >( d.words[ 0 ] & 0xFFu ) );
+        property_bool( p, "Set Branch B", b, static_cast< std::uint8_t >( ( d.words[ 0 ] >> 8 ) & 0xFFu ) );
+        v.words[ 0 ] = a | static_cast< std::uint32_t >( b ) << 8;
+        for ( int k = 1; k <= 2; ++k )
+        {
+            float f, fd;
+            std::memcpy( &fd, &d.words[ k ], 4 );
+            property_float( p, k == 1 ? "Branch A Prob." : "Branch B Prob.", f, fd, false );
+            std::memcpy( &v.words[ k ], &f, 4 );
+        }
+    }
+    else if ( c == "VuPersistentBooleanEntity" || c == "VuPersistentIntegerEntity" || c == "VuPersistentStringEntity" )   // ctor 0x5E3C30
+    {
+        std::uint8_t save = 0;
+        property_bool( p, "Save", save, d.head[ 0 ] );
+        v.head[ 0 ] = save;
+        property_string( p, "Name", v.text, d.text );
+    }
+    else if ( c == "VuIsAchievementUnlockedEntity" )
+        property_string( p, "Achievement", v.text, d.text );
+    else if ( c == "VuStartActionGameUIAction" )   // the VuString +0x5C
+        property_string( p, "Type", v.text, d.text );
+    else if ( c == "VuSetDefaultSettingsEntity" )
+    {
+        static const char* names[ 4 ] = { "Audio", "GamePadControls", "KeyboardControls", "TouchTiltControls" };
+        for ( int k = 0; k < 4; ++k )
+            property_bool( p, names[ k ], v.head[ k ], d.head[ k ] );
+        std::uint8_t g = 0;
+        property_bool( p, "Graphics", g, static_cast< std::uint8_t >( d.words[ 0 ] & 0xFFu ) );
+        v.words[ 0 ] = g;
+    }
     else if ( c == "VuRandomTriggerEntity" )
     {
         static const char* names[ 8 ] = { "Weight 1", "Weight 2", "Weight 3", "Weight 4", "Weight 5", "Weight 6", "Weight 7", "Weight 8" };
