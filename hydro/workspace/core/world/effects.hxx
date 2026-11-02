@@ -8,6 +8,7 @@
 #include <workspace/core/world/pfxstatic.hxx>
 #include <workspace/utility/logger.hxx>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -242,6 +243,14 @@ public:
         if ( systems != nullptr )
             for ( std::uint32_t instance : *systems )
                 draw_system( instance );
+        // VuPfxManager's entries (power-ups' StaticPfx, the hull's one-shots): each VuPfxEntity's draw component, added to the draw manager while +0x1E is set
+        // (0x52BC30, pfx_manager_entry_t::registered). A system the list above already drew is not drawn twice.
+        for ( int e = m_manager.active_first; e >= 0; e = m_manager.entries[ static_cast< std::size_t >( e ) ].next )
+        {
+            const pfx_manager_entry_t& x = m_manager.entries[ static_cast< std::size_t >( e ) ];
+            if ( x.registered && ( systems == nullptr || std::find( systems->begin( ), systems->end( ), x.instance ) == systems->end( ) ) )
+                draw_system( x.instance );
+        }
         if ( trails > 0 && !m_trails_logged )
         {
             m_trails_logged = true;

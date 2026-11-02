@@ -6,7 +6,10 @@
 #include <workspace/core/save/ghost.hxx>
 #include <workspace/core/world/ghost.hxx>
 #include <workspace/core/world/ghostgame.hxx>
-#include <workspace/core/world/records.hxx>
+#include <workspace/core/game/packages.hxx>
+#include <workspace/core/game/settings.hxx>
+#include <workspace/core/ui/award.hxx>
+#include <workspace/core/ui/paused.hxx>
 #include <workspace/core/world/tiretrack.hxx>
 #include <workspace/core/world/pause.hxx>
 #include <workspace/core/boat/construct.hxx>
@@ -192,9 +195,11 @@ struct race_world_t
     std::function< bool( const entity_t& e ) > motion_release;
     // The audio platform (FMOD's imports - world/sound.hxx; c_world's). Null: no audio calls made (logged).
     const sound_hooks_t* sound = nullptr;
-    // The game save (VuCloudSaveManager +0x20, c_world's; null: saves off) and HiddenPackagesDB; 0x4ABD60; the input manager's profile load.
+    // The game save (VuCloudSaveManager +0x20, c_world's; null: saves off) and the hidden package manager g 0x758FD0; 0x4ABD60; the input manager's profile load.
     value_t* save_doc = nullptr;
-    const value_t* hidden_db = nullptr;
+    c_hidden_packages* hidden = nullptr;
+    const settings_t* settings = nullptr;     // g 0x758FE0
+    c_unlock_manager* unlock = nullptr;       // g 0x758FE8
     std::function< void( ) > save_game;
     std::function< void( platform_input_t& ) > input_profile;
     std::uint32_t viewports = 1;
@@ -430,6 +435,7 @@ struct race_session_t
     // answered by the platform input hook in place of the device; null: the device (input below). frames: the session frames
     // run (race_session_frame), the script's clock.
     std::shared_ptr< struct race_input_script_t > input_script;
+    bool autopilot = false;   // --autopilot (world/autopilot.hxx)
     // The input retail reads (game/input.hxx): the managers on InputDB's document, which `input_db` keeps alive. Made here at
     // the session's start, not by the engine's init 0x566230 (ours: no input exists outside a race yet). Null: InputDB did not
     // load; the hooks answer 0.
@@ -2604,7 +2610,7 @@ inline void race_session_slalom_start( race_session_t& s, const race_session_dbs
 inline void race_session_game_events( race_session_t& s, const std::string& mode )
 {
     s.bus.ticks = &s.ticks;
-    // The pause menu's ctor 0x4BAE80 (the action mode's ctor, before any game): its two gate events. Its others: not built.
+    // The pause menu's ctor 0x4BAE80 (the action mode's ctor, before any game): its two gate events. Its others: c_world::pause_bind.
     race_bus_subscribe( s.bus, "OnPauseActionGame", 0x4BB660u, "VuPauseMenu", [ &s ]( const ui_params_t& ) { pause_on_pause( s.pause ); } );
     race_bus_subscribe( s.bus, "OnSetAllowPause", 0x4BB900u, "VuPauseMenu", [ &s ]( const ui_params_t& p ) { pause_on_set_allow( s.pause, p ); } );
     race_bus_subscribe( s.bus, "OnUserNext", 0x483170u, "VuGame", [ &s ]( const ui_params_t& ) {
@@ -2715,4 +2721,5 @@ inline void race_session_boat_events( race_session_t& s )
 }
 
 #include <workspace/core/world/ghostplay.hxx>
+#include <workspace/core/world/autopilot.hxx>
 #include <workspace/core/world/opening.hxx>

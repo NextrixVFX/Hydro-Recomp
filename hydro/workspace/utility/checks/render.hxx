@@ -2597,6 +2597,8 @@ inline bool verify_render_all( )
     ok = verify_gfx_sort_life( ) && ok;
     ok = verify_gfx_device( ) && ok;
     ok = verify_ui_record_draws( ) && ok;
+    ok = verify_boost_record( ) && ok;
+    ok = verify_minimap_record( ) && ok;
     ok = verify_mode_switch( ) && ok;
     ok = verify_gfx_program( ) && ok;
     ok = verify_gfx_model_draws( ) && ok;

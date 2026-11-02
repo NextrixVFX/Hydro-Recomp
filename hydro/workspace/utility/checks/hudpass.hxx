@@ -3,6 +3,7 @@
 #include <workspace/core/world/hudpass.hxx>
 #include <workspace/core/world/mode.hxx>
 
+#include <bit>
 #include <cstdint>
 #include <cstring>
 #include <vector>
@@ -84,6 +85,150 @@ inline bool verify_ui_record_draws( )
         return true;
     }
     LOG_ERROR( "ui_record_draws FAILED %d of %d words", g.failed, g.compared );
+    return false;
+}
+
+// 0x42C290 -> 0x42C2A0 against retail (case boost_record): row: the entity's fields, the record, then the device log.
+struct ui_boost_check_device_t final : ui_boost_device_t
+{
+    std::vector< std::uint32_t > m_log;
+    void boost_matrix( const float* m ) override
+    {
+        m_log.push_back( 1u );
+        for ( int k = 0; k < 16; ++k )
+            m_log.push_back( std::bit_cast< std::uint32_t >( m[ k ] ) );
+    }
+    void boost_float( float v ) override { m_log.insert( m_log.end( ), { 2u, std::bit_cast< std::uint32_t >( v ) } ); }
+    void boost_texture( bool mask, std::uint32_t handle ) override { m_log.insert( m_log.end( ), { 3u, mask ? 0x94u : 0x90u, handle } ); }
+    void boost_draw( std::uint32_t kind, std::uint32_t primitives, const float* vertices, std::uint32_t stride ) override
+    {
+        m_log.insert( m_log.end( ), { 4u, kind, primitives, stride } );
+        for ( int k = 0; k < 16; ++k )
+            m_log.push_back( std::bit_cast< std::uint32_t >( vertices[ k ] ) );
+    }
+};
+
+inline bool verify_boost_record( )
+{
+    anim_cursor_t g;
+    g.w = g_golden_brd_words;
+    g.size = g_golden_brd_size;
+    g.where = "boost_record";
+    const unsigned rows = g.take( );
+    unsigned logged = 0;
+    for ( unsigned k = 0; k < rows; ++k )
+    {
+        const auto tex = [ & ]( ui_texture_t& t ) {
+            t.m_handle = g.take( );
+            t.m_width = static_cast< std::int32_t >( g.take( ) );
+            t.m_height = static_cast< std::int32_t >( g.take( ) );
+        };
+        ui_speedometer_t s;
+        tex( s.m_back_imperial );
+        tex( s.m_back_metric );
+        tex( s.m_active );
+        tex( s.m_inactive );
+        tex( s.m_hold );
+        tex( s.m_mask );
+        tex( s.m_flash );
+        s.m_metric = static_cast< std::int32_t >( g.take( ) );
+        s.m_v_offset = std::bit_cast< float >( g.take( ) );
+        s.m_countdown = std::bit_cast< float >( g.take( ) );
+        const bool transform = g.take( ) != 0u, offset = g.take( ) != 0u, texture = g.take( ) != 0u, mask = g.take( ) != 0u;
+        std::uint32_t words[ 23 ];
+        for ( std::uint32_t& w : words )
+            w = g.take( );
+        ui_boost_check_device_t d;
+        ui_record_boost( d, s, transform, offset, texture, mask, reinterpret_cast< const std::uint8_t* >( words ) );
+        const unsigned n = g.take( );
+        logged += n;
+        g.eq( static_cast< std::uint32_t >( d.m_log.size( ) ), n );
+        for ( unsigned i = 0; i < n; ++i )
+            g.eq( i < d.m_log.size( ) ? d.m_log[ i ] : 0xDEADBEEFu, g.take( ) );
+    }
+    if ( !g.failed )
+    {
+        LOG_SUCCESS( "boost_record matches retail's 0x42C290 / 0x42C2A0 on %u records, %u log words", rows, logged );
+        return true;
+    }
+    LOG_ERROR( "boost_record FAILED %d of %d words", g.failed, g.compared );
+    return false;
+}
+
+// 0x428060 / 0x428070 against retail (case minimap_record): the entity's fields, the record, the log.
+struct ui_map_check_device_t final : ui_map_device_t, ui_record_device_t
+{
+    std::vector< std::uint32_t > m_log;
+    void words( std::uint32_t tag, const void* p, unsigned n )
+    {
+        m_log.push_back( tag );
+        const std::size_t at = m_log.size( );
+        m_log.resize( at + n );
+        std::memcpy( m_log.data( ) + at, p, n * 4u );
+    }
+    void map_matrix( const float* m ) override { words( 1u, m, 16u ); }
+    void map_colour( const std::uint8_t* rgba ) override { words( 2u, rgba, 1u ); }
+    void map_range( const float* v ) override { words( 3u, v, 2u ); }
+    void map_texture( int which, std::uint32_t handle ) override { m_log.insert( m_log.end( ), { 4u, static_cast< std::uint32_t >( which ), handle } ); }
+    void map_draw( const float* v ) override { words( 5u, v, 24u ); }
+    void colour( int, const char*, const std::uint8_t* rgba ) override { words( 6u, rgba, 1u ); }
+    void matrix( int, const char*, const float* m ) override { words( 7u, m, 16u ); }
+    void texture( std::uint32_t slots, std::uint32_t handle ) override { m_log.insert( m_log.end( ), { 8u, slots, handle } ); }
+    void draw( std::uint32_t, std::uint32_t, const void* v, std::uint32_t ) override { words( 9u, v, 20u ); }
+};
+
+inline bool verify_minimap_record( )
+{
+    anim_cursor_t g;
+    g.w = g_golden_mmr_words;
+    g.size = g_golden_mmr_size;
+    g.where = "minimap_record";
+    const unsigned rows = g.take( );
+    unsigned logged = 0;
+    for ( unsigned k = 0; k < rows; ++k )
+    {
+        const std::uint32_t icons = g.take( );
+        ui_minimap_t m;
+        m.m_map = g.take( );
+        m.m_map_size[ 0 ] = static_cast< std::int32_t >( g.take( ) );
+        m.m_map_size[ 1 ] = static_cast< std::int32_t >( g.take( ) );
+        m.m_frame = g.take( );
+        m.m_frame_size[ 0 ] = static_cast< std::int32_t >( g.take( ) );
+        m.m_frame_size[ 1 ] = static_cast< std::int32_t >( g.take( ) );
+        m.m_mask = g.take( );
+        const std::uint32_t tw = g.take( ), th = g.take( );
+        const auto number = [ & ] { return std::bit_cast< float >( g.take( ) ); };
+        m.m_screen_scale[ 0 ] = number( );
+        m.m_screen_scale[ 1 ] = number( );
+        m.m_origin[ 0 ] = number( );
+        m.m_origin[ 1 ] = number( );
+        m.m_scale = number( );
+        m.m_view = number( );
+        m.m_softness = number( );
+        const std::uint32_t water = g.take( );
+        std::memcpy( m.m_water, &water, 4 );
+        const unsigned n_words = g.take( );
+        std::vector< std::uint32_t > record( n_words );
+        for ( std::uint32_t& w : record )
+            w = g.take( );
+        ui_map_check_device_t d;
+        const auto* bytes = reinterpret_cast< const std::uint8_t* >( record.data( ) );
+        if ( icons )
+            ui_record_icons( d, m, [ & ]( std::uint32_t, std::int32_t* w, std::int32_t* h ) { *w = static_cast< std::int32_t >( tw ); *h = static_cast< std::int32_t >( th ); }, bytes );
+        else
+            ui_record_map( d, m, bytes );
+        const unsigned n = g.take( );
+        logged += n;
+        g.eq( static_cast< std::uint32_t >( d.m_log.size( ) ), n );
+        for ( unsigned i = 0; i < n; ++i )
+            g.eq( i < d.m_log.size( ) ? d.m_log[ i ] : 0xDEADBEEFu, g.take( ) );
+    }
+    if ( !g.failed )
+    {
+        LOG_SUCCESS( "minimap_record matches retail's 0x428060 0x428080 0x428070 0x4284F0 on %u records, %u log words", rows, logged );
+        return true;
+    }
+    LOG_ERROR( "minimap_record FAILED %d of %d words", g.failed, g.compared );
     return false;
 }
 

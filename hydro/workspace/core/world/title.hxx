@@ -44,14 +44,11 @@ public:
         LOG_INFO( "title sequence: %zu screens, fade %.2f, wait %.2f", m_screens.size( ), m_fade_time, m_wait_time );
     }
 
-    // Slot 2 0x4C6FD0: the first state's enter.
+    // Slot 2 0x4C6FD0: the first state's enter (start( ) runs it).
     bool enter( const std::string& ) override
     {
         m_world.title_enter( );
         m_fsm.start( );
-        if ( fsm_state_t* s = m_fsm.current( ) )
-            if ( s->m_enter )
-                s->m_enter( );
         return true;
     }
 

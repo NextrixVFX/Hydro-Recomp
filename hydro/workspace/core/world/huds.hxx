@@ -78,6 +78,8 @@ inline void c_world::load_huds( const char* const* k_names )   // the game ctor'
                 // m_string_db: VuStringDB's getString (slot 6 0x53B830, world/strings.hxx) on the world's string DB.
                 string_db_ready( );
                 hooks.m_string_db = [ this ]( const char* key ) { return string_db_get( m_string_db, key ? key : "" ); };
+                hooks.m_input = [ this ]( int pad, const char* name ) { return m_race.input && m_race.input->manager.pressed( pad, name ); };
+                hooks.m_touch_device = &m_touch;
                 h.ui = std::make_unique< c_ui_race_hud >( *h.ui_tree, hooks );
             }
             else
@@ -311,13 +313,21 @@ inline void c_world::bind_game_screens( )
     };
     // g 0x759038 slot 9( pad, name ): the manager's "pressed" (Results' Select).
     hooks.m_input = [ this ]( int pad, const char* name ) { return m_race.input && m_race.input->manager.pressed( pad, name ); };
+    hooks.m_touch_device = &m_touch;
     g.m_hooks = hooks;
     m_race.rules.screen_hooks.results_open = [ this ]( const char* project ) { return m_race.screens.results_open( project ); };
     m_race.rules.screen_hooks.screen = [ this ]( int screen, int verb, float dt ) {
         if ( screen == 0 )
             m_race.screens.screen( verb, dt );
+        else
+            m_race.screens.award_screen( verb, dt );
+    };
+    m_race.rules.screen_hooks.award_done = [ this ] { return m_race.screens.award_done( ); };
+    m_race.rules.screen_hooks.award.award_open = [ this ]( const char* project, std::int32_t tier, const std::string& boat_class, std::int32_t value, const std::vector< std::string >& names ) {
+        return m_race.screens.award_open( project, tier, boat_class, value, names );
     };
     m_race.rules.screen_hooks.paused = [ ] { return false; };
+    pause_bind( );
 #if HYDRO_UI_PASS
     g.m_frame = [ this ]( const entity_t& root, c_ui_binding& binding ) {
         if ( !m_ui_pass )
@@ -326,6 +336,68 @@ inline void c_world::bind_game_screens( )
         ui_screen_frame( root, m_ui_pass->m_impl, m_ui_pass->m_sort, 1.0f, 4, &in );
     };
 #endif
+}
+
+// The pause menu: ui/paused.hxx's object over the race. Its project is a screen as Results' (g.m_load, a c_ui_binding); its broadcasts reach the bus, where
+// 0x4BAE80's event map stands. Hooks: FMOD's "game" category (no audio device), the analytics (a platform service), the touch device (none), g 0x758FD4 +0x34 (nothing sets it).
+inline void c_world::pause_bind( )
+{
+    ui_pause_hooks_t h;
+    h.m_play = [ this ]( const char* event ) {
+        std::uint32_t id = 0;
+        if ( m_sound.get_event && m_sound.get_event( m_sound.user, event, 1u, &id, nullptr ) == 0 && m_sound.start )
+            m_sound.start( m_sound.user, id );
+    };
+    h.m_tick_paused = [ this ]( bool paused ) { m_race.ticks.pause_count += paused ? 1 : -1; };   // slots 11 / 12
+    h.m_delta = [ this ] { return m_race.ticks.dt; };
+    h.m_input = [ this ]( const char* name ) { return m_race.input && m_race.input->manager.pressed( 0, name ); };
+    h.m_touches = [ ] { return 0; };
+    h.m_input_type = [ this ] { return m_race.world.control_method; };
+    h.m_open = [ this ]( const std::string& name ) {
+        ui_game_screens_t& g = m_race.screens;
+        m_pause_root = g.m_load ? g.m_load( name ) : nullptr;
+        if ( !m_pause_root )
+            return false;
+        m_pause_binding = std::make_unique< c_ui_binding >( *m_pause_root, g.m_hooks );
+        m_pause_binding->project_initialize( );
+        return true;
+    };
+    h.m_close = [ this ] {
+        if ( m_pause_binding )
+            m_pause_binding->project_release( );
+        m_pause_binding.reset( );
+        m_pause_root.reset( );
+    };
+    h.m_screen = [ this ] { return m_pause_root && ui_common_is_screen( *m_pause_root ); };
+    h.m_screen_tick = [ this ]( float dt, bool input ) { m_pause_binding->tick( dt, input ); };
+#if HYDRO_UI_PASS
+    h.m_screen_draw = [ this ] {
+        if ( m_ui_pass )
+        {
+            const ui_frame_inputs_t in = ui_screen_inputs( *m_pause_binding, ui_screen_environment( ) );
+            ui_screen_frame( *m_pause_root, m_ui_pass->m_impl, m_ui_pass->m_sort, 1.0f, 4, &in );
+        }
+    };
+    h.m_background = [ this ]( std::uint32_t colour ) {
+        if ( m_ui_pass )
+            ui_pause_background( m_ui_pass->m_sort, ui_inputs( ).m_env, colour );
+    };
+#endif
+    std::uint32_t colour = 0xFF000000u;
+    ui_json_colour( member( member( member( m_constant_db, "VuDBAsset" ), "UI" ), "PauseMenuBackgroundColor" ), colour );
+    m_pause_menu = std::make_unique< c_ui_pause_menu >( m_race.pause, std::move( h ), colour );
+    const auto text = [ ]( const ui_params_t& p ) {
+        ui_params_reader_t r( p );
+        return std::string( r.read_string( ) );
+    };
+    race_bus_subscribe( m_race.bus, "OnResumeActionGame", 0x4BB680u, "VuPauseMenu", [ this ]( const ui_params_t& ) { m_pause_menu->on_resume( ); } );
+    race_bus_subscribe( m_race.bus, "OnSetScreen", 0x4BB6F0u, "VuPauseMenu", [ this, text ]( const ui_params_t& p ) { m_pause_menu->on_set_screen( text( p ) ); } );
+    race_bus_subscribe( m_race.bus, "OnPushScreen", 0x4BB780u, "VuPauseMenu", [ this, text ]( const ui_params_t& p ) { m_pause_menu->on_push_screen( text( p ) ); } );
+    race_bus_subscribe( m_race.bus, "OnPopScreen", 0x4BB830u, "VuPauseMenu", [ this ]( const ui_params_t& ) { m_pause_menu->on_pop_screen( ); } );
+    race_bus_subscribe( m_race.bus, "OnReloadScreen", 0x4BB8E0u, "VuPauseMenu", [ this ]( const ui_params_t& ) { m_pause_menu->on_reload_screen( ); } );
+    race_bus_subscribe( m_race.bus, "OnSettingsCommand", 0x4BB980u, "VuPauseMenu", [ this, text ]( const ui_params_t& p ) { m_pause_menu->on_settings_command( text( p ) ); } );
+    race_bus_subscribe( m_race.bus, "OnEndActionGame", 0x4B9B70u, "VuActionGameMode", [ this ]( const ui_params_t& ) { if ( m_action ) m_action->on_end_action_game( ); } );
+    race_bus_subscribe( m_race.bus, "OnRestartActionGame", 0x4B9B90u, "VuActionGameMode", [ this ]( const ui_params_t& ) { if ( m_action ) m_action->on_restart_action_game( ); } );
 }
 
 #if HYDRO_UI_PASS
@@ -434,6 +506,7 @@ inline void c_world::hud_env( hud_project_t& h )
     env.m_track_built = m_race.track && track_is_built( *m_race.track );
     env.m_track_circuit = env.m_track_built && track_is_circuit( *m_race.track );
     env.m_control_method = m_race.world.control_method;
+    env.m_manager_28 = static_cast< std::uint32_t >( m_race.manager.lists.humans.boats.size( ) );   // g 0x758FB8 +0x28: the human list's size (0x426330: the pause button)
     // The gauges' inputs (core/ui overlay.hxx ui_hud_gauges_t): the speedometer 0x42BA00's local boat - its body
     // (+0x21C) linear velocity +0x140 / +0x144, +0x31C, +0x320, +0x32C, +0x310, the animation object's (+0x230) +0x78,
     // +0x32D - and the minimap 0x427BD0's boats: the transform's (+0x50) world row 3 (+0x80 / +0x84) and row 1
@@ -444,8 +517,7 @@ inline void c_world::hud_env( hud_project_t& h )
     ui_hud_gauges_t& g = h.ui->gauges( );
     g.m_live = true;
 #if HYDRO_UI_PASS
-    // The speedometer ctor 0x42AB60's textures by name (the asset factory 0x426A90). The boost record's material stays 0: its callback
-    // 0x42C290 is not recreated.
+    // The speedometer ctor 0x42AB60's textures by name (the asset factory 0x426A90) and its "BoostMeter" material.
     if ( m_ui_pass && !g.m_speedometer )
         g.m_speedometer = [ this ]( const entity_t&, ui_speedometer_t& s ) {
             const auto at = [ this ]( const std::string& name ) {
@@ -457,6 +529,44 @@ inline void c_world::hud_env( hud_project_t& h )
             s.m_needle = at( "UI/HUD_Speed_Needle" );
             for ( int k = 0; k < 8; ++k )
                 s.m_boost[ k ] = at( "UI/HUD_Boost" + std::to_string( k + 1 ) + "x" );
+            s.m_active = at( "UI/HUD_Speed_BoostActive" );
+            s.m_inactive = at( "UI/HUD_Speed_BoostInactive" );
+            s.m_hold = at( "UI/HUD_Speed_BoostHold" );
+            s.m_mask = at( "UI/HUD_Speed_BoostMask" );
+            s.m_flash = at( "UI/HUD_Speed_BoostInactiveFlash" );
+            m_ui_pass->boost_material( s.m_material, s.m_material_key );
+            s.m_self = m_ui_pass->boost_add( s );
+        };
+    // The minimap ctor 0x426D70: its textures by name, TrackDB [ track ].MiniMap. No "Texture": VuGfxUtil +0x1C's white (0x4280B6), none on this tree: 0.
+    if ( m_ui_pass && !g.m_minimap )
+        g.m_minimap = [ this ]( const entity_t&, ui_minimap_t& m ) {
+            const auto at = [ this ]( const std::string& name ) {
+                const ui_texture_t* t = m_ui_pass->texture_asset( name );
+                return t ? *t : ui_texture_t{ };
+            };
+            const value_t& mini = member( member( member( m_track_db, "VuDBAsset" ), m_race.game.track.c_str( ) ), "MiniMap" );
+            const value_t& origin = member( mini, "Origin" );
+            ui_json_float( member( origin, "X" ), m.m_origin[ 0 ] );
+            ui_json_float( member( origin, "Y" ), m.m_origin[ 1 ] );
+            ui_json_float( member( mini, "Scale" ), m.m_scale );
+            ui_json_float( member( mini, "ViewDist" ), m.m_view );
+            ui_json_float( member( mini, "Softness" ), m.m_softness );
+            std::uint32_t water = 0;
+            if ( ui_json_colour( member( mini, "WaterColor" ), water ) )
+                std::memcpy( m.m_water, &water, 4 );
+            const value_t& texture = member( mini, "Texture" );
+            const ui_texture_t map = texture.tag == 4 ? at( texture.text ) : ui_texture_t{ };
+            m.m_map = map.m_handle;
+            m.m_map_size[ 0 ] = map.m_width;
+            m.m_map_size[ 1 ] = map.m_height;
+            const ui_texture_t frame = at( "UI/HUD_MapFrame" );
+            m.m_frame = frame.m_handle;
+            m.m_frame_size[ 0 ] = frame.m_width;
+            m.m_frame_size[ 1 ] = frame.m_height;
+            m.m_mask = at( "UI/HUD_MapMask" ).m_handle;
+            m.m_icon = at( "UI/HUD_MapPlayer" ).m_handle;
+            m_ui_pass->map_material( m.m_material, m.m_material_key );
+            m.m_self = m_ui_pass->map_add( m );
         };
 #endif
     g.m_display[ 0 ] = m_race.world.display_w;

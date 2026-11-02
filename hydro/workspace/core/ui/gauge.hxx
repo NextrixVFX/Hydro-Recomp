@@ -13,8 +13,7 @@
 // which 0x42BA00 never reads; its Vu2dLayoutComponent (vtable 0x738A78; delegate
 // 0x739240 -> 0x4089B0) runs 0x42C1E0( selected ). Everything below is the
 // disassembly transliterated; the records and commands are what retail leaves
-// in VuGfxSort. The boost record's callback 0x42C290 (the boost meter's shader
-// draw at submit time) is the GPU side and is NOT recreated.
+// in VuGfxSort. The boost record's callback 0x42C290 is world/hudpass.hxx ui_record_boost.
 
 // The x87 sequence of 0x40B5F0 (fld; fsincos; fstp c; fstp s) on this FPU (engine x87.asm).
 extern "C" void x87_sincos( float x, float* c, float* s );
@@ -47,8 +46,15 @@ struct ui_speedometer_t
     ui_texture_t m_back_imperial;                          // +0xA0 "UI/HUD_Speed_Back_Imperial"
     ui_texture_t m_back_metric;                            // +0xA4 "UI/HUD_Speed_Back_Metric"
     ui_texture_t m_needle;                                 // +0xA8 "UI/HUD_Speed_Needle"
+    ui_texture_t m_active;                                 // +0xAC "UI/HUD_Speed_BoostActive"
+    ui_texture_t m_inactive;                               // +0xB0 "UI/HUD_Speed_BoostInactive"
+    ui_texture_t m_hold;                                   // +0xB4 "UI/HUD_Speed_BoostHold"
+    ui_texture_t m_mask;                                   // +0xB8 "UI/HUD_Speed_BoostMask"
+    ui_texture_t m_flash;                                  // +0xBC "UI/HUD_Speed_BoostInactiveFlash"
     ui_texture_t m_boost[ 8 ];                             // +0xC0 "UI/HUD_Boost%dx", 1..8
     std::int32_t m_metric = 0;                             // +0xE0 (OnUITick: settings "Metric")
+    float m_v_offset = 0.0f;                               // +0xE4 (OnUITick, gBoostTextureVOffset)
+    float m_countdown = 0.0f;                              // +0xE8 (OnUITick)
     float m_depth = 0.0f;                                  // the draw component (+0x5C) +0x14 "Depth"
     std::uint32_t m_self = 0;                              // the entity (the boost record's +0)
 };

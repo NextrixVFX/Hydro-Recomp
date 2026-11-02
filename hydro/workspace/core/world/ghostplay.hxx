@@ -199,7 +199,7 @@ inline void race_session_ghost_bind( race_session_t& s )
                 ghost_game_post_t h;
                 h.progress = [ &s ]( const std::string& track, std::int32_t place, float time ) {
                     if ( s.world.save_doc )
-                        record_ghost_put( *s.world.save_doc, track, place, time );
+                        ui_progress_ghost_add( *s.world.save_doc, track, place, time );
                 };
                 h.store = [ &s ]( const std::vector< std::uint8_t >& blob ) {
                     if ( s.world.save_doc && !ghost_store_best( blob, 0, s.game.track ) )

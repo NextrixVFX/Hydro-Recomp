@@ -1,8 +1,10 @@
 #pragma once
 
-#include <workspace/core/world/records.hxx>
+#include <workspace/core/game/packages.hxx>
+#include <workspace/core/ui/progress.hxx>
 
-// world/records.hxx against retail's VuProgressManagerImpl and VuHiddenPackageManagerImpl on their own vtables (oracle case
+// ui/progress.hxx and game/packages.hxx, a second witness beside verify_ui_progress_records and hidden_packages, against retail's
+// VuProgressManagerImpl and VuHiddenPackageManagerImpl on their own vtables (oracle case
 // progress_race): a seeded op script over five documents x 5: answers, the out words, the commit / achievement log, the document's hash.
 inline bool verify_progress_race( )
 {
@@ -10,9 +12,11 @@ inline bool verify_progress_race( )
     const auto hash = [ ]( const value_t& v ) { std::string d; vujb_dump( v, d ); return ui_chl_hash( d ); };
     static const char* const types[ 3 ] = { "Race", "TimeTrial", "Slalom" };
     for ( int k = 0; k < 3; ++k )
-        if ( std::string( record_table( k ) ) != g_golden_prr_strings[ k ] )
+        if ( std::string( k_ui_progress_modes[ k ] ) != g_golden_prr_strings[ k ] )
             ++failed;
     const value_t db = c_reader( ui_fnd_bytes( g_golden_prr_db ) ).parse( );
+    c_hidden_packages packages;
+    packages.init( &db );
     for ( std::size_t k = 0; k < g_golden_prr_runs_count; ++k )
     {
         const golden_prr_run_t& run = g_golden_prr_runs[ k ];
@@ -39,48 +43,52 @@ inline bool verify_progress_race( )
                 log += text;
             };
             if ( op == "put" )
-                record_put( document, type, g.m_track, course, g.m_key, g.m_idx, g.m_place, t1, t2 );
+                ui_progress_add( document, type, g.m_track, course, g.m_key, g.m_idx, g.m_place, t1, t2 );
             else if ( op == "get" )
             {
-                ret = record_get( document, type, g.m_track, g.m_key, g.m_idx, a, fb, fc );
+                ret = ui_progress_record( document, type, g.m_track, g.m_key, g.m_idx, a, fb, fc );
                 floats = true;
             }
             else if ( op == "best" )
             {
-                ret = record_best( document, type, g.m_track, course, g.m_idx, a, fb, fc );
+                ret = ui_progress_best( document, type, g.m_track, course, g.m_idx, a, fb, fc );
                 floats = true;
             }
             else if ( op == "bestall" )
             {
-                ret = record_best_all( document, type, g.m_track, g.m_course, a, fb, fc );
+                ret = ui_progress_best_any( document, type, g.m_track, g.m_course, a, fb, fc );
                 floats = true;
             }
             else if ( op == "count" )
-                ret = static_cast< std::uint32_t >( record_count( document, type ) );
+                ret = static_cast< std::uint32_t >( ui_progress_count( document, type ) );
             else if ( op == "medal" )
-                record_medals( document, type, g.m_idx, a, b, c );
+                ui_progress_medals( document, type, g.m_idx, a, b, c );
             else if ( op == "gput" )
-                record_ghost_put( document, g.m_track, g.m_place, t1 );
+                ui_progress_ghost_add( document, g.m_track, g.m_place, t1 );
             else if ( op == "gget" )
             {
                 float out = std::bit_cast< float >( 0x11111111u );
-                ret = record_ghost_get( document, g.m_track, out );
+                ret = ui_progress_ghost_time( document, g.m_track, out );
                 a = std::bit_cast< std::int32_t >( out );
             }
             else if ( op == "found" )
-                package_set_found( document, g.m_name, commit, achievement );
+                {
+                packages.save = commit;
+                packages.progress = achievement;
+                packages.set_found( document, g.m_name );
+            }
             else if ( op == "isfound" )
-                ret = package_is_found( document, g.m_name );
+                ret = c_hidden_packages::is_found( document, g.m_name );
             else if ( op == "inlevel" )
-                ret = package_in_level( db, g.m_track, a );
+                ret = packages.level_total( g.m_track, a );
             else if ( op == "inlevelfound" )
-                package_found_in_level( document, g.m_track, a );
+                c_hidden_packages::level_found( document, g.m_track, a );
             else if ( op == "total" )
-                package_found_total( document, a );
+                a = c_hidden_packages::found_total( document );
             else if ( op == "all" )
-                ret = package_all_found( document, db, g.m_track );
+                ret = packages.level_complete( document, g.m_track );
             else if ( op == "clear" )
-                package_clear( document );
+                c_hidden_packages::clear( document );
             if ( floats )
             {
                 b = std::bit_cast< std::int32_t >( fb );
@@ -99,7 +107,7 @@ inline bool verify_progress_race( )
         }
     }
     if ( failed == 0 )
-        LOG_SUCCESS( "records.hxx matches retail's VuProgressManagerImpl slots 5 .. 21, 30, 31 and VuHiddenPackageManagerImpl slots 7 .. 12, 6: %d ops on %zu runs", ops, g_golden_prr_runs_count );
+        LOG_SUCCESS( "ui/progress.hxx + game/packages.hxx match retail's VuProgressManagerImpl slots 5 .. 21, 30, 31 and VuHiddenPackageManagerImpl slots 7 .. 12, 6: %d ops on %zu runs", ops, g_golden_prr_runs_count );
     else
         LOG_ERROR( "progress_race FAILED %d of %d", failed, ops );
     return failed == 0;

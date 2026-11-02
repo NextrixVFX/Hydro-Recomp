@@ -11,11 +11,10 @@
 
 // The level's power-ups made live (world batch 35): VuPowerUpEntity's gameInitialize 0x43B9D0, the body 0x43C700, the
 // Decision tick 0x43BDB0, the contact part +0x5C (0x43C8C0) and slots 12 / 13 / 15, all boat/powerup.hxx's on OUR session.
-// Boosts (37 on Hydroelectric), triggers (3), hidden packages (10; slots 6 0x43DD20, 13 0x43DE20, 15 0x43DE80, on world/records.hxx's
+// Boosts (37 on Hydroelectric), triggers (3), hidden packages (10; slots 6 0x43DD20, 13 0x43DE20, 15 0x43DE80, on game/packages.hxx's
 // manager: with the saves off no document answers, so they are not made live). Hooks answered here:
 //   an entity id (0x500D50, FNV-1a of the long name) is the boat's index + 1: SUBSTITUTION, the map's key only;
-//   the ApplyPfx (0x52BAC0 + the spring constraint: read to 0x43C02D, tools tmp/b38/d_43BDB0.txt) and the StaticPfx's scale (vt+0x10: no slot
-//   in boat_pfx_ops_t) are logged, not run; gameRelease 0x43BCA0 is not run (the session's teardown drops the bodies).
+//   the ApplyPfx (0x52BAC0 + the spring constraint: read to 0x43C02D, tools tmp/b38/d_43BDB0.txt) is logged, not run; gameRelease 0x43BCA0 is not run (the session's teardown drops the bodies).
 
 // 0x43C700: a btSphereShape (vtable 0x73ADD4: type 8, +0x10 scaling (1, 1, 1, 0), +0x20 and +0x30 the radius), mass 0, the
 // entity's world, group 0x20, mask 0x10 (the boats), +0xD8 |= 4, +0x2C4 the +0x5C part (a marker word here).
@@ -63,6 +62,8 @@ inline powerup_world_hooks_t race_powerup_world_hooks( race_session_t& s, race_s
         const std::uint32_t handle = pfx_manager_handle( m, e );
         const int x = handle ? pfx_manager_lookup( m, handle ) : -1;
         const transform_component_t* t = entity_transform( *u.entity );
+        if ( t )
+            LOG_VERBOSE( "power-up: %s StaticPfx %s handle 0x%X at %.1f %.1f %.1f", u.entity->m_name.c_str( ), name.c_str( ), handle, t->world[ 12 ], t->world[ 13 ], t->world[ 14 ] );
         if ( x >= 0 && t )
         {
             const boat_pfx_ops_t o = boat_pfx_runtime_ops( *s.world.pfx );
@@ -98,17 +99,17 @@ inline std::string race_level_name( const race_session_t& s )
     return slash == std::string::npos ? level : level.substr( slash + 1 );
 }
 
-// The manager's slots on the game save (world/records.hxx).
+// The manager's slots on the game save (game/packages.hxx).
 inline powerup_package_hooks_t race_powerup_package_hooks( race_session_t& s, race_session_t::powerup_live_t& u )
 {
     powerup_package_hooks_t p;
-    p.is_found = [ &s ]( const std::string& name ) { return package_is_found( *s.world.save_doc, name ); };
+    p.is_found = [ &s ]( const std::string& name ) { return c_hidden_packages::is_found( *s.world.save_doc, name ); };
     p.set_found = [ &s ]( const std::string& name ) {
-        package_set_found( *s.world.save_doc, name, s.world.save_game, [ &s ]( const char*, float ) { race_unwired( s, "the \"Collector\" achievement 0x4AA1A0 (a platform service) - not run" ); } );
+        s.world.hidden->set_found( *s.world.save_doc, name );
     };
     p.level = [ &s ] { return race_level_name( s ); };
-    p.first = [ &s ]( const std::string& level, std::int32_t& value ) { return package_in_level( *s.world.hidden_db, level, value ); };
-    p.second = [ &s ]( const std::string& level, std::int32_t& value ) { package_found_in_level( *s.world.save_doc, level, value ); };
+    p.first = [ &s ]( const std::string& level, std::int32_t& value ) { return s.world.hidden->level_total( level, value ); };
+    p.second = [ &s ]( const std::string& level, std::int32_t& value ) { c_hidden_packages::level_found( *s.world.save_doc, level, value ); };
     p.broadcast = [ &s ]( const std::vector< std::uint32_t >& w ) {
         ui_params_t params;
         ui_params_add( params, w[ 0 ], w[ 1 ] );
@@ -177,6 +178,14 @@ inline void race_powerup_tick( void* user, float dt )
                 s.world.fire( *u.entity, "OnTrigger" );
         } );
     };
+    // The handle +0x110's instance, slot 4 setScale (the manager's table; a released handle: nothing).
+    h.pfx_scale = [ &s ]( std::uint32_t handle, float scale ) {
+        if ( !s.world.pfx || !s.world.pfx_manager || !handle )
+            return;
+        const int x = pfx_manager_lookup( *s.world.pfx_manager, handle );
+        if ( x >= 0 )
+            pfx_instance_set_scale( s.world.pfx->heap, s.world.pfx_manager->entries[ static_cast< std::size_t >( x ) ].instance, scale );
+    };
     h.apply_pfx = [ &s ]( void* ) { race_unwired( s, "a power-up's ApplyPfx (0x52BAC0 + VuPfxBoatSpringConstraint) - not run" ); };
     h.driver_38 = [ ]( void* ) { return true; };   // 0x404BD0 in all five driver vtables
     h.driver_30 = [ &s ]( void* v ) { return race_session_is_human( s, static_cast< race_session_boat_t* >( v )->graph.objects[ 0 ].image.data( ) ); };
@@ -203,7 +212,7 @@ inline bool race_session_powerup( race_session_t& s, entity_t& e, std::uint32_t&
 {
     const bool boost = e.m_type == "VuPowerUpBoostEntity";
     const bool package = e.m_type == "VuPowerUpHiddenPackageEntity";
-    if ( package && ( !s.world.save_doc || !s.world.hidden_db ) )
+    if ( package && ( !s.world.save_doc || !s.world.hidden ) )
     {
         race_unwired( s, "VuPowerUpHiddenPackageEntity's gameInitialize with the saves off - not made live" );
         return true;
@@ -230,7 +239,7 @@ inline bool race_session_powerup( race_session_t& s, entity_t& e, std::uint32_t&
     if ( package )   // slot 6 0x43DD20: +0x138, before the base gameInitialize
     {
         u->package_name = race_entity_path( &e );   // 0x500BF0's long name holds the root's name first: powerup_package_name drops just that, which this never had
-        LOG_INFO( "saves: hidden package %s (%s)", u->package_name.c_str( ), package_is_found( *s.world.save_doc, u->package_name ) ? "found" : "not found" );
+        LOG_INFO( "saves: hidden package %s (%s)", u->package_name.c_str( ), c_hidden_packages::is_found( *s.world.save_doc, u->package_name ) ? "found" : "not found" );
     }
     u->randomize = props->randomize;
     u->image.assign( 0x144, 0 );

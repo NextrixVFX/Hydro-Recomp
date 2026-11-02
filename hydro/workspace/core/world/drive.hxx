@@ -69,9 +69,8 @@
 //   vt+0x18) the camera's collision 0x40B090 and the AI's avoidance 0x40C750
 //   cast - no collision world holds the level in the race yet.
 //
-// The settings manager's bytes the human tick reads (g_vusettingsmanager
-// 0x758FE0 +0x2C / +0x2D / +0x30 / +0x34) are a SAVE-side value (scope: saves
-// are re-made): 0 here, flagged.
+// The settings manager's values the human tick reads (g_vusettingsmanager
+// 0x758FE0 +0x2C / +0x2D / +0x30 / +0x34): race_world_t::settings, each tick.
 
 // The engine's +0xF8 std::vector of 8-byte records: 0x413700 resizes it to
 // the drive count through 0x4153A0, whose growth 0x415700 writes each new
@@ -172,8 +171,12 @@ inline input_t race_input_script_at( const race_input_script_t& s, int frame )
 
 // The platform input hooks' answers (VuInputManagerImpl slots 6 / 8 / 9 on pad 0): the script's channels when one is loaded,
 // else the manager. A channel the script has no column for answers 0 with a script.
+inline float race_autopilot_axis( const race_session_t& s, const char* name );   // world/autopilot.hxx
+
 inline float race_drive_axis( const race_session_t& s, std::int32_t pad, const char* name )
 {
+    if ( s.autopilot )
+        return race_autopilot_axis( s, name );
     if ( s.input_script )
     {
         const input_t in = race_input_script_at( *s.input_script, s.frames );
@@ -394,6 +397,15 @@ inline void race_drive_driver( void* user, float dt )
     race_session_t& s = *r.session;
     if ( r.human )
     {
+        human_env_t& env = r.human_driver.env;
+        env.control_method = s.world.control_method;
+        if ( const settings_t* set = s.world.settings )
+        {
+            env.brake_only_0 = set->auto_throttle_pad ? 1u : 0u;
+            env.brake_only_1 = set->auto_throttle_keys ? 1u : 0u;
+            env.tilt_blend = set->ui.m_steering;
+            env.rumble = set->ui.m_vibration ? 1u : 0u;
+        }
         human_decision_driver( &r.human_driver, dt );
         return;
     }
