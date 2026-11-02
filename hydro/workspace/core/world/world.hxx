@@ -143,9 +143,8 @@ private:
     // Ours: the load's window ends with the first frame's overlay. That frame reads the HUD and the debris, and frees the cache, before anything is shown.
     void load_close( )
     {
-        if ( m_load_settle == 0 )
+        if ( m_load_settle == 0 || --m_load_settle != 0 )
             return;
-        m_load_settle = 0;
         m_archive.cache_end( );
         m_archive.watch_late( m_load_race );
         prewarm_report( m_load_start );
