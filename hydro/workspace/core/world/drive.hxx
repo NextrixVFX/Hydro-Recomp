@@ -1313,7 +1313,7 @@ inline void race_drive_build( race_session_t& s, std::size_t boat, float dt )
     race_drive_t& r = *s.drives[ boat ];
     // Step 3, the driver's vt+0x4C(dt): 0x4021A0 (ret 4) in every driver vtable - VuHumanDriver 0x737F44, VuAiDriver
     // 0x737B5C, VuAiNuisanceDriver 0x737C4C, the UI driver 0x737CDC, VuGhostDriver 0x737DDC (read from the image): nothing.
-    race_unwired( s, "the Build tick 0x41F330's step 6 (the draw aabb merge + g_vu3ddrawmanager vt+0x30) and step 4's second instance 0x532990 - NOT recreated" );
+    race_unwired( s, "the Build tick 0x41F330's g_vu3ddrawmanager vt+0x30 (the renderer's) and step 4's second instance 0x532990 - NOT recreated" );
     // Step 1: 0x52F690 on the blender g 0x759430 (world/blend.hxx) with the position (transform +0x80, copied first)
     // into boat +0x408 (the 22-word record: +0x408 the far plane the race camera reads, +0x454 / +0x458 the pfx
     // colours step 2 lerps).
@@ -1337,6 +1337,17 @@ inline void race_drive_build( race_session_t& s, std::size_t boat, float dt )
         race_unwired( s, "the Build tick's step 4: no model, or a clip with fewer bones than the skeleton - UNKNOWN" );
     // Step 5.
     race_drive_effects( s, r, dt );
+    // Step 6 (world/rig.hxx): the draw aabb.
+    {
+        race_session_boat_t& b6 = race_drive_boat( r );
+        if ( b6.rig.model )
+        {
+            float pfx[ 8 ];
+            std::memcpy( pfx, b6.pfx.aabb, 32 );
+            boat_rig_draw_aabb( b6.rig.model->instance, reinterpret_cast< const float* >( r.d.transform + 0x50 ), reinterpret_cast< const float* >( r.d.boat + 0x49C ), pfx,
+                                reinterpret_cast< const float* >( r.d.debris + 0xA8 ), b6.draw_aabb );
+        }
+    }
     boat_build_audio_hooks_t h;
     h.user = &s;
     h.slot = []( void* u, std::uint8_t*, const std::string& ) {

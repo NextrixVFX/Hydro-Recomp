@@ -648,9 +648,42 @@ inline bool verify_graph_logic( )
     return true;
 }
 
+// Case aabb_merge: 0x517530 on seeded aabbs (the default NaN among them): the six lanes.
+inline bool verify_aabb_merge( )
+{
+    const unsigned* g = g_golden_amg_words;
+    int failed = 0, compared = 0;
+    const unsigned n = g[ 0 ];
+    std::size_t at = 1;
+    for ( unsigned v = 0; v < n; ++v )
+    {
+        float a[ 8 ], b[ 8 ];
+        std::memcpy( a, g + at, 32 );
+        std::memcpy( b, g + at + 8, 32 );
+        at += 16;
+        boat_rig_aabb_merge( a, b );
+        for ( int k : { 0, 1, 2, 4, 5, 6 } )
+        {
+            std::uint32_t w;
+            std::memcpy( &w, a + k, 4 );
+            ++compared;
+            if ( w != g[ at++ ] )
+                ++failed;
+        }
+    }
+    if ( at != g_golden_amg_size || failed )
+    {
+        LOG_ERROR( "aabb_merge: %d of %d values differ", failed, compared );
+        return false;
+    }
+    LOG_SUCCESS( "0x517530 (the aabb merge of Build step 6): %u vectors, %d values bit-exact against retail's own code", n, compared );
+    return true;
+}
+
 inline bool verify_rig_all( )
 {
     bool ok = true;
+    ok = verify_aabb_merge( ) && ok;
     ok = verify_graph_logic( ) && ok;
     ok = verify_boat_rig( ) && ok;
     ok = verify_attach_components( ) && ok;

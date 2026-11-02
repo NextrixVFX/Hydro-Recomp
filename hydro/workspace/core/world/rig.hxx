@@ -174,6 +174,48 @@ inline void boat_rig_animation_tick( boat_rig_t& rig, const boat_rig_inputs_t& i
         }
 }
 
+// 0x517530 (thiscall aabb; other*; retn 4): lanes 0..2 minss( this, other ), lanes 4..6 maxss( this, other ). The two w lanes are
+// stack words retail never wrote (UNKNOWN: left as they were here).
+inline void boat_rig_aabb_merge( float* aabb, const float* other )
+{
+    for ( int k = 0; k < 3; ++k )
+    {
+        aabb[ k ] = _mm_cvtss_f32( _mm_min_ss( _mm_set_ss( aabb[ k ] ), _mm_set_ss( other[ k ] ) ) );
+        aabb[ 4 + k ] = _mm_cvtss_f32( _mm_max_ss( _mm_set_ss( aabb[ 4 + k ] ), _mm_set_ss( other[ 4 + k ] ) ) );
+    }
+}
+
+// The Build tick's step 6 (0x41F60E .. 0x41F708): M = (instance +0x50) . world . translation( +0x49C ) (0x4078C0 twice, 0x410AB0),
+// the instance's +0x2C aabb through M (0x41B2A0), merged (0x517530) with the pfx's +0x98 and the debris' +0xA8 unless their min x
+// is ordered-equal FLT_MAX (ucomiss 0x6F7864; a NaN merges), into `out` (the draw component's +0x24 .. +0x43). The draw manager's
+// vt+0x30 on it when +0x1E is set: the renderer's, a hook.
+inline void boat_rig_draw_aabb( const skel_instance_t& i, const float* world, const float* offset, const float* pfx, const float* debris, float* out )
+{
+    float m1[ 16 ], t[ 16 ], m[ 16 ];
+    hull_multiply( i.root, m1, world );
+    vu_identity( t );
+    t[ 12 ] = offset[ 0 ];
+    t[ 13 ] = offset[ 1 ];
+    t[ 14 ] = offset[ 2 ];
+    hull_multiply( m1, m, t );
+    scene_aabb_transform( out, i.aabb, m );
+    const std::uint32_t flt_max = 0x7F7FFFFFu;
+    float empty;
+    std::memcpy( &empty, &flt_max, 4 );
+    if ( !anim_eq( pfx[ 0 ], empty ) )
+        boat_rig_aabb_merge( out, pfx );
+    if ( !anim_eq( debris[ 0 ], empty ) )
+        boat_rig_aabb_merge( out, debris );
+}
+
+// 0x4108C0 (gameRelease): the skeleton +4 and the three controls +8 / +C / +10 released, each slot 0.
+inline void boat_rig_release( boat_rig_t& rig )
+{
+    rig.animated.reset( );
+    for ( bool& h : rig.has )
+        h = false;
+}
+
 // The Build tick's step 4 (0x41F56C .. 0x41F5D1) on +0x2A4: anim +4's advance 0x5169E0 + build 0x516CF0 when set, setPose
 // 0x532720( anim +4 ), the instance's +0x24 and +0x28 flipped (== 0). No control has a listener, so advance fires nothing.
 // False: a path skeleton.hxx refuses (an animation with fewer bones than the skeleton: retail's stale words - UNKNOWN).

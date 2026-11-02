@@ -104,6 +104,7 @@ struct race_session_boat_t
     std::unique_ptr< boat_thunk_t > thunk;   // the step callback's context (boat/thunk.hxx), persistent
     std::vector< std::uint32_t > excluded;   // the solver's +0x34 array words this step
     std::uint8_t draw_added = 0, instigator_registered = 0;
+    float draw_aabb[ 8 ]{ };   // the draw component +0x6C's +0x24 .. +0x43 (Build step 6)
     // The hull draw (c_world): each model instance's placements, the one shown.
     std::vector< int > placements[ 3 ];
     int shown = -2;
@@ -2326,7 +2327,26 @@ inline void race_session_end( race_session_t& s )
                   ui_json_find( data, "TotalTime" ).real );
         (void)s;
     };
-    h.release = [ &s ]( std::size_t ) { race_unwired( s, "VuGame release: 0x500B80 (gameRelease) on a game boat - not recreated" ); };
+    // 0x500B80 on a game boat: its slot 7 0x41D470 (race.hxx race_boat_game_release): the ticks, slot 18, the rig. Not run, named: the
+    // driver's slot 7, the hull's 0x419260, the engine's 0x415330, the debris' 0x411950, the draw manager's remove (the renderer's).
+    h.release = [ &s ]( std::size_t k ) {
+        if ( k >= s.boats.size( ) )
+            return;
+        race_session_boat_t& b = *s.boats[ k ];
+        race_boat_init_hooks_t rh;
+        if ( k < s.start_boats.size( ) )
+        {
+            rh.manager = &s.manager.lists;
+            rh.entry = s.start_boats[ k ].boat;
+        }
+        rh.slot18 = [ &s, &b ] { race_session_enable( s, b, false ); };
+        rh.anim_release = [ &b ] { boat_rig_release( b.rig ); };
+        rh.call = [ &s ]( const std::string& row ) {
+            if ( row == "driver slot7 driver" || row == "0x419260 hull" || row == "0x415330 engine" || row == "0x411950 damage" )
+                race_unwired( s, "the boat's gameRelease 0x41D470: " + row + " - not recreated" );
+        };
+        race_boat_game_release( &b, s.ticks, b.draw_added, b.instigator_registered, rh );
+    };
     // The game's slot 6 by mode (rules.hxx vugame_release_hooks_t::slot6).
     h.slot6 = s.start.slalom ? 0x48C880u : s.start.timetrial ? 0x48F330u : s.mode == "Ghost" ? 0x485360u : 0x489A10u;
     h.draw_remove = [ &s ] {
