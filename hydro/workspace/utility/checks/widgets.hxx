@@ -1919,11 +1919,145 @@ inline bool verify_ui_minimap_layout( )
     return failed == 0;
 }
 
+// ui_remap_on_focus / _set_focus / _hide / _tick / _event / _touch_* / _decision /
+// _box_result (core/ui remap.hxx) against retail's row runtime (oracle case
+// remap_logic): one script per row kind on the real entity; after each step the row's
+// bytes, the point, hover, select, box, +0x204, the axes, the two auto settings
+// and the log of the hook calls with their arguments.
+inline bool verify_ui_remap_logic( )
+{
+    int failed = 0, steps = 0, logged = 0;
+    for ( std::size_t k = 0; k < g_golden_rl_rows_count; ++k )
+    {
+        const golden_rl_row_t& g = g_golden_rl_rows[ k ];
+        const std::vector< std::uint8_t > raw = ui_unhex( g.m_fields ), block = ui_unhex( g.m_block );
+        golden_rm_row_t row = { };
+        row.m_type = g.m_type;
+        row.m_channel = g.m_channel;
+        row.m_label = g.m_label;
+        row.m_config = g.m_config;
+        ui_remap_t r = ui_rm_of( raw, row, 0u );
+        r.m_selected = raw[ 0x1F0 - 0x60 ];
+        std::memcpy( &r.m_hover, raw.data( ) + ( 0x22C - 0x60 ), 4 );
+        float inverse[ 16 ];
+        std::memcpy( inverse, block.data( ) + 0x54, 64 );
+        ui_remap_runtime_t s;
+        s.m_axes.assign( 3, 0.0f );   // retail's array exists before the first opening
+        float axes[ 3 ] = { 0.0f, 0.0f, 0.0f };
+        std::uint32_t bits = 0;
+        std::vector< int > keys;
+        std::uint8_t automatic[ 2 ] = { 1, 1 };
+        std::string log;
+        const auto note = [ & ]( const std::string& t )
+        {
+            log += ( log.empty( ) ? "" : ";" ) + t;
+            ++logged;
+        };
+        ui_remap_hooks_t h;
+        h.m_set_focus = [ & ]
+        {
+            std::uint32_t hash = 0x811C9DC5u;
+            for ( const char* c = "OnUISetFocus"; *c; ++c )
+                hash = ( hash ^ static_cast< std::uint8_t >( *c ) ) * 0x01000193u;
+            char t[ 32 ];
+            std::snprintf( t, sizeof t, "broadcast 0x%08X", hash );
+            note( t );
+        };
+        h.m_nav = [ & ]( const char* plug, std::int32_t arg )
+        {
+            note( std::string( "find " ) + plug );
+            note( "nav " + std::to_string( arg ) );
+            note( "sound Global/UI_and_Menu/menu_browse" );
+        };
+        h.m_sound = [ & ] { note( std::string( "sound " ) + g.m_sfx ); };
+        h.m_open_box = [ & ]( bool can_auto )
+        {
+            note( std::string( "box " ) + g.m_label + "|Control_Mapping_MB_Body|" + ( can_auto ? "MessageBox_Auto" : "" ) + "|MessageBox_Cancel" );
+        };
+        h.m_channels = [ ] { return 3; };
+        h.m_axis = [ & ]( int i ) { return axes[ i ]; };
+        h.m_button_bits = [ & ] { return bits; };
+        h.m_key = [ & ]( int key )
+        {
+            for ( int d : keys )
+                if ( d == key )
+                    return true;
+            return false;
+        };
+        h.m_bind = [ & ]( int slot, std::int32_t config, const std::string& channel, int kind, int index )
+        {
+            note( "bind " + std::to_string( slot ) + " " + std::to_string( config ) + " " + channel + " " + std::to_string( kind ) + " " + std::to_string( index ) );
+        };
+        if ( g.m_vtable == 0x73D45Cu )
+            h.m_set_auto = [ & ]( std::uint8_t v )
+            {
+                if ( g.m_config == 0 || g.m_config == 1 )
+                    automatic[ g.m_config ] = v;
+            };
+        for ( int n = 0; n < g.m_steps; ++n )
+        {
+            const golden_rl_step_t& t = g_golden_rl_steps[ g.m_first + n ];
+            log.clear( );
+            float f[ 3 ];
+            std::memcpy( f, t.m_f, 12 );
+            switch ( t.m_op )
+            {
+            case 0: ui_remap_set_focus( s, h ); break;
+            case 1: ui_remap_tick( r, s, h ); break;
+            case 2: ui_remap_on_focus( s, t.m_i != 0 ); break;
+            case 3: ui_remap_event( r, s, t.m_text, t.m_i, h ); break;
+            case 4: ui_remap_decision( r, s, h ); break;
+            case 5:
+            {
+                std::memcpy( axes, f, 12 );
+                bits = t.m_bits;
+                keys.clear( );
+                for ( const char* c = t.m_keys; *c; )
+                {
+                    char* end = nullptr;
+                    keys.push_back( static_cast< int >( std::strtol( c, &end, 10 ) ) );
+                    c = *end ? end + 1 : end;
+                }
+                break;
+            }
+            case 6: ui_remap_touch_down( r, s, inverse, f ); break;
+            case 7: ui_remap_touch_point( s, inverse, f ); break;
+            case 8: ui_remap_touch_up( r, s ); break;
+            case 9: ui_remap_box_result( s, t.m_i, h ); break;
+            default: ui_remap_hide( r, s ); break;
+            }
+            ++steps;
+            char state[ 16 ];
+            std::snprintf( state, sizeof state, "%02x%02x%02x%02x%02x%02x", r.m_visible, r.m_selected, s.m_focus, s.m_pressed, s.m_down, s.m_released );
+            std::string axes_text;
+            if ( !s.m_axes.empty( ) )
+                for ( int a = 0; a < 3; ++a )
+                {
+                    char v[ 16 ];
+                    std::snprintf( v, sizeof v, "0x%08X", ui_lv_bits( s.m_axes[ static_cast< std::size_t >( a ) ] ) );
+                    axes_text += ( a ? ";" : "" ) + std::string( v );
+                }
+            const bool same = t.m_state == std::string( state ) && ui_lv_bits( s.m_point[ 0 ] ) == t.m_point[ 0 ] && ui_lv_bits( s.m_point[ 1 ] ) == t.m_point[ 1 ] && r.m_hover == t.m_hover && s.m_select == t.m_select &&
+                              ( s.m_box ? 1 : 0 ) == t.m_box && s.m_buttons == t.m_buttons && axes_text == t.m_axes && automatic[ 0 ] == t.m_auto[ 0 ] && automatic[ 1 ] == t.m_auto[ 1 ] && log == t.m_log;
+            if ( !same && ++failed <= 8 )
+                LOG_ERROR( "ui remap logic: row %d step %d (op %d): %s hover %d select %d box %d buttons 0x%08X [%s] {%s} (retail %s %d %d %d 0x%08X [%s] {%s})", static_cast< int >( k ), n, t.m_op, state, r.m_hover,
+                           s.m_select, s.m_box ? 1 : 0, s.m_buttons, axes_text.c_str( ), log.c_str( ), t.m_state, t.m_hover, t.m_select, t.m_box, t.m_buttons, t.m_axes, t.m_log );
+        }
+    }
+    if ( failed == 0 )
+        LOG_SUCCESS( "the remapping row's runtime matches retail's (0x4613A0, 0x4613F0, 0x4615A0, 0x4612E0, 0x461380, 0x461760, 0x4617F0, 0x461800, 0x4623D0, 0x4625C0, 0x4627F0, 0x461900) on %d rows: %d steps, %d hook calls",
+                     static_cast< int >( g_golden_rl_rows_count ), steps, logged );
+    else
+        LOG_ERROR( "the UI remapping logic FAILED %d checks against retail's", failed );
+    return failed == 0;
+}
+
 inline bool verify_ui_widgets_all( )
 {
     bool ok = true;
     ok = verify_ui_championship_draw( ) && ok;
     ok = verify_ui_remap_draw( ) && ok;
+    ok = verify_ui_remap_logic( ) && ok;
     ok = verify_ui_message_box_frame( ) && ok;
     ok = verify_ui_control_methods( ) && ok;
     ok = verify_ui_page_layout_tick( ) && ok;

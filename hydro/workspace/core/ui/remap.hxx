@@ -7,6 +7,7 @@
 #include <cstring>
 #include <functional>
 #include <string>
+#include <vector>
 
 // The control remapping row: VuInputRemappingEntity (vtable 0x73D4F4, ctor
 // 0x45FD30) and VuThrottleRemappingEntity (0x73D45C, ctor 0x462910: only slots
@@ -220,4 +221,232 @@ inline bool ui_remap_layout_draw( ui_gfx_sort_t& sort, const ui_font_draw_env_t&
         ui_rect_draw( sort, env, 0xFFFFFFFFu, rect, r.m_depth * ui_f32( 0x3BA3D70Au ) + ui_f32( 0x3F000000u ) );
     }
     return ui_remap_contents_draw( sort, env, db, r, in, one );
+}
+
+// ---- the row's runtime (batch 27): events, plugs, touch, the capture of a new binding ----
+
+// What the row writes besides its drawn fields.
+struct ui_remap_runtime_t
+{
+    std::uint8_t m_focus = 0;                 // +0x1F1
+    std::uint8_t m_pressed = 0;               // +0x220 a touch went down this tick
+    std::uint8_t m_down = 0;                  // +0x221
+    std::uint8_t m_released = 0;              // +0x222
+    float m_point[ 2 ] = { 0.0f, 0.0f };      // +0x224 / +0x228 the touch point
+    std::uint8_t m_select = 0;                // +0x230 InputSelect arrived
+    bool m_box = false;                       // +0x1F4 the message box is open
+    std::vector< float > m_axes;              // +0x1F8 the channels' values when the box opened (VuArray: size kept)
+    std::uint32_t m_buttons = 0;              // +0x204 the button bits seen so far
+};
+
+struct ui_remap_hooks_t
+{
+    // 0x505690 "OnUISetFocus" with the row's id (0x4612E0).
+    std::function< void( ) > m_set_focus;
+    // 0x462420 (the output plug's name, the event's first int): findPlug + execute, the browse sound when it has a connection.
+    std::function< void( const char* plug, std::int32_t arg ) > m_nav;
+    // The Sfx +0x1D4 played at the press (FMOD: 0x64C348 / 0x64C354).
+    std::function< void( ) > m_sound;
+    // 0x461940: the message box (heading = Label String ID, "Control_Mapping_MB_Body", "MessageBox_Cancel", with slot 15 true "MessageBox_Auto").
+    std::function< void( bool can_auto ) > m_open_box;
+    // The box's release (+4 - 1, +0xCC = 1).
+    std::function< void( ) > m_close_box;
+    // g 0x759040: its +8 channel count; pad 0's (slot 6) +0x10 values [ i ] and +0xC button bits.
+    std::function< int( ) > m_channels;
+    std::function< float( int ) > m_axis;
+    std::function< std::uint32_t( ) > m_button_bits;
+    // g 0x75906C +0xFF [ key ] down (0..0x50).
+    std::function< bool( int ) > m_key;
+    // 0x4627F0: the input manager's slot 15 (Button) / 13 (Axis+) / 14 (Axis-): (0, config, channel, kind, index).
+    std::function< void( int slot, std::int32_t config, const std::string& channel, int kind, int index ) > m_bind;
+    // Slot 17 vt+0x44 (byte): 0x4021A0 nothing / the throttle's 0x4629D0 (the setting of Config 0 / 1).
+    std::function< void( std::uint8_t ) > m_set_auto;
+};
+
+// Slot 12 0x4613A0 (OnUISetFocus): +0x1F1 = the event's id is this row's.
+inline void ui_remap_on_focus( ui_remap_runtime_t& s, bool mine ) { s.m_focus = mine ? 1u : 0u; }
+
+// The input plugs: SetFocus 0x4612E0 (the broadcast, then +0x1F1 = 1), Hide 0x461380.
+inline void ui_remap_set_focus( ui_remap_runtime_t& s, const ui_remap_hooks_t& h )
+{
+    if ( h.m_set_focus )
+        h.m_set_focus( );
+    s.m_focus = 1u;
+}
+
+inline void ui_remap_hide( ui_remap_t& r, ui_remap_runtime_t& s )
+{
+    r.m_visible = 0;
+    r.m_selected = 0;   // the word +0x1F0
+    s.m_focus = 0;
+}
+
+// The touch callbacks (this + 0x5C). Down 0x461760 (point*): Visible and not yet
+// down: +0x220 = +0x221 = 1, the point through VuUIImpl's inverse crop.
+inline void ui_remap_touch_point( ui_remap_runtime_t& s, const float inverse[ 16 ], const float point[ 2 ] )
+{
+    const float x = ( inverse[ 4 ] * point[ 1 ] + inverse[ 0 ] * point[ 0 ] ) + inverse[ 12 ];
+    const float y = ( inverse[ 1 ] * point[ 0 ] + inverse[ 5 ] * point[ 1 ] ) + inverse[ 13 ];
+    s.m_point[ 0 ] = x;
+    s.m_point[ 1 ] = y;
+}
+
+inline void ui_remap_touch_down( const ui_remap_t& r, ui_remap_runtime_t& s, const float inverse[ 16 ], const float point[ 2 ] )
+{
+    if ( !r.m_visible || s.m_down )
+        return;
+    s.m_pressed = 1;
+    s.m_down = 1;
+    ui_remap_touch_point( s, inverse, point );
+}
+
+// Up 0x4617F0: Visible -> +0x222 = 1. Move 0x461800: the device's touch 0 position, no test.
+inline void ui_remap_touch_up( const ui_remap_t& r, ui_remap_runtime_t& s )
+{
+    if ( r.m_visible )
+        s.m_released = 1;
+}
+
+// 0x462540: the baseline: the array sized to the channels, each value, +0x204 = -1.
+inline void ui_remap_baseline( ui_remap_runtime_t& s, const ui_remap_hooks_t& h )
+{
+    const int n = h.m_channels ? h.m_channels( ) : 0;
+    if ( static_cast< int >( s.m_axes.size( ) ) < n )
+        s.m_axes.resize( static_cast< std::size_t >( n ), 0.0f );
+    for ( int i = 0; i < n; ++i )
+        s.m_axes[ static_cast< std::size_t >( i ) ] = h.m_axis( i );
+    s.m_buttons = 0xFFFFFFFFu;
+}
+
+// Slot 13 0x4613F0 (OnUITick; its VuParams unread).
+inline void ui_remap_tick( ui_remap_t& r, ui_remap_runtime_t& s, const ui_remap_hooks_t& h )
+{
+    if ( !r.m_visible )
+        return;
+    bool press = false;
+    if ( s.m_focus != r.m_selected )
+        r.m_selected = s.m_focus;
+    const float one = ui_f32( 0x3F800000u );
+    const float ix = one / r.m_scale[ 0 ];
+    const float iy = one / r.m_scale[ 1 ];
+    const float x = ix * ( r.m_pos[ 0 ] + r.m_touch[ 0 ] );
+    const float y = iy * ( r.m_touch[ 1 ] + r.m_pos[ 1 ] );
+    const float w = ix * r.m_touch[ 2 ];
+    const float h2 = iy * r.m_touch[ 3 ];
+    const bool inside = s.m_point[ 0 ] >= x && w + x >= s.m_point[ 0 ] && s.m_point[ 1 ] >= y && h2 + y >= s.m_point[ 1 ];
+    if ( s.m_pressed && inside )
+        r.m_hover = 1;
+    if ( r.m_hover == 1 )
+    {
+        if ( s.m_released )
+        {
+            press = true;
+            r.m_hover = 0;
+        }
+        if ( !inside )
+            r.m_hover = 0;
+    }
+    if ( s.m_released )
+    {
+        s.m_down = 0;
+        s.m_released = 0;
+    }
+    const bool go = s.m_select != 0 || press;
+    s.m_pressed = 0;
+    s.m_select = 0;
+    if ( go )
+    {
+        if ( h.m_sound )
+            h.m_sound( );
+        if ( h.m_open_box )
+            h.m_open_box( h.m_set_auto != nullptr );
+        s.m_box = true;
+        ui_remap_baseline( s, h );
+    }
+}
+
+// Slot 14 0x4615A0 (OnUIEvent; the event's string and first int): only while
+// selected: InputUp / Down / Left / Right -> the plug Nav*; InputSelect -> +0x230.
+inline void ui_remap_event( const ui_remap_t& r, ui_remap_runtime_t& s, const std::string& text, std::int32_t arg, const ui_remap_hooks_t& h )
+{
+    if ( !r.m_selected )
+        return;
+    const char* plug = text == "InputUp" ? "NavUp" : text == "InputDown" ? "NavDown" : text == "InputLeft" ? "NavLeft" : text == "InputRight" ? "NavRight" : nullptr;
+    if ( plug )
+    {
+        if ( h.m_nav )
+            h.m_nav( plug, arg );
+    }
+    else if ( text == "InputSelect" )
+        s.m_select = 1;
+}
+
+// 0x4627F0 (kind, index): Type picks the manager's slot.
+inline void ui_remap_bind( const ui_remap_t& r, int kind, int index, const ui_remap_hooks_t& h )
+{
+    const int slot = r.m_type == "Button" ? 15 : r.m_type == "Axis+" ? 13 : r.m_type == "Axis-" ? 14 : -1;
+    if ( slot >= 0 && h.m_bind )
+        h.m_bind( slot, r.m_config, r.m_channel, kind, index );
+}
+
+// 0x4625C0: true = a new input was bound: an axis moved past +-0.5 (kinds 1 / 2); a
+// button bit new since +0x204 (kind 3, the HIGHEST such bit); else +0x204 = the bits
+// and the first key down (kind 4).
+inline bool ui_remap_capture( const ui_remap_t& r, ui_remap_runtime_t& s, const ui_remap_hooks_t& h )
+{
+    const int n = h.m_channels( );
+    for ( int i = 0; i < n; ++i )
+    {
+        const float d = h.m_axis( i ) - s.m_axes[ static_cast< std::size_t >( i ) ];
+        if ( d > ui_f32( 0x3F000000u ) )
+        {
+            ui_remap_bind( r, 1, i, h );
+            return true;
+        }
+        if ( ui_f32( 0xBF000000u ) > d )
+        {
+            ui_remap_bind( r, 2, i, h );
+            return true;
+        }
+    }
+    const std::uint32_t bits = h.m_button_bits( );
+    std::uint32_t fresh = ~s.m_buttons & bits;
+    if ( fresh )
+    {
+        int index = 0;
+        while ( fresh >>= 1 )
+            ++index;
+        ui_remap_bind( r, 3, index, h );
+        return true;
+    }
+    s.m_buttons = bits;
+    for ( int k = 0; k < 0x51; ++k )
+        if ( h.m_key( k ) )
+        {
+            ui_remap_bind( r, 4, k, h );
+            return true;
+        }
+    return false;
+}
+
+// 0x4623D0 ("Decision" tick; dt unread): with the box open and a capture: slot 17(0), the box released.
+inline void ui_remap_decision( const ui_remap_t& r, ui_remap_runtime_t& s, const ui_remap_hooks_t& h )
+{
+    if ( !s.m_box || !ui_remap_capture( r, s, h ) )
+        return;
+    if ( h.m_set_auto )
+        h.m_set_auto( 0 );
+    if ( h.m_close_box )
+        h.m_close_box( );
+    s.m_box = false;
+}
+
+// 0x461900 (the box's callback at +0x60; ret 4): result 1 (its +0xC8) -> slot 17(1); the box released.
+inline void ui_remap_box_result( ui_remap_runtime_t& s, std::int32_t result, const ui_remap_hooks_t& h )
+{
+    if ( result == 1 && h.m_set_auto )
+        h.m_set_auto( 1 );
+    if ( h.m_close_box )
+        h.m_close_box( );
+    s.m_box = false;
 }
