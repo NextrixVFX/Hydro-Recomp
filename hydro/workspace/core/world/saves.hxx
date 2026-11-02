@@ -39,7 +39,7 @@ inline void c_world::saves_start( )
     }
     m_saves_on = true;
     m_profile.load( );
-    m_cloud.hooks.corrupt_box = [ ] { LOG_WARNING( "saves: the game save is corrupt (SaveGame_Corrupt_Heading's box: the UI's, not shown)" ); };
+    m_cloud.hooks.corrupt_box = [ this ] { boxes_show( k_ui_save_corrupt_box[ 0 ], k_ui_save_corrupt_box[ 1 ], k_ui_save_corrupt_box[ 2 ] ); };   // 0x4AC57B
     m_cloud.hooks.broadcast = [ this ]( const char* name ) {
         if ( std::strcmp( name, "OnCloudSavePreSave" ) == 0 )                // 0x4B6A90
             m_unlock.save( json_member( m_cloud.data, "Unlock" ) );

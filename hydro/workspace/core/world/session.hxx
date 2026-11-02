@@ -206,6 +206,7 @@ struct race_world_t
     std::function< void( platform_input_t& ) > input_profile;
     std::uint32_t viewports = 1;
     std::int32_t control_method = 0;
+    std::function< msgbox_ref_t( const std::string&, const std::string&, const std::string& ) > message_box;    // g 0x758FD4 0x4B1430 (world/msgbox.hxx)
     std::int32_t display_w = 1280;
     std::int32_t display_h = 720;
 };

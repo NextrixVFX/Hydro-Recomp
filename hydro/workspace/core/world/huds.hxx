@@ -282,7 +282,7 @@ inline void c_world::race_broadcast_hash( std::uint32_t hash, const char* name, 
 // VuGame's Results enter 0x484110 / exit 0x484250 / tick 0x484280 / draw 0x4842F0 on the UI agent's VuCommonScreen. The
 // project load is 0x4B4360 through the UI's world (ui_hud_load, as the HUDs). A screen's broadcasts reach the race's bus
 // ("OnUserNext" 0x483170) and the live HUDs; no HUD is its origin (-1). m_frame stays null: the results leaf 0x46A500 has
-// no render pass yet. g 0x758FD4 +0x34 (the game's paused word): nothing writes it, so false.
+// no render pass yet. g 0x758FD4 +0x34: the box up (world/msgbox.hxx).
 inline void c_world::bind_game_screens( )
 {
     ui_game_screens_t& g = m_race.screens;
@@ -327,7 +327,7 @@ inline void c_world::bind_game_screens( )
     m_race.rules.screen_hooks.award.award_open = [ this ]( const char* project, std::int32_t tier, const std::string& boat_class, std::int32_t value, const std::vector< std::string >& names ) {
         return m_race.screens.award_open( project, tier, boat_class, value, names );
     };
-    m_race.rules.screen_hooks.paused = [ ] { return false; };
+    m_race.rules.screen_hooks.paused = [ this ] { return m_boxes.drawing( ); };
     pause_bind( );
 #if HYDRO_UI_PASS
     g.m_frame = [ this ]( const entity_t& root, c_ui_binding& binding ) {
@@ -340,7 +340,7 @@ inline void c_world::bind_game_screens( )
 }
 
 // The pause menu: ui/paused.hxx's object over the race. Its project is a screen as Results' (g.m_load, a c_ui_binding); its broadcasts reach the bus, where
-// 0x4BAE80's event map stands. Hooks: FMOD's "game" category (no audio device), the analytics (a platform service), the touch device (none), g 0x758FD4 +0x34 (nothing sets it).
+// 0x4BAE80's event map stands. Hooks: FMOD's "game" category (no audio device), the analytics (a platform service), the touch device (none).
 inline void c_world::pause_bind( )
 {
     ui_pause_hooks_t h;
@@ -353,6 +353,7 @@ inline void c_world::pause_bind( )
     h.m_delta = [ this ] { return m_race.ticks.dt; };
     h.m_input = [ this ]( const char* name ) { return m_race.input && m_race.input->manager.pressed( 0, name ); };
     h.m_touches = [ ] { return 0; };
+    h.m_popup = [ this ] { return m_boxes.drawing( ); };
     h.m_input_type = [ this ] { return m_race.world.control_method; };
     h.m_open = [ this ]( const std::string& name ) {
         ui_game_screens_t& g = m_race.screens;
@@ -488,6 +489,7 @@ inline void c_world::ui_frame( )
         return;
     m_ui_pass->begin( m_race.world.display_w, m_race.world.display_h );
     m_modes.draw( );
+    boxes_draw( );
     m_ui_pass->end( );
 #endif
 }

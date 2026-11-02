@@ -11,6 +11,7 @@
 #include <workspace/core/trigger/set.hxx>
 #include <workspace/core/assets/reader.hxx>
 #include <workspace/core/assets/tree.hxx>
+#include <workspace/core/game/boxes.hxx>
 #include <workspace/core/game/input.hxx>
 #include <workspace/core/game/identity.hxx>
 #include <workspace/core/world/control.hxx>
@@ -629,9 +630,30 @@ private:
     {
         std::map< const entity_t*, sound_event_t > sounds;     // VuAudioEventEntity +0x78
         std::map< const entity_t*, logic_entity_t > logic;
+        std::map< const entity_t*, msgbox_entity_t > boxes;    // VuMessageBoxEntity (world/msgbox.hxx)
     };
     screen_state_t m_game_screen_state;                 // the Results and Award projects
     c_ui_binding* m_logic_binding = nullptr;            // the screen a logic handler runs on
+    // The message boxes, world/msgbox.hxx: g 0x758FD4 and its project.
+    c_msgbox_manager m_boxes;
+    msgbox_screen_t m_box_screen;
+    ui_message_box_t m_box_view;
+    std::unique_ptr< entity_t > m_box_root;
+    std::unique_ptr< c_ui_binding > m_box_binding;
+    screen_state_t m_box_state;
+    std::uint32_t m_box_image = 0u;
+    bool m_boxes_tried = false;
+    bool m_boxes_ready = false;
+    platform_input_t* boxes_input( );
+    bool m_pad_box = false;                             // g 0x758FC0 +0x1C
+    void boxes_pad( bool connected, int pad );
+    void boxes_start( );
+    void boxes_tick( float dt );
+    void boxes_draw( );
+    msgbox_ref_t boxes_show( const std::string& heading, const std::string& body, const std::string& text_a, const std::string& text_b = std::string( ) );
+    void boxes_release( screen_state_t& state );
+    bool boxes_entity( screen_state_t& state, c_ui_binding& binding, entity_t& e, const char* plug );
+    std::unique_ptr< entity_t > menu_load_root( const std::string& name );
     struct menu_project_t
     {
         std::unique_ptr< entity_t > root;
@@ -1074,6 +1096,7 @@ public:
     {
         if ( !m_opened )
             load( );
+        boxes_start( );
         saves_start( );
         if ( !m_sorted )
         {
@@ -1625,6 +1648,7 @@ public:
     }
     void scene_frame( float dt )
     {
+        boxes_tick( dt );
         if ( m_title )   // the title sequence runs no scene: the mode manager's tick alone
         {
             m_modes.tick( dt );
@@ -1651,6 +1675,7 @@ public:
         };
         m_race.world.fire = [ this ]( const entity_t& owner, const char* plug ) { fire( entity_path( owner ), plug ); };
         m_race.world.sound = &m_sound;
+        m_race.world.message_box = [ this ]( const std::string& heading, const std::string& body, const std::string& text_a ) { return boxes_show( heading, body, text_a ); };
         m_race.world.vo = m_vo_ready ? &m_vo : nullptr;
         m_race.world.vo_hooks = m_vo_ready ? &m_vo_hooks : nullptr;
         m_race.world.prop_moved = [ this ]( const entity_t& owner ) { prop_moved( owner ); };
@@ -2301,6 +2326,7 @@ private:
 #include <workspace/core/world/graph.hxx>
 #include <workspace/core/world/menu.hxx>
 #include <workspace/core/world/external.hxx>
+#include <workspace/core/world/msgbox.hxx>
 #include <workspace/core/world/saves.hxx>
 #include <workspace/core/world/motion.hxx>
 #include <workspace/core/world/animate.hxx>

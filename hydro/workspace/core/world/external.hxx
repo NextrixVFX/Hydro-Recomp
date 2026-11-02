@@ -187,6 +187,8 @@ inline ui_ret_t c_world::screen_external( screen_state_t& state, c_ui_binding& b
         ui_play( ui_json_text( member( member( ui_db_entry( &m_boat_db, boat ), "Audio" ), "Announcer" ) ).c_str( ) );
         return out;
     }
+    if ( boxes_entity( state, binding, e, plug ) )
+        return out;
     if ( logic_entity_t* l = screen_logic( state, e ) )
     {
         screen_logic_context_t ctx{ &binding, &e, { } };
