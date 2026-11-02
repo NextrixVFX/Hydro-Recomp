@@ -46,6 +46,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <map>
+#include <deque>
 #include <set>
 #include <string>
 #include <utility>
@@ -980,6 +981,8 @@ public:
             if ( item.path == path )
             {
                 transform_draw_matrix( *t, item.world );
+                const auto box = m_scene_aabbs.find( item.asset );
+                scene_component_aabb( item.aabb, box != m_scene_aabbs.end( ) ? box->second.data( ) : scene_zero_aabb( ), item.world, false );
                 if ( !item.playing && item.rigid )
                 {
                     const std::vector< cached_part_t >& parts = model_for( item.asset );
@@ -1449,6 +1452,41 @@ public:
                     item.retail->draw( sort, p );
                 }
             retail_boats( sort, p );
+            for ( animated_t& item : m_animated )
+            {
+                const animated_draw_t s = animated_model_select( item.draw, item.aabb, item.aabb + 4, p.m_eye, p.m_skip_models != 0u );
+                if ( !s.drawn || !item.retail || ( p.m_reflecting & item.draw.reflect ) != p.m_reflecting )
+                    continue;
+                item.retail->m_colour = s.color;
+                item.retail->m_byte = s.dynamic_lighting;
+                item.retail->m_model_word = static_cast< std::uint32_t >( item.palette.size( ) / 16 );
+                item.retail->m_bones = m_retail->palette_id( item.palette.data( ) );
+                item.retail->draw( sort, item.world, p );
+            }
+            if ( !p.m_reflecting )
+                for ( retail_geom_t& g : m_retail_geoms )
+                {
+                    g.model->m_colour = g.colour;
+                    g.model->draw( sort, g.matrix, p );
+                }
+        };
+        m_pfx.m_geom_sink = [ this ]( const std::string& asset, const float* matrix, std::uint32_t colour ) {
+            gfx_static_model_t*& model = m_retail_geom_models[ asset ];
+            if ( model == nullptr )
+            {
+                const gfx_scene_view_t* v = m_retail->model( asset );
+                if ( v == nullptr )
+                    return false;
+                m_retail_geom_store.emplace_back( );
+                model = &m_retail_geom_store.back( );
+                gfx_scene_view_attach( *model, *v );
+            }
+            retail_geom_t g;
+            g.model = model;
+            std::memcpy( g.matrix, matrix, 64 );
+            g.colour = colour;
+            m_retail_geoms.push_back( g );
+            return true;
         };
         c_engine::stage_pass( &gfx_retail_t::engine_pass, m_retail.get( ) );
     }
@@ -1635,6 +1673,7 @@ public:
         if ( c_engine::option( "no-pfx" ) == nullptr )
         {
             m_pfx.frame( dt, m_eye );
+            m_retail_geoms.clear( );
             race_session_pfx_draw( m_race, m_race_pfx_draw );
             m_pfx.draw( m_eye, m_target, [ this ]( const std::string& path ) { return texture_for( path ); },
                 [ this ]( const std::string& path ) -> const std::vector< pfx_part_t >& { return pfx_parts( path ); }, &m_race_pfx_draw );
@@ -1778,6 +1817,16 @@ private:
     bool m_stage_attached = false, m_stage_bound = false;
     std::unique_ptr< gfx_retail_t > m_retail;
     std::vector< std::unique_ptr< gfx_retail_boat_t > > m_retail_boats;
+    // VuPfxGeomPattern's particles this frame: 0x5903A0's tail, the model's draw 0x520130 at the particle's matrix and colour.
+    struct retail_geom_t
+    {
+        gfx_static_model_t* model = nullptr;
+        float matrix[ 16 ]{};
+        std::uint32_t colour = 0;
+    };
+    std::vector< retail_geom_t > m_retail_geoms;
+    std::map< std::string, gfx_static_model_t* > m_retail_geom_models;
+    std::deque< gfx_static_model_t > m_retail_geom_store;
     std::uint32_t m_gfx_record[ 22 ] = { };   // the settings entity applied at load, its +0x70 record (0x41B400's order)
     // Loaded VuTimedEventAssets, keyed by asset name. A control points into
     // this, so entries are only ever added.
@@ -1810,6 +1859,10 @@ private:
         std::string asset;
         std::string path;
         std::string clip;
+        model_draw_t draw{};                                // the component's properties, 0x61DB60's choice
+        float aabb[ 8 ]{};                                  // its world aabb
+        std::unique_ptr< gfx_animated_model_t > retail;     // the instance over stage.hxx's model
+        std::vector< float > palette;                       // the frame's pose, gMatrixArray; identity until it plays
         std::string trigger;
         // "VuTimedEventAsset/<name>", empty when the driver names none.
         std::string timed;

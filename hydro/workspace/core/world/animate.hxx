@@ -48,6 +48,10 @@ inline void c_world::skin_props( float dt )
             frame = ( static_cast< int >( static_cast< float >( frames ) * item.control.time
                 / item.control.loop - 0.5f ) + 1 ) % frames;
 
+        // The pose for gMatrixArray: 0x533C90 takes the palette; the draw walks the model itself.
+        build_palette( item.palette, bones->second, clip->second, frame, nullptr, 0, 0.0f );
+        continue;
+
         // Rigid: fold the single bone's palette matrix into each part's
         // placement. The streamed path computes
         // (world * node) * (palette * vertex); this computes
@@ -458,29 +462,25 @@ inline void c_world::bind_animations( )
         // result is mathematically identical because the final transform
         // is just regrouped from (world*node)*(palette*v) to
         // (world*node*palette)*v.
-        if ( m_rigid_props && usable && bones->second.size( ) == 1 )
-        {
-            item.rigid = true;
-            ++rigid;
-            place_model( item.asset, item.world, 0, -1, item.tint, nullptr, -1, &item.placements );
-            continue;
-        }
         if ( usable )
         {
-            item.geometry = c_engine::geometry(
-                mesh->second.bind.data( ), static_cast< int >( mesh->second.bind.size( ) ),
-                mesh->second.indices.data( ), static_cast< int >( mesh->second.indices.size( ) ) );
+            item.rigid = bones->second.size( ) == 1 && m_rigid_props;
+            ++( item.rigid ? rigid : clones );
+            item.geometry = 0;   // skin_props' test: a pose is wanted
         }
-        if ( item.geometry >= 0 )
-        {
-            ++clones;
-            streamed += static_cast< int >( mesh->second.bind.size( ) );
-            place_model( item.asset, item.world, 0, -1, item.tint, nullptr, item.geometry );
-        }
-        else
-        {
-            place_model( item.asset, item.world, 0, -1, item.tint );
-        }
+        // Retail's instance (stage.hxx): the palette identity until it plays (0x532360).
+        const std::size_t count = bones != m_skeletons.end( ) ? bones->second.size( ) : 0u;
+        item.palette.assign( ( std::max )( count, std::size_t{ 1 } ) * 16, 0.0f );
+        for ( std::size_t b = 0; b < item.palette.size( ) / 16; ++b )
+            for ( std::size_t k = 0; k < 4; ++k )
+                item.palette[ b * 16 + k * 5 ] = 1.0f;
+        model_for( item.asset );
+        if ( m_retail )
+            if ( const gfx_scene_view_t* v = m_retail->model( item.asset ) )
+            {
+                item.retail = std::make_unique< gfx_animated_model_t >( );
+                gfx_scene_view_attach( *item.retail, *v );
+            }
     }
     LOG_INFO( "animated props: %d streaming %d vertices per frame, %d rigid by placement matrix (0 vertices)",
         clones, streamed, rigid );

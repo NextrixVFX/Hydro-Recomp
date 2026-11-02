@@ -384,6 +384,11 @@ inline void c_world::load_entity_tree( const char* asset, const value_t& project
             std::memcpy( item.world, matrix, sizeof( item.world ) );
             std::memcpy( item.tint, tint, sizeof( item.tint ) );
             item.distance = m.draw_distance;
+            item.draw = m;
+            {
+                const auto box = m_scene_aabbs.find( m.model_asset );
+                scene_component_aabb( item.aabb, box != m_scene_aabbs.end( ) ? box->second.data( ) : scene_zero_aabb( ), matrix, false );
+            }
             m_animated.push_back( std::move( item ) );
         }
         ++entities;
