@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstring>
 #include <string>
+#include <new>
 #include <vector>
 #include <xmmintrin.h>
 
@@ -275,11 +276,16 @@ inline bool skel_animation_read( scene_reader_t& r, skel_animation_t& a )
     a = skel_animation_t{ };
     const std::uint32_t bones = scene_u32( r );
     const std::uint32_t frames = scene_u32( r );
-    if ( r.bad || bones > 0x10000u || frames > 0x100000u )   // OURS
+    if ( r.bad )
         return false;
     a.bones = static_cast< int >( bones );
     a.frames = static_cast< int >( frames );
-    a.data.assign( static_cast< std::size_t >( bones ) * frames, skel_xform_t{ } );
+    // new[ ] of 0x30 * ( bones * frames ): the product wraps at 32 bits, a byte size past 32 bits asks for -1 (seto / neg / or) and
+    // operator new throws. Retail has no other limit.
+    const std::uint32_t count = bones * frames;
+    if ( static_cast< std::uint64_t >( count ) * 48u > 0xFFFFFFFFu )
+        throw std::bad_alloc( );
+    a.data.assign( count, skel_xform_t{ } );
     if ( !a.data.empty( ) )
         scene_take( r, a.data.data( ), 48u * a.data.size( ) );
     scene_take( r, a.aabb, 32 );

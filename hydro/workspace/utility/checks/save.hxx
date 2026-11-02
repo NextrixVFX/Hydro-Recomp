@@ -6,6 +6,7 @@
 #include <workspace/core/save/profile.hxx>
 #include <workspace/core/save/seam.hxx>
 #include <workspace/core/save/writer.hxx>
+#include <workspace/core/world/ghost.hxx>
 
 #include <chrono>
 #include <filesystem>
@@ -270,9 +271,9 @@ inline bool verify_save_input( )
     return bad == 0;
 }
 
-// ghost.hxx against retail (case save_ghost): the blob write 0x4AFB90 and read 0x4AFCE0, base64 0x558300 / 0x558440, the tick
-// 0x4AF9C0 + sample 0x4AFA30 on a fake boat, the load callback 0x485680. Then the round trip through the real seam: the
-// recorded ghost stored, loaded back by ghost_load_all, bytes equal to retail's blob.
+// save/ghost.hxx against retail (case save_ghost): base64 0x558300 / 0x558440, the load callback 0x485680. Then the round trip
+// through the real seam: world/ghost.hxx's blob of retail's record (its ghost_write 0x4AFB90 / ghost_read 0x4AFCE0 / ghost_tick
+// 0x4AF9C0 compared with this case's own retail vectors too) stored, loaded back by ghost_load_all, bytes equal to retail's.
 inline bool verify_save_ghost( )
 {
     save_words_t c{ g_golden_save_ghost_words };
@@ -282,24 +283,20 @@ inline bool verify_save_ghost( )
             LOG_ERROR( "save_ghost %s vector %u differs", what, v );
     };
     const auto bytes_of = []( const std::string& s ) { return std::vector< std::uint8_t >( s.begin( ), s.end( ) ); };
-    const auto samples_of = []( const std::string& s ) {
-        std::vector< ghost_sample_t > out( s.size( ) / 24 );
-        if ( !out.empty( ) )
-            std::memcpy( out.data( ), s.data( ), s.size( ) );
-        return out;
-    };
-    const auto sample_text = []( const std::vector< ghost_sample_t >& s ) {
-        return std::string( reinterpret_cast< const char* >( s.data( ) ), s.size( ) * 24 );
+    const auto sample_text = []( const ghost_data_t& d ) {
+        return std::string( reinterpret_cast< const char* >( d.frames.data( ) ), static_cast< std::size_t >( d.count ) * 24 );
     };
     const unsigned nw = c.next( );
     save_check_dir_t dir;
     for ( unsigned v = 0; v < nw; ++v )
     {
-        ghost_record_t record;
+        ghost_data_t record;
         record.boat = c.str( );
         record.skin = c.str( );
         record.driver = c.str( );
-        record.samples = samples_of( c.str( ) );
+        const std::string frames = c.str( );
+        record.count = static_cast< std::int32_t >( frames.size( ) / 24 );
+        record.frames.assign( frames.begin( ), frames.end( ) );
         const std::string want = c.str( );
         std::vector< std::uint8_t > blob;
         ghost_write( record, blob );
@@ -307,7 +304,7 @@ inline bool verify_save_ghost( )
             fail( "write", v );
         // The round trip: store, load through the seam, the blob reaches add_ghost unchanged.
         dir.reset( );
-        if ( !ghost_store_best( record, 0, "Hydroelectric" ) )
+        if ( !ghost_store_best( blob, 0, "Hydroelectric" ) )
             fail( "store", v );
         ghost_loads_t loads;
         loads.entries.resize( 1 );
@@ -339,13 +336,14 @@ inline bool verify_save_ghost( )
         const std::string blob = c.str( );
         const bool ret = c.next( ) != 0;
         const std::string boat = c.str( ), skin = c.str( ), driver = c.str( ), samples = c.str( );
-        ghost_record_t record;
+        ghost_data_t record;
         record.boat = "old boat";
         record.skin = "old skin";
         record.driver = "old driver";
-        record.samples.resize( 2 );
-        const bool got = ghost_read( record, bytes_of( blob ) );
-        if ( got != ret || record.boat != boat || record.skin != skin || record.driver != driver || sample_text( record.samples ) != samples )
+        ghost_resize( record, 2 );
+        const std::vector< std::uint8_t > bytes = bytes_of( blob );
+        const bool got = ghost_read( record, bytes.data( ), bytes.size( ) );
+        if ( got != ret || record.boat != boat || record.skin != skin || record.driver != driver || sample_text( record ) != samples )
             fail( "read", v );
     }
     const unsigned nb = c.next( );
@@ -370,34 +368,45 @@ inline bool verify_save_ghost( )
     int ticks = 0;
     for ( unsigned v = 0; v < nt; ++v )
     {
-        c_ghost_recorder recorder;
+        ghost_manager_t recorder;
         const auto word = [ & ]( ) {
             const unsigned u = c.next( );
             float f;
             std::memcpy( &f, &u, 4 );
             return f;
         };
-        recorder.elapsed = word( );
+        recorder.clock = word( );
         const unsigned count = c.next( );
         for ( unsigned k = 0; k < count; ++k, ++ticks )
         {
             const float dt = word( );
-            ghost_source_t boat;
-            for ( float& x : boat.position )
-                x = word( );
-            for ( float& x : boat.rotation )
-                x = word( );
-            boat.boost = word( );
-            boat.flag_2 = c.next( ) != 0;
-            boat.flag_8 = c.next( ) != 0;
-            boat.flag_16 = c.next( ) != 0;
-            boat.drive = word( );
+            std::uint8_t boat[ 0x470 ]{}, body[ 0xB0 ]{}, debris[ 0x98 ]{};
+            for ( int lane = 0; lane < 3; ++lane )
+            {
+                const float x = word( );
+                std::memcpy( body + 0x80 + 4 * lane, &x, 4 );
+            }
+            for ( int lane = 0; lane < 3; ++lane )
+            {
+                const float x = word( );
+                std::memcpy( body + 0xA0 + 4 * lane, &x, 4 );
+            }
+            const float boost = word( );
+            std::memcpy( boat + 0x310, &boost, 4 );
+            boat[ 0x32C ] = static_cast< std::uint8_t >( c.next( ) );
+            boat[ 0x464 ] = static_cast< std::uint8_t >( c.next( ) );
+            debris[ 0x94 ] = static_cast< std::uint8_t >( c.next( ) );
+            ghost_boat_t source;
+            source.boat = boat;
+            source.transform = body;
+            source.debris = debris;
+            source.throttle = word( );
             const unsigned elapsed = c.next( ), clock = c.next( ), samples = c.next( );
-            recorder.tick( dt, boat );
-            if ( std::memcmp( &recorder.elapsed, &elapsed, 4 ) != 0 || std::memcmp( &recorder.clock, &clock, 4 ) != 0 || recorder.record.samples.size( ) != samples )
+            ghost_tick( recorder, source, dt );
+            if ( std::memcmp( &recorder.clock, &elapsed, 4 ) != 0 || std::memcmp( &recorder.accumulator, &clock, 4 ) != 0 || static_cast< unsigned >( recorder.record.count ) != samples )
                 fail( "tick", v );
         }
-        if ( sample_text( recorder.record.samples ) != c.str( ) )
+        if ( sample_text( recorder.record ) != c.str( ) )
             fail( "samples", v );
     }
     const unsigned nl = c.next( );
@@ -438,7 +447,7 @@ inline bool verify_save_ghost( )
         }
     }
     if ( bad == 0 )
-        LOG_SUCCESS( "ghost store matches retail 0x4AFB90 0x4AFCE0 0x558300 0x558440 0x4AF9C0 0x4AFA30 0x485680, round trip through the seam: %u blobs, %u reads, %u texts, %d ticks, %u load scripts", nw, nr, nb, ticks, nl );
+        LOG_SUCCESS( "ghost store matches retail 0x558300 0x558440 0x485680 (and world/ghost.hxx 0x4AFB90 0x4AFCE0 0x4AF9C0), round trip through the seam: %u blobs, %u reads, %u texts, %d ticks, %u load scripts", nw, nr, nb, ticks, nl );
     else
         LOG_ERROR( "save_ghost FAILED %d", bad );
     return bad == 0;

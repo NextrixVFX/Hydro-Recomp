@@ -8,84 +8,11 @@
 #include <functional>
 #include <string>
 #include <vector>
-#include <emmintrin.h>
 
-// The ghost store, local (the user's Saves decision): VuGhostManager's recording (g 0x758FC8, vtable 0x745668), the ghost
-// blob, the text form it travels in, and VuMetroTitleStorageManager's GET / PUT (slots 6 / 7 0x4A8850 / 0x4A8C40, HTTP to
-// Xbox title storage in retail) answered from local files through the one seam.
-//
-// One sample, 24 bytes: +0 the time, +4 the position, +0x10 the rotation's three int16 (radians x 10424.648), +0x16 flags.
-struct ghost_sample_t
-{
-    float time = 0.0f;
-    float position[ 3 ]{};
-    std::int16_t rotation[ 3 ]{};
-    std::uint16_t flags = 0;
-};
-static_assert( sizeof( ghost_sample_t ) == 24 );
-
-// The record (0x5C bytes, ctor 0x4AF1C0): +0 index; +4 / +0x1C / +0x34 boat, skin, driver; +0x4C the samples. +0x58 the
-// VuBoatEntity retail makes in 0x4AF640: the caller's.
-struct ghost_record_t
-{
-    std::string boat;
-    std::string skin;
-    std::string driver;
-    std::vector< ghost_sample_t > samples;
-};
-
-// 0x4AFB90 (this = VuGhostManager + 4): 16 header bytes, the three texts each with its NUL, the sample count, the samples;
-// then the header over the rest: 'BRUV' 0x56555242, version 2, the rest's size, its FNV-1a.
-inline void ghost_write( const ghost_record_t& record, std::vector< std::uint8_t >& blob )
-{
-    blob.assign( 16, 0 );
-    for ( const std::string* text : { &record.boat, &record.skin, &record.driver } )
-        blob.insert( blob.end( ), text->c_str( ), text->c_str( ) + text->size( ) + 1 );
-    const std::uint32_t count = static_cast< std::uint32_t >( record.samples.size( ) );
-    const auto* at = reinterpret_cast< const std::uint8_t* >( &count );
-    blob.insert( blob.end( ), at, at + 4 );
-    at = reinterpret_cast< const std::uint8_t* >( record.samples.data( ) );
-    blob.insert( blob.end( ), at, at + 24 * static_cast< std::size_t >( count ) );
-    const std::uint32_t size = static_cast< std::uint32_t >( blob.size( ) ) - 16;
-    const std::uint32_t head[ 4 ] = { 0x56555242u, 2, size, save_hash( blob.data( ) + 16, size ) };
-    std::memcpy( blob.data( ), head, 16 );
-}
-
-// 0x4AFCE0: the boat's text and the samples go first (the skin and the driver stay until a good header replaces them); a
-// good header replaces all of it. The answer: at least one sample. Retail reads past the end of a blob whose hash passes
-// but whose texts or count overrun (strlen, memcpy_s of 24 * count): no defined result, read as a failed blob here.
-inline bool ghost_read( ghost_record_t& record, const std::vector< std::uint8_t >& blob )
-{
-    record.boat.clear( );
-    record.samples.clear( );
-    if ( blob.size( ) < 16 )
-        return false;
-    std::uint32_t head[ 4 ];
-    std::memcpy( head, blob.data( ), 16 );
-    const std::uint32_t size = static_cast< std::uint32_t >( blob.size( ) ) - 16;
-    if ( head[ 0 ] != 0x56555242u || head[ 1 ] != 2 || head[ 2 ] != size || head[ 3 ] != save_hash( blob.data( ) + 16, size ) )
-        return false;
-    std::size_t at = 16;
-    const auto text = [ & ]( std::string& out ) {
-        const void* end = at < blob.size( ) ? std::memchr( blob.data( ) + at, 0, blob.size( ) - at ) : nullptr;
-        if ( end == nullptr )
-            return false;
-        const std::size_t length = static_cast< const std::uint8_t* >( end ) - ( blob.data( ) + at );
-        out.assign( reinterpret_cast< const char* >( blob.data( ) ) + at, length );
-        at += length + 1;
-        return true;
-    };
-    if ( !text( record.boat ) || !text( record.skin ) || !text( record.driver ) || blob.size( ) < at + 4 )
-        return false;
-    std::uint32_t count = 0;
-    std::memcpy( &count, blob.data( ) + at, 4 );
-    at += 4;
-    if ( ( blob.size( ) - at ) / 24 < count )
-        return false;
-    record.samples.resize( count );
-    std::memcpy( record.samples.data( ), blob.data( ) + at, 24 * static_cast< std::size_t >( count ) );
-    return count > 0;
-}
+// The ghost store, local (the user's Saves decision): the text form a ghost blob travels in, VuMetroTitleStorageManager's GET /
+// PUT (slots 6 / 7 0x4A8850 / 0x4A8C40, HTTP to Xbox title storage in retail) answered from local files through the one seam,
+// and VuGhostGame's load callback. The blob itself and the recorder are hydro's world/ghost.hxx (world batch 31): ghost_write
+// 0x4AFB90, ghost_read 0x4AFCE0, ghost_tick 0x4AF9C0.
 
 // 0x558300: base64, table 0x6D2D78; 4 * ( ( size + 2 ) / 3 ) characters, '=' padded.
 inline std::string save_base64( const std::uint8_t* bytes, std::uint32_t size )
@@ -172,82 +99,6 @@ inline bool save_unbase64( const std::string& text, std::vector< std::uint8_t >&
     out.clear( );
     return false;
 }
-
-// What 0x4AFA30 reads of the boat each sample. position = body +0x80, rotation = body +0xA0; boost = boat +0x310;
-// flag_2 = boat +0x32C; drive = boat[ +0x220 ] slot 25 ( +0x64 ); flag_8 = boat +0x464; flag_16 = boat[ +0x238 ] +0x94.
-struct ghost_source_t
-{
-    float position[ 3 ]{};
-    float rotation[ 3 ]{};
-    float boost = 0.0f;
-    bool flag_2 = false;
-    float drive = 0.0f;
-    bool flag_8 = false;
-    bool flag_16 = false;
-};
-
-// VuGhostManager's recording (+4 the record, +0x5C the elapsed time, +0x60 the sample clock).
-class c_ghost_recorder
-{
-public:
-    ghost_record_t record;
-    float elapsed = 0.0f;
-    float clock = 0.0f;
-
-    // 0x4AF520's part here: the names (boat +0x8C, boat +0xA4, the driver), 2048 samples reserved, both clocks zero. The tick
-    // registration ("Final") is the caller's.
-    void begin( const std::string& boat, const std::string& skin, const std::string& driver )
-    {
-        record.boat = boat;
-        record.skin = skin;
-        record.driver = driver;
-        record.samples.reserve( 2048 );
-        elapsed = 0.0f;
-        clock = 0.0f;
-    }
-
-    // 0x4AFA30: one sample more. The rotation words: fistp (round to nearest) of the product, low 16 bits.
-    void sample( const ghost_source_t& boat )
-    {
-        ghost_sample_t s;
-        s.flags = boat.boost > 0.0f ? 1 : 0;
-        if ( boat.flag_2 )
-            s.flags |= 2;
-        if ( boat.drive > 0.25f )
-            s.flags |= 4;
-        if ( boat.flag_8 )
-            s.flags |= 8;
-        if ( boat.flag_16 )
-            s.flags |= 0x10;
-        s.time = elapsed;
-        std::memcpy( s.position, boat.position, sizeof( s.position ) );
-        for ( int k = 0; k < 3; ++k )
-            s.rotation[ k ] = static_cast< std::int16_t >( _mm_cvtss_si32( _mm_set_ss( boat.rotation[ k ] * 10424.6484f ) ) );
-        record.samples.push_back( s );
-    }
-
-    // 0x4AF9C0 ( dt ): up to 300 s of 15 Hz; the clock keeps the remainder, by repeated subtraction.
-    void tick( float dt, const ghost_source_t& boat )
-    {
-        if ( !( 300.0f > elapsed ) )
-            return;
-        elapsed = elapsed + dt;
-        clock = clock + dt;
-        const float step = 0.06666667f;
-        if ( clock >= step )
-        {
-            sample( boat );
-            float rest = clock;
-            if ( rest >= step )
-            {
-                do
-                    rest = rest - step;
-                while ( rest >= step );
-                clock = rest;
-            }
-        }
-    }
-};
 
 // The title storage's answer to a GET (0x4A9140): 0 the body (HTTP 200), 1 no request / signed out, 2 another status. The
 // local store: a file there 0, none 2 (a player with no ghost yet is retail's 404).
@@ -363,10 +214,8 @@ inline void ghost_load_all( ghost_loads_t& loads, const std::string& key )
     }
 }
 
-// 0x486EC0's PUT (post-game, a new best time): the record's blob as text, slot 7 on "ghost/<key>".
-inline bool ghost_store_best( const ghost_record_t& record, std::uint64_t xuid, const std::string& key )
+// 0x486EC0's PUT (post-game, a new best time): `blob` = ghost_write of the record, as text, slot 7 on "ghost/<key>".
+inline bool ghost_store_best( const std::vector< std::uint8_t >& blob, std::uint64_t xuid, const std::string& key )
 {
-    std::vector< std::uint8_t > blob;
-    ghost_write( record, blob );
     return title_store( xuid, "ghost/" + key, save_base64( blob.data( ), static_cast< std::uint32_t >( blob.size( ) ) ) );
 }
