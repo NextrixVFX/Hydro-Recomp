@@ -655,6 +655,8 @@ private:
     logic_services_t m_logic_services;
     value_t m_profile_temp;                             // g 0x759084 +0x18
     value_t m_option_db;                                // gameutil +0x34
+    value_t m_page_db;                                  // VuDBAsset/PageLayoutDB
+    std::string m_logic_sku;                            // m_logic_game.sku: the pack's
     float m_menu_dt = 0.0f;                             // the tick manager's delta the screen tick sees
     ui_difficulty_env_t m_difficulty_env;
     mode_manager_t m_modes;

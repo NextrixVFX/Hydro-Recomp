@@ -98,6 +98,21 @@ inline ui_bind_hooks_t c_world::menu_hooks( int id )
         return screen_external( project.state, *project.binding, e, plug, p );
     };
     hooks.m_input = [ this ]( int pad, const char* name ) { return m_menu_input && m_menu_input->manager.pressed( pad, name ); };
+    // A PLATFORM ANSWER, not read from anything: the license manager's "trial" is no (the owner's copy; the retail shot's Main shows Windows 8 Store, the full licence's text).
+    hooks.m_trial = [ ] { return false; };   // the same answer as ui_profile_saved's p.license
+#if HYDRO_UI_PASS && HYDRO_UI_TEXT
+    // The ticker's: VuStringDB slot 7, 0x626B80 on its Font, 0x5373D0 on the font with the entity's FontDB params.
+    hooks.m_info.m_string = [ this ]( const std::string& id ) { return string_db_get( m_string_db, id ); };
+    hooks.m_font = [ this ]( const entity_t& e ) { return m_ui_pass ? ui_screen_font( e, "Font", ui_screen_environment( ) ) : 0u; };
+    hooks.m_measure_of = [ this ]( const entity_t& e, const std::string& text, float aspect ) {
+        const ui_slot_t* name = ui_property_value( e, "Font" );
+        std::uint8_t params[ 60 ] = { };
+        std::string asset;
+        ui_font_params( m_font_db, name ? name->m_text : std::string( ), params, asset );
+        const ui_font_t* font = m_ui_pass ? m_ui_pass->font_of( ui_screen_font( e, "Font", ui_screen_environment( ) ) ) : nullptr;
+        return font ? ui_font_text_width( *font, text.c_str( ), params, aspect ) : 0.0f;
+    };
+#endif
     const auto db = [ this ]( const char* asset, value_t& out ) -> const value_t* {
         if ( out.tag == 0 )
         {
@@ -111,6 +126,15 @@ inline ui_bind_hooks_t c_world::menu_hooks( int id )
     hooks.m_option_db = db( "VuDBAsset/OptionDB", m_option_db );
     hooks.m_champ_db = db( "VuDBAsset/ChampDB", m_champ_db );
     hooks.m_font_db = db( "VuDBAsset/FontDB", m_font_db );
+    hooks.m_page_db = db( "VuDBAsset/PageLayoutDB", m_page_db );
+#if HYDRO_UI_PASS && HYDRO_UI_TEXT
+    if ( m_ui_pass )
+    {
+        hooks.m_page_hooks = ui_screen_environment( ).m_page;
+        hooks.m_page_env.m_default_font = m_ui_pass->font_asset( "Dev" );
+        hooks.m_page_env.m_default = hooks.m_page_env.m_default_font != 0u;
+    }
+#endif
     hooks.m_skin_db = db( "VuDBAsset/SkinDB", m_skin_db );
     hooks.m_boat_db = &m_boat_db;
     hooks.m_track_db = &m_track_db;

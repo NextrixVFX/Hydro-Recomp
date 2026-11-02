@@ -72,6 +72,11 @@ inline const logic_services_t& c_world::logic_services( )
         s.profile_temp = &m_profile_temp;
     }
     s.game_data = m_race.active ? &m_race.util : &m_menu_util;
+    if ( !m_logic_game.sku )   // VuIsSkuEntity's answer: the pack's
+    {
+        m_logic_sku = m_archive.pack_sku( );
+        m_logic_game.sku = &m_logic_sku;
+    }
     return s;
 }
 
@@ -194,8 +199,11 @@ inline ui_ret_t c_world::screen_external( screen_state_t& state, c_ui_binding& b
         logic_hooks_t hooks;
         hooks.user = &ctx;
         hooks.rand = &ctx.rand;
-        hooks.game = &m_logic_game;
         hooks.services = &logic_services( );
+        if ( m_menu )   // gameutil +0x50 in the front end (load_scene points it at the race's)
+            m_logic_game.game_data = &m_menu_util;
+        m_logic_game.unrecreated = &m_logic_unrecreated;
+        hooks.game = &m_logic_game;
         hooks.fire = screen_logic_fire;
         c_ui_binding* const held = m_logic_binding;
         m_logic_binding = &binding;

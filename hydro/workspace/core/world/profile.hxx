@@ -1,7 +1,7 @@
 #pragma once
 
 // The selectors' profile on the saved state (world batch 40; bound by c_world::menu_profile): `unlock` g 0x758FE8, `save` the game save's document g 0x758FA0 +0x20.
-// The progress slots read the document live: the answers follow every race. HOOKS, declared: the license manager g 0x758FAC vt+0x18 (the game is owned), the asset
+// The progress slots read the document live: the answers follow every race. HOOKS, declared: the license manager g 0x758FAC vt+0x18 ("is trial": no, the game is owned), the asset
 // factory's package test 0x4EF7C0 (every package ships in the one pack), the store beta 0x4D3170 (no).
 
 #include <workspace/core/game/unlock.hxx>
@@ -20,7 +20,7 @@ inline ui_profile_t ui_profile_saved( const c_unlock_manager& unlock, const valu
         default: return false;
         }
     };
-    p.license = [ ] { return true; };
+    p.license = [ ] { return false; };   // vt+0x18 means "is trial" (0x42DE10): a full game
     p.store_beta = [ ] { return false; };
     p.package = [ ]( const std::string& ) { return true; };
     p.progress = [ &save ]( const std::string& boat ) { return ui_progress_boat_was_used( save, boat ); };     // vt+0x84 0x4B4090

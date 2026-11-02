@@ -618,6 +618,8 @@ struct gfx_ui_pass_t final : gfx_sort_hooks_t, ui_record_device_t, ui_boost_devi
         return out;
     }
 
+    const ui_font_t* font_of( std::uint32_t id ) const { return id == 0u || id > m_fonts.size( ) ? nullptr : m_fonts[ id - 1 ].get( ); }
+
     void font( const std::uint8_t* record )
     {
         std::uint32_t id;

@@ -13,6 +13,8 @@
 #include <workspace/core/ui/slider.hxx>
 #include <workspace/core/ui/standings.hxx>
 #include <workspace/core/ui/ticker.hxx>
+#include <workspace/core/ui/footer.hxx>
+#include <workspace/core/ui/completion.hxx>
 #include <workspace/core/ui/wired.hxx>
 #include <workspace/core/ui/wiring.hxx>
 
@@ -96,6 +98,7 @@ inline constexpr std::uint32_t k_ui_container_vtable = 0x6F74F0u;
 inline constexpr std::uint32_t k_ui_button_vtable = 0x73B7B0u;
 inline constexpr std::uint32_t k_ui_event_vtable = 0x6F7308u;
 inline constexpr std::uint32_t k_ui_if_vtable = 0x754CD4u;
+inline constexpr std::uint32_t k_ui_set_string_vtable = 0x754E7Cu;   // VuSetStringEntity (ctor 0x5E3640)
 inline constexpr std::uint32_t k_ui_info_vtable = 0x73BC5Cu;
 inline constexpr std::uint32_t k_ui_page_vtable = 0x6F72C4u;
 inline constexpr std::uint32_t k_ui_results_vtable = 0x73DA38u;
@@ -340,6 +343,7 @@ struct ui_bound_t
     std::unique_ptr< c_ui_button > m_button;
     std::unique_ptr< c_ui_event > m_event;
     std::unique_ptr< ui_info_ticker_t > m_ticker;
+    std::unique_ptr< ui_completion_t > m_completion;
     ui_slider_hooks_t m_slider_hooks;
     std::unique_ptr< c_ui_slider > m_slider;
     // the race HUD's (m_hud set)
@@ -393,6 +397,10 @@ struct ui_bind_hooks_t
     ui_info_hooks_t m_info;
     std::function< float( ) > m_delta;
     std::function< std::uint32_t( const entity_t& ) > m_font;
+    // Preferred over m_info.m_measure when set: 0x5373D0 needs the entity's own font params (+0xA0).
+    std::function< float( const entity_t&, const std::string&, float ) > m_measure_of;
+    // HOOK: the license manager g 0x758FAC vt+0x18 (footer.hxx). Null: VuLicenseEntity stays an UNKNOWN input.
+    std::function< bool( ) > m_trial;
     // The sliders': HOOKS the touch device g 0x759070 (slot 6 count, slot 7 point),
     // an input the inverse crop matrix (VuUIImpl +76; null = identity), the settings
     // manager g 0x758FE0 (null = none: the getters' defaults).
@@ -652,6 +660,13 @@ private:
         if ( shown_vtable( b.m_vtable ) && b.m_vtable != k_ui_hud_element_vtable && b.m_vtable != k_ui_hud_toast_vtable )
         {
             make_shown( b );
+            return true;
+        }
+        // Batch 33: the Screens hold this entity too (Main's license / sign-in branches run off it): as the HUD's, 0x5EFA60 fires "Trigger".
+        if ( b.m_vtable == k_ui_project_initialized_vtable && m_hooks.m_trial )
+        {
+            entity_t& e = *b.m_entity;
+            add( b, "OnProjectInitialized", 0x5EFA60u, [ this, &e ]( const ui_params_t& ) { fire_named( e, "Trigger", ui_params_t( ) ); } );
             return true;
         }
         return false;
@@ -1166,10 +1181,13 @@ private:
             const std::uint32_t font = m_hooks.m_font ? m_hooks.m_font( e ) : 0u;
             // 0x446120 registers OnClearInfoStringID, OnSetInfoStringID, OnUITick.
             add( b, "OnClearInfoStringID", 0x446450u, [ &t ]( const ui_params_t& ) { ui_info_clear( t ); } );
-            add( b, "OnSetInfoStringID", 0x446480u, [ this, &t, scale, width, font ]( const ui_params_t& p )
+            add( b, "OnSetInfoStringID", 0x446480u, [ this, &t, &e, scale, width, font ]( const ui_params_t& p )
             {
                 ui_params_reader_t r( p );
-                ui_info_set( t, r.read_string( ), scale.data( ), width, font, m_info );
+                ui_info_hooks_t hooks = m_info;
+                if ( m_hooks.m_measure_of )
+                    hooks.m_measure = [ this, &e ]( std::uint32_t, const std::string& text, float aspect ) { return m_hooks.m_measure_of( e, text, aspect ); };
+                ui_info_set( t, r.read_string( ), scale.data( ), width, font, hooks );
             } );
             add( b, "OnUITick", 0x446580u, [ this, &t, width ]( const ui_params_t& )
             {
@@ -1396,6 +1414,13 @@ private:
         const std::uint32_t vt = owner.m_ctor ? owner.m_ctor->m_vtable : 0u;
         if ( shown_input( vt, plug ) && ( m_hooks.m_hud || ( vt != k_ui_hud_element_vtable && vt != k_ui_hud_toast_vtable ) ) )
             return true;
+        if ( vt == k_ui_license_vtable && m_hooks.m_trial && ( std::strcmp( plug, "IsTrialVersion" ) == 0 || std::strcmp( plug, "IsFullVersion" ) == 0 ) )
+            return true;
+        // ui_frames' golden stubs these inputs, so they run only in a live screen (the hook set): case completion_text holds them.
+        if ( ui_completion_of_vtable( vt ) >= 0 && m_hooks.m_trial && ( std::strcmp( plug, "UnusedContent" ) == 0 || std::strcmp( plug, "Locked" ) == 0 ) )
+            return true;
+        if ( vt == k_ui_set_string_vtable && m_hooks.m_trial && std::strcmp( plug, "Trigger" ) == 0 )
+            return true;
         if ( m_hooks.m_hud )
         {
             if ( ( vt == k_ui_control_method_vtable || vt == k_ui_start_lights_vtable ) && std::strcmp( plug, "Trigger" ) == 0 )
@@ -1408,7 +1433,7 @@ private:
                 if ( std::strcmp( plug, name ) == 0 )
                     return true;
         if ( vt == k_ui_champ_vtable && m_hooks.m_champ )
-            for ( const char* name : { "IsBusy", "Exit", "PlayNext" } )
+            for ( const char* name : { "IsBusy", "Exit", "PlayNext", "Completed" } )
                 if ( std::strcmp( plug, name ) == 0 )
                     return true;
         if ( ( vt == k_ui_remap_vtable || vt == k_ui_throttle_remap_vtable ) && ( std::strcmp( plug, "SetFocus" ) == 0 || std::strcmp( plug, "Hide" ) == 0 ) )
@@ -1729,6 +1754,8 @@ private:
             known = true;   // batch 30: 0x451370 / 0x451540
         else if ( vt == k_ui_loading_bar_vtable && b && b->m_bar )
             known = true;   // batch 32: slot 6 0x463220, slot 7 the nullsub 0x401560
+        else if ( ui_completion_of_vtable( vt ) >= 0 && b && m_hooks.m_platform )
+            known = true;   // batch 33: 0x458500 / 0x458A40 / 0x459060 / 0x4595A0 (completion.hxx)
         else if ( !init && ( vt == k_ui_game_config_vtable || ( vt == k_ui_boat_config_vtable && m_hooks.m_root ) ) && b && b->m_config )
             known = true;   // batch 26: slot 7 0x45D080 / 0x44D090 (slot 6 stays config_setup( )'s)
         trace( ui_trace_kind_t::game, index, std::string( ), address, ui_params_t( ), known );
@@ -1737,7 +1764,31 @@ private:
             ++m_unknown_slots;
             return;
         }
-        if ( b && b->m_champ )
+        if ( ui_completion_of_vtable( vt ) >= 0 )
+        {
+            b->m_completion = std::make_unique< ui_completion_t >( );
+            b->m_completion->m_kind = static_cast< ui_completion_kind_t >( ui_completion_of_vtable( vt ) );
+            static const char* const modes[ 4 ] = { "Race", "Slalom", "TimeTrial", "Championship" };
+            ui_completion_env_t env;
+            env.m_track_db = m_hooks.m_track_db;
+            env.m_champ_db = m_hooks.m_champ_db;
+            env.m_package = [ this ]( const std::string& asset ) { return m_hooks.m_platform( "144|" + asset ).first; };
+            env.m_record = [ this ]( ui_completion_kind_t k, const std::string& track, const std::string& course, std::int32_t& place )
+            {
+                const std::string key = k == ui_completion_kind_t::championship ? "88|" + track : "48|" + std::string( modes[ static_cast< int >( k ) ] ) + "|" + track + "|" + course;
+                const std::pair< bool, int > a = m_hooks.m_platform( key );
+                place = a.second;
+                return a.first;
+            };
+            env.m_open = [ this ]( ui_completion_kind_t k, const std::string& track, const std::string& course )
+            {
+                return m_hooks.m_platform( k == ui_completion_kind_t::championship ? "92|Championship|" + track
+                                                                                   : "100|" + std::string( modes[ static_cast< int >( k ) ] ) + "|" + track + "|" + course ).first;
+            };
+            env.m_string6 = m_hooks.m_string_db;
+            ui_completion_initialize( *b->m_completion, env );
+        }
+        else if ( b && b->m_champ )
         {
             if ( init )
                 ui_champ_load( *b->m_champ, *m_hooks.m_champ );
@@ -1875,6 +1926,28 @@ public:
                 ui_remap_decision( *b->m_remap, b->m_remap_state, b->m_remap_hooks );   // batch 28: 0x4623D0
     }
     // Batch 29: a bound front-end button's +0x188 / +0x198 (the frame's m_button); default 0 / 0.
+    // What Show / Hide / SetAlpha left on a text base or image (the frame's m_shown); false: not one.
+    bool shown( const entity_t& e, std::uint8_t& visible, float& alpha ) const
+    {
+        const int index = index_of( e );
+        const ui_hud_shown_t* s = index >= 0 ? m_bound[ static_cast< std::size_t >( index ) ]->m_shown.get( ) : nullptr;
+        if ( !s )
+            return false;
+        visible = s->m_visible ? 1 : 0;
+        alpha = s->m_alpha;
+        return true;
+    }
+    // The String ID a SetStringID left on a button (0x442980) or a text base (0x62F480), or null.
+    const std::string* runtime_string( const entity_t& e ) const
+    {
+        const int index = index_of( e );
+        if ( index < 0 )
+            return nullptr;
+        const ui_bound_t& b = *m_bound[ static_cast< std::size_t >( index ) ];
+        if ( b.m_button )
+            return b.m_button->m_string_id.empty( ) ? nullptr : &b.m_button->m_string_id;
+        return b.m_shown && b.m_vtable == k_ui_text_vtable && !b.m_shown->m_string_id.empty( ) ? &b.m_shown->m_string_id : nullptr;
+    }
     void button_state( const entity_t& e, std::uint8_t& focused, std::uint32_t& press )
     {
         const int index = index_of( e );
@@ -1917,6 +1990,13 @@ public:
             r.m_string_id = s->m_text;
         return &r;
     }
+    // A completion text's state after slot 6, or null.
+    const ui_completion_t* completion( const entity_t& e ) const
+    {
+        const int index = index_of( e );
+        return index >= 0 ? m_bound[ static_cast< std::size_t >( index ) ]->m_completion.get( ) : nullptr;
+    }
+
     // A bound ticker (VuInfoUITextEntity: +0x12C.. and slot 12's text +0x140), or null.
     const ui_info_ticker_t* ticker( const entity_t& e ) const
     {
@@ -2036,6 +2116,12 @@ private:
                 out.m_words[ 1 ] = b.m_champ->m_award ? 1u : 0u;
                 return out;
             }
+            if ( std::strcmp( plug, "Completed" ) == 0 )
+            {
+                out.m_words[ 0 ] = 3u;   // 0x44FEC0: a VuRetVal bool: 0x454E30
+                out.m_words[ 1 ] = ui_champ_done( *b.m_champ, *m_hooks.m_champ ) ? 1u : 0u;
+                return out;
+            }
             if ( std::strcmp( plug, "Exit" ) == 0 )
                 ui_champ_next( *b.m_champ, *m_hooks.m_champ );
             else
@@ -2117,6 +2203,32 @@ private:
         if ( ( m_hooks.m_hud && vt != k_ui_if_vtable && vt != k_ui_set_info_vtable && !ui_is_slider_vtable( vt ) && vt != k_ui_button_vtable ) ||
              shown_input( vt, plug ) )
             return run_hud_input( owner, vt, plug, p );
+        if ( vt == k_ui_set_string_vtable )
+        {
+            // Trigger 0x5E3860: the plug "Set" with one string record, the Value property +0x60. VuRetVal { 0, the caller's }.
+            const ui_slot_t* value = ui_bind_slot( owner, "Value" );
+            ui_params_t q;
+            q.add_string( value ? value->m_text.c_str( ) : "" );
+            fire_named( owner, "Set", q );
+            out.m_known = false;
+            return out;
+        }
+        if ( vt == k_ui_license_vtable && m_hooks.m_trial &&
+             ( std::strcmp( plug, "IsTrialVersion" ) == 0 || std::strcmp( plug, "IsFullVersion" ) == 0 ) )
+        {
+            // 0x42DE10 / 0x42DE40: a bool VuRetVal, the answer or its inverse.
+            out.m_words[ 0 ] = 3u;
+            out.m_words[ 1 ] = ui_license_answer( m_hooks.m_trial( ), plug[ 2 ] == 'F' ) ? 1u : 0u;
+            return out;
+        }
+        if ( ui_completion_of_vtable( vt ) >= 0 && ( std::strcmp( plug, "UnusedContent" ) == 0 || std::strcmp( plug, "Locked" ) == 0 ) )
+        {
+            // 0x4582C0 / 0x4582E0 (one pair per class): a bool VuRetVal of +0x124 / +0x125. Before slot 6 the ctor's 0 / 1.
+            const ui_completion_t* c = m_bound[ static_cast< std::size_t >( index_of( owner ) ) ]->m_completion.get( );
+            out.m_words[ 0 ] = 3u;
+            out.m_words[ 1 ] = ( plug[ 0 ] == 'U' ? c && c->m_unused : !c || c->m_locked ) ? 1u : 0u;
+            return out;
+        }
         if ( vt == k_ui_if_vtable )
         {
             // 0x5DDE60.
