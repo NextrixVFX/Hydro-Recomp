@@ -99,7 +99,7 @@ inline void c_world::settings_start( )
             LOG_WARNING( "saves: VuDBAsset/UnlockDB not in the pack" );
     }
     m_unlock.store_beta = [ ] { return false; };
-    m_unlock.init( m_unlock_db.tag ? &m_unlock_db : nullptr, false, m_cloud.data );
+    m_unlock.init( m_unlock_db.tag ? &m_unlock_db : nullptr, value_t{ }, m_cloud.data );   // getParam( "UnlockAll" ): 0x4FDB70 answers null
     unlock_bind( );
     {
         float fov = 0.0f;
