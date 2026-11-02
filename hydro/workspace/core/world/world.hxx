@@ -639,7 +639,7 @@ private:
 
     void wipe_scene( )
     {
-        for ( int alpha = 0; alpha <= 13; ++alpha )
+        for ( int alpha = 0; alpha <= 14; ++alpha )
             c_engine::drop( alpha );
         m_foliage = foliage_manager_t{ };
         m_foliage_entities.clear( );
@@ -1598,7 +1598,10 @@ public:
                 [ this ]( const std::string& path ) -> const std::vector< pfx_part_t >& { return pfx_parts( path ); }, &m_race_pfx_draw );
         }
         else
+        {
             c_engine::drop( 11 );
+            c_engine::drop( 14 );
+        }
         m_coronas.tick( dt );
         m_coronas.draw( m_eye, m_target, [ this ]( const std::string& path ) { return texture_for( path ); } );
         trace::frame( ).pfx += trace::now( ) - pfx_start;
