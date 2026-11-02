@@ -1,6 +1,7 @@
 #pragma once
 
 #include <workspace/core/assets/tree.hxx>
+#include <workspace/core/entity/json.hxx>
 
 #include <xmmintrin.h>
 
@@ -18,8 +19,9 @@
 // The device is the caller's (input_hooks_t): g_vugamepad 0x759040's name tables (+4 axes, stride 0x10, +8 count, name
 // hash +4; +0x10 buttons, stride 8, +0x14 count, name hash +4: 0x57E770 / 0x57E7D0 answer the index, -1 when absent), its
 // pad state (vt+0x18( i ): +0xC the button bits, +0x10 the axis floats) and the keyboard's bytes (g_vukeyboard 0x75906C
-// +0xC + key). Not recreated, the profile side of the platform layer: the "OnSaveProfile" writer 0x5111B0 / 0x5118D0 /
-// 0x511E50 (saves are re-made for the platform, not 1:1), the tick registrations and the dtor (the caller's lifetime).
+// +0xC + key). Not recreated: the tick registrations and the dtor (the caller's lifetime). The "OnSaveProfile" writer
+// 0x5111B0 / 0x5118D0 / 0x511E50 is save_profile below (batch 32, the Saves decision): the listener calls it on +8 of the
+// profile manager.
 // SUBSTITUTION: std::vector for the axis / button / controller arrays (retail's resize 0x512340 / 0x512470 zero-fill).
 
 // FNV-1a of a C string, the hash every lookup here uses.
@@ -31,8 +33,8 @@ inline std::uint32_t input_hash( const char* text )
     return h;
 }
 
-// 0x5390C0: the key name table 0x7358B8; a name that is not there is 0 ("NONE").
-inline int input_key_index( const char* name )
+// The key name table 0x7358B8.
+inline const char* const* input_key_names( )
 {
     static constexpr const char* s_keys[ 81 ] = {
         "NONE", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O",
@@ -40,9 +42,15 @@ inline int input_key_index( const char* name )
         "APOSTROPHE", "SEMICOLON", "SLASH", "GRAVE", "BACKSLASH", "LEFT BRACKET", "RIGHT BRACKET", "LEFT", "RIGHT", "UP", "DOWN", "CENTER",
         "SHIFT", "ALT", "CONTROL", "ESCAPE", "SCROLL", "PAUSE", "INSERT", "DELETE", "HOME", "END", "PRIOR", "NEXT", "F1", "F2", "F3", "F4",
         "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12" };
+    return s_keys;
+}
+
+// 0x5390C0: a name that is not there is 0 ("NONE").
+inline int input_key_index( const char* name )
+{
     for ( int k = 0; k < 81; ++k )
     {
-        if ( std::strcmp( s_keys[ k ], name ) == 0 )
+        if ( std::strcmp( input_key_names( )[ k ], name ) == 0 )
             return k;
     }
     return 0;
@@ -62,6 +70,8 @@ struct input_hooks_t
     int ( *button_index )( void* user, const char* name ) = nullptr;    // 0x57E7D0
     input_pad_t ( *pad )( void* user, int controller ) = nullptr;       // [0x759040] vt+0x18
     std::uint8_t ( *key )( void* user, int key ) = nullptr;             // [0x75906C] +0xC + key
+    const char* ( *axis_name )( void* user, int index ) = nullptr;      // [0x759040] +4 + 0x10 * index
+    const char* ( *button_name )( void* user, int index ) = nullptr;    // [0x759040] +0x10 + 8 * index
 };
 
 // A binding (8 bytes): +0 the type (1 AxisPos, 2 AxisNeg, 3 Button, 4 Key; 0 unbound), +4 the index.
@@ -167,6 +177,34 @@ public:
     {
         load_mapping( 0, member( member( profile, "InputMapping" ), "Gamepad" ), 0 );
         load_mapping( 0, member( member( profile, "InputMapping" ), "Keyboard" ), 1 );
+    }
+
+    // 0x5111B0, the "OnSaveProfile" listener: controller 0's mappings back into the profile, [ "InputMapping" ][ "Gamepad" ]
+    // for method 0, [ "InputMapping" ][ "Keyboard" ] for method 1, each member made if absent. ( [0x759084] null skips this. )
+    void save_profile( value_t& profile ) const
+    {
+        save_mapping( json_member( json_member( profile, "InputMapping" ), "Gamepad" ), 0 );
+        save_mapping( json_member( json_member( profile, "InputMapping" ), "Keyboard" ), 1 );
+    }
+
+    // 0x5118D0 ( out, method ): every bound axis in out[ "Axes" ][ name ][ "+" / "-" ], every bound button in
+    // out[ "Buttons" ][ name ]. An unbound one (type 0) touches nothing: what `out` held stays, and with nothing bound
+    // `out` is not even made an object.
+    void save_mapping( value_t& out, int method ) const
+    {
+        const controller_t& c = m_controllers[ 0 ];
+        for ( std::size_t k = 0; k < m_axes.size( ); ++k )
+        {
+            if ( c.axes[ k ].pos[ method ].type != 0 )
+                save_binding( json_member( json_member( json_member( out, "Axes" ), m_axes[ k ].name ), "+" ), c.axes[ k ].pos[ method ] );
+            if ( c.axes[ k ].neg[ method ].type != 0 )
+                save_binding( json_member( json_member( json_member( out, "Axes" ), m_axes[ k ].name ), "-" ), c.axes[ k ].neg[ method ] );
+        }
+        for ( std::size_t k = 0; k < m_buttons.size( ); ++k )
+        {
+            if ( c.buttons[ k ].bind[ method ].type != 0 )
+                save_binding( json_member( json_member( out, "Buttons" ), m_buttons[ k ].name ), c.buttons[ k ].bind[ method ] );
+        }
     }
 
     // Slot 16 0x5110F0 ( controller, method ): VuDBAsset.DefaultMapping.Metro.GamePad / .Keyboard; another method does
@@ -357,6 +395,11 @@ public:
         return m_controllers[ index ];
     }
 
+    controller_t& edit_controller( int index )
+    {
+        return m_controllers[ index ];
+    }
+
 private:
     static int list_size( const value_t& v )
     {
@@ -461,6 +504,31 @@ private:
             out.type = 4;
             out.index = input_key_index( index.c_str( ) );
         }
+    }
+
+    // 0x511E50 ( out, binding ): "Type" AxisPos 1 / AxisNeg 2 / Button 3 / Key 4, "Index" the device's name for it (a key
+    // index of 0x51 or more: the empty text); any other type both empty.
+    void save_binding( value_t& out, const input_binding_t& b ) const
+    {
+        std::string type, index;
+        if ( b.type == 1 || b.type == 2 )
+        {
+            type = b.type == 1 ? "AxisPos" : "AxisNeg";
+            index = hooks.axis_name( hooks.user, b.index );
+        }
+        else if ( b.type == 3 )
+        {
+            type = "Button";
+            index = hooks.button_name( hooks.user, b.index );
+        }
+        else if ( b.type == 4 )
+        {
+            type = "Key";
+            if ( static_cast< std::uint32_t >( b.index ) < 0x51u )
+                index = input_key_names( )[ b.index ];
+        }
+        json_set_string( json_member( out, "Type" ), type );
+        json_set_string( json_member( out, "Index" ), index );
     }
 
     // 0x5116E0 ( controller, value, method ): the "Axes" object's members in key order: a known axis takes its "+" and
