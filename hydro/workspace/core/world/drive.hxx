@@ -44,11 +44,9 @@
 //                    water under a point 0x529140 (water_point_height); the
 //                    hull's wake update 0x417D80 (race_drive_hull_wake:
 //                    0x417F80 + world/wake.hxx water_wake_update).
+//   The animation tick 0x40FFF0 = world/rig.hxx on boat_anim_tick.
 //   NOT RECREATED / NOT WIRED (counted, each logged once by name - never a
-//   stand-in): the animation tick 0x40FFF0 (recreated as boat_anim_tick, but
-//   its three controls at anim +0x08 / +0x0C / +0x10 come from the asset
-//   loads 0x410610 gameInitialize hands to the animation system - a hook here
-//   - so its inputs are UNKNOWN and it does not run); 0x410FF0, 0x41E240, the
+//   stand-in): 0x410FF0, 0x41E240, the
 //   debris pieces' follow / removal; the driver tick of a UI / nuisance /
 //   ghost driver (none in a Race roster - their ticks are the boat agent's);
 //   the hull's splash pfx 0x52BCD0, the lens-water manager g 0x759048 (VuLensWaterManagerImpl, the water /
@@ -231,6 +229,8 @@ inline race_drive_t& race_drive_of( void* user )
 {
     return *static_cast< race_drive_t* >( user );
 }
+
+inline void race_drive_animation( race_drive_t& r, float dt );
 
 inline race_session_boat_t& race_drive_boat( race_drive_t& r )
 {
@@ -633,10 +633,7 @@ inline void race_drive_setup( race_session_t& s, const value_t* constant_db )
         h.wake_lookup = race_drive_wake;
         h.jump_sound = []( void* u ) { race_unwired( *race_drive_of( u ).session, "audio: the jump sound 0x41E100 (FMOD - platform)" ); };
         h.driver_tick = race_drive_driver;
-        h.animation_tick = []( void* u, float ) {
-            race_unwired( *race_drive_of( u ).session, "the animation tick 0x40FFF0: its controls (anim +0x08 / +0x0C / +0x10) come from 0x410610's asset "
-                                                       "loads (a hook) - UNKNOWN, not run" );
-        };
+        h.animation_tick = []( void* u, float dt ) { race_drive_animation( race_drive_of( u ), dt ); };
         h.camera_tick = race_drive_camera;
         h.respawn = race_drive_respawn;
         h.enable = []( void* u ) { race_session_enable( *race_drive_of( u ).session, race_drive_boat( race_drive_of( u ) ), true ); };
@@ -1052,6 +1049,33 @@ inline bool race_drive_throttle( const race_drive_t& r, float& t )
     return true;
 }
 
+// The Decision tick's animation tick 0x40FFF0 on the boat's rig (world/rig.hxx); the driver's vt+0x68 is slot 26 0x40EB20 in every class.
+inline void race_drive_animation( race_drive_t& r, float dt )
+{
+    race_session_t& s = *r.session;
+    boat_rig_inputs_t in;
+    in.anim = r.d.animation;
+    in.boat = r.d.boat;
+    if ( !race_drive_throttle( r, in.throttle ) )
+    {
+        race_unwired( s, "the animation tick 0x40FFF0: the driver's vt+0x64 for this driver class - UNKNOWN, not run" );
+        return;
+    }
+    in.steer = driver_steer_value( r.d.boat );
+    float position[ 4 ], velocity[ 4 ];
+    std::memcpy( position, r.d.transform + 0x80, 16 );
+    std::memcpy( velocity, r.d.body + 0x140, 16 );
+    in.position = position;
+    in.velocity = velocity;
+    in.engine = r.d.engine;
+    in.voice_user = &r;
+    in.voice = []( void* u, const char* line ) {   // vt+0x1C( boat, line )
+        race_drive_t& d = *static_cast< race_drive_t* >( u );
+        race_session_vo_say( *d.session, d.d.boat, line, false );
+    };
+    boat_rig_animation_tick( race_drive_boat( r ).rig, in, dt );
+}
+
 // The pfx frame's boats (pfxsim.hxx pfx_frame_t): what the processes bound to boat `b` read of it, refreshed at its Build
 // step 5 - the thrust 0x4CD5B0 (0x41D570's view, engine +0xF8), the boat spring 0x4CD980, the hull 0x4CE760 (below). The
 // solver is the controller's OWN VuFluidsObject (+0x34, 0x419FF0 hands it to the hull process): its mesh is the asset
@@ -1181,7 +1205,7 @@ inline void race_drive_effects( race_session_t& s, race_drive_t& r, float dt )
             race_unwired( s, "Build step 5: postLoad's Pfx fill did not run / stopped - the seven record lists are empty (UNKNOWN); 0x419700's "
                              "on / off machine, raises and aabb reset run" );
         else if ( b.pfx_unknown_bones )
-            race_unwired( s, "Build step 5: pfx records whose bone findNodeByName could not answer (no skeleton) tick at bone -1 - UNKNOWN placement" );
+            race_unwired( s, "Build step 5: pfx records whose bone findNodeByName could not answer (no model) tick at bone -1 - UNKNOWN placement" );
         boat_pfx_boat_t pb;
         pb.throttle = throttle;
         pb.d570 = driver_entity_throttle( r.d.boat, r.d.transform, r.d.engine, r.d.body );   // 0x41D570 itself
@@ -1193,6 +1217,11 @@ inline void race_drive_effects( race_session_t& s, race_drive_t& r, float dt )
         pb.colour = r.d.boat + 0x454;
         pb.offset = reinterpret_cast< const float* >( r.d.boat + 0x49C );
         pb.world = reinterpret_cast< const float* >( r.d.transform + 0x50 );
+        if ( b.rig.model )   // 0x41A81D: the instance +0x2A4's +0x18
+        {
+            pb.bones = b.rig.model->instance.matrices.data( );
+            pb.bone_count = b.rig.model->asset.skeleton.count;
+        }
         boat_pfx_ops_t o = s.world.pfx ? boat_pfx_runtime_ops( *s.world.pfx ) : boat_pfx_ops_t{ };
         o.raise = []( void*, float a, float c ) {
             if ( race_drive_t* d = g_race_drive_raising )
@@ -1277,8 +1306,7 @@ inline void race_drive_build( race_session_t& s, std::size_t boat, float dt )
     race_drive_t& r = *s.drives[ boat ];
     // Step 3, the driver's vt+0x4C(dt): 0x4021A0 (ret 4) in every driver vtable - VuHumanDriver 0x737F44, VuAiDriver
     // 0x737B5C, VuAiNuisanceDriver 0x737C4C, the UI driver 0x737CDC, VuGhostDriver 0x737DDC (read from the image): nothing.
-    race_unwired( s, "the Build tick 0x41F330's steps 4 and 6 (the animation 0x5169E0 / 0x516CF0 and model instances 0x532720 / 0x532990; the "
-                     "draw aabb merge + g_vu3ddrawmanager vt+0x30 - not read here) - NOT recreated" );
+    race_unwired( s, "the Build tick 0x41F330's step 6 (the draw aabb merge + g_vu3ddrawmanager vt+0x30) and step 4's second instance 0x532990 - NOT recreated" );
     // Step 1: 0x52F690 on the blender g 0x759430 (world/blend.hxx) with the position (transform +0x80, copied first)
     // into boat +0x408 (the 22-word record: +0x408 the far plane the race camera reads, +0x454 / +0x458 the pfx
     // colours step 2 lerps).
@@ -1297,7 +1325,10 @@ inline void race_drive_build( race_session_t& s, std::size_t boat, float dt )
         if ( !boat_build_water( r.d.boat, position, s.world.view ? &s.world.view->water : nullptr ) )
             race_unwired( s, "the Build tick's step 2 (0x52ACB0 / 0x535E10) with no VuWater, a tree overflow or a map cell outside its map - UNKNOWN, nothing written" );
     }
-    // Step 5 (after 4, which is not run: only a record with a bone would read its palette).
+    // Step 4 (world/rig.hxx): the animated skeleton, the instance +0x2A4's pose. Its second instance's copy 0x532990: a draw input.
+    if ( !boat_rig_pose( race_drive_boat( r ).rig, dt ) )
+        race_unwired( s, "the Build tick's step 4: no model, or a clip with fewer bones than the skeleton - UNKNOWN" );
+    // Step 5.
     race_drive_effects( s, r, dt );
     boat_build_audio_hooks_t h;
     h.user = &s;

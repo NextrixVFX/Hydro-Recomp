@@ -23,6 +23,7 @@
 #include <workspace/core/world/lens.hxx>
 #include <workspace/core/world/mine.hxx>
 #include <workspace/core/world/modes.hxx>
+#include <workspace/core/world/rig.hxx>
 #include <workspace/core/world/voice.hxx>
 #include <workspace/core/world/pfxmgr.hxx>
 #include <workspace/core/world/pfxsim.hxx>
@@ -86,7 +87,8 @@ struct race_session_boat_t
     // boat_pfx_fill through io.pfx_fill - race_session_sections), ticked by Build step 5 (world/drive.hxx).
     boat_pfx_t pfx;
     bool pfx_filled = false;
-    int pfx_unknown_bones = 0;   // findNodeByName calls answered UNKNOWN (no skeleton here)
+    int pfx_unknown_bones = 0;   // findNodeByName calls answered UNKNOWN (the boat has no model: retail would fault)
+    boat_rig_t rig;              // the model instance +0x2A4, the animation +0x230's skeleton and controls (world/rig.hxx)
     std::uint8_t* pfx_fluids = nullptr;   // the controller's +0x34 VuFluidsObject image
     // What the VuPfx processes bound to this boat read (pfx_frame_t's entries; world/drive.hxx race_drive_pfx_frame): the
     // controller's fluids object as the solver 0x4CE760 prepares (its mesh from the load's handle) and the boat's views.
@@ -541,6 +543,24 @@ inline std::uint8_t* race_session_image( race_session_boat_t& b, int object, int
 // readers are absent - UNKNOWN, the load stops (b.stop says where).
 inline void race_unwired( race_session_t& s, const std::string& what );
 
+// 0x5322C0 on the boat's +0x2A4: the asset manager's exists / create (0x534000 / 0x5340B0) = the pack, through the mesh
+// library's reader (race_session_sections sets it first).
+inline void race_session_load_model( race_session_boat_t& b, const std::string& name )
+{
+    std::vector< std::uint8_t > blob;
+    if ( !b.meshes.read( b.meshes.read_user, "VuAnimatedModelAsset/" + name, blob ) || !boat_rig_model( b.rig, blob.data( ), blob.size( ) ) )
+        race_unwired( *b.owner, "0x420A70: VuAnimatedModelAsset/" + name + " did not load - the boat has no skeleton" );
+}
+
+// 0x410610 on +0x230 (gameInitialize): the strings the Animation sections left at +0x14 / +0x2C / +0x44.
+inline void race_session_create_rig( race_session_boat_t& b )
+{
+    const std::string names[ 3 ] = { b.io.animation_strings[ 0x14 ], b.io.animation_strings[ 0x2C ], b.io.animation_strings[ 0x44 ] };
+    boat_rig_create( b.rig, names, [ &b ]( const std::string& name, std::vector< std::uint8_t >& blob ) {
+        return !name.empty( ) && b.meshes.read( b.meshes.read_user, "VuAnimationAsset/" + name, blob );
+    } );
+}
+
 // The fill's hooks on a session boat (bound once per boat; used by postLoad's fill and the gameInitialize's 0x419FF0).
 inline boat_pfx_fill_hooks_t race_session_pfx_hooks( race_session_boat_t& rb )
 {
@@ -572,11 +592,12 @@ inline boat_pfx_fill_hooks_t race_session_pfx_hooks( race_session_boat_t& rb )
     };
     h.find_bone = []( void* v, const char* name ) -> std::int32_t {
         race_session_boat_t& x = *static_cast< race_session_boat_t* >( v );
+        if ( x.rig.model )   // 0x41A5BC: findNodeByName 0x52F3C0 on the instance +0x2A4's skeleton, an empty name too
+            return skel_instance_find_node( x.rig.model->instance, name );
         if ( name && name[ 0 ] )
         {
             ++x.pfx_unknown_bones;
-            race_unwired( *x.owner, "postLoad's Pfx step: VuSkeleton_findNodeByName 0x52F3C0 on the model instance +0x2A4 (the renderer's - no "
-                                    "skeleton in the race session): the record's bone UNKNOWN, -1 here" );
+            race_unwired( *x.owner, "postLoad's Pfx step: the boat's model instance +0x2A4 did not load: the record's bone UNKNOWN, -1 here" );
         }
         return -1;
     };
@@ -632,8 +653,8 @@ inline boat_pfx_fill_hooks_t race_session_pfx_hooks( race_session_boat_t& rb )
 //   type_of            the object's vt+4: world/pfxclass.hxx g_pfx_classes (vtable -> getType's descriptor); its +4 parents
 //                      from the rows' chains (read from the image: 0x7367D0 -> 0x7369B4 -> 0x7369BC -> 0x7369D4 -> 0x7369CC,
 //                      0x7367D8 -> 0x7369D4); a vtable outside the table answers 0 (logged UNKNOWN)
-//   find_bone          0x52F3C0 on the model instance (+0x2A4, the renderer's) +0x10: NO SKELETON HERE - answered -1 and
-//                      counted / logged UNKNOWN for every non-empty name
+//   find_bone          0x52F3C0 on the model instance (+0x2A4, world/rig.hxx) +0x10; no model: answered -1 and counted / logged
+//                      UNKNOWN for every non-empty name
 //   fluids_set         0x5243A0 on that object = boat load.hxx load_fluid_mesh (the boat agent's, 1:1)
 //   word / put         the pfx runtime's heap; the fluids token's words = the solver image's
 inline void race_session_bind_pfx_fill( race_session_boat_t& b )
@@ -776,6 +797,8 @@ inline bool race_session_sections( race_session_boat_t& b, const value_t& boatdb
         return lib.fluid_aabb( lib.user, a, box );
     };
     race_session_bind_pfx_fill( b );
+    io.model_user = &b;
+    io.model0 = []( void* u, const std::string& name ) { race_session_load_model( *static_cast< race_session_boat_t* >( u ), name ); };
     const bool ok = boat_load_sections( io );
     if ( !ok && b.stop.empty( ) )
         b.stop = io.hooks.surface == nullptr
@@ -2816,6 +2839,7 @@ inline bool race_session_start( race_session_t& s, const std::string& mode, cons
         race_session_tick_t* user = tick_users[ static_cast< std::size_t >( k ) ].get( );
         ih.slot17 = [ &s, &b ] { race_session_enable( s, b, true ); };
         ih.instigator = [ &s, &b ] { race_session_register_instigator( s, b ); };
+        ih.anim_create = [ &b ] { race_session_create_rig( b ); };
         // 0x419FF0 on +0x234 (boat effects.hxx boat_pfx_create, the boat agent's) when the Pfx fill was bound and ran.
         ih.pfx_create = [ &s, &b ] {
             if ( !b.pfx_filled )
@@ -3204,6 +3228,7 @@ inline bool race_session_start( race_session_t& s, const std::string& mode, cons
                 race_session_tick_t* user = tick_users.back( ).get( );
                 ih.slot17 = [ &s, &b ] { race_session_enable( s, b, true ); };
                 ih.instigator = [ &s, &b ] { race_session_register_instigator( s, b ); };
+                ih.anim_create = [ &b ] { race_session_create_rig( b ); };
                 // 0x419FF0 on +0x234 (boat effects.hxx boat_pfx_create, the boat agent's) when the Pfx fill was bound and ran.
                 ih.pfx_create = [ &s, &b ] {
                     if ( !b.pfx_filled )

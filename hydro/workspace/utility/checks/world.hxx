@@ -3370,6 +3370,7 @@ inline bool verify_dynamic_prop_step( )
     return failed == 0;
 }
 
+#include <workspace/utility/checks/rig.hxx>
 #include <workspace/utility/checks/session.hxx>
 
 inline bool verify_world_all( )
@@ -3427,5 +3428,6 @@ inline bool verify_world_all( )
     ok = verify_static_model_draw( ) && ok;
     ok = verify_static_world_aabb( ) && ok;
     ok = verify_session_all( ) && ok;
+    ok = verify_rig_all( ) && ok;
     return ok;
 }
