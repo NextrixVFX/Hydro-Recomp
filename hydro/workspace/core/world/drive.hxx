@@ -489,6 +489,8 @@ inline void race_drive_driver( void* user, float dt )
         ghost_driver_tick( *s.track, r.ghost_pilot, r.d.transform );   // slot 18 0x40EBA0
         return;
     }
+    if ( s.dock )
+        return;   // VuAiUiDriver's tick 0x40E5C0: not recreated (world/dock.hxx)
     race_unwired( s, "a driver tick of a class not wired here (UI, or an AI boat with no pilot) - UNKNOWN" );
 }
 
@@ -1572,6 +1574,22 @@ inline bool race_event_dispatch( race_session_t& s, const std::string& entity, c
             else
                 key_motion_deactivate( *kp->k, race_session_key_hooks( *kp ) );
             LOG_INFO( "race: event %s . %s (sync %d)", entity.c_str( ), plug.c_str( ), s.dynamics ? s.dynamics->syncs : -1 );
+            return true;
+        }
+    // VuForceAffectorEntity's inputs "Activate" 0x439C40 / "Deactivate" 0x439C60 (world/force.hxx).
+    if ( plug == "Activate" || plug == "Deactivate" )
+        for ( const auto& fp : s.forces )
+        {
+            std::string path;
+            for ( const entity_t* e = fp->entity; e && e->m_parent; e = e->m_parent )
+                path = path.empty( ) ? e->m_name : e->m_name + "/" + path;
+            if ( path != entity )
+                continue;
+            if ( plug == "Activate" )
+                force_affector_activate( *fp->value, fp->world, fp->scale, fp->hooks );
+            else
+                force_affector_deactivate( *fp->value, fp->hooks );
+            LOG_INFO( "race: event %s . %s (force; sync %d)", entity.c_str( ), plug.c_str( ), s.dynamics ? s.dynamics->syncs : -1 );
             return true;
         }
     // VuControlEntity's inputs (ctor 0x5CCBA0): "Activate" 0x5CD7A0 / "Deactivate" 0x5CD890 (VuRetVal void) and the method

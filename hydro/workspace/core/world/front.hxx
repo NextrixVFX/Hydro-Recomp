@@ -83,6 +83,7 @@ inline void c_world::load_background( )
     h.project_initialized = []( void* u ) { static_cast< c_world* >( u )->project_initialized( ); };
     background_construct( m_background, m_background_env, h );
     m_loaded = true;
+    dock_start( );
     LOG_SUCCESS( "front end: VuBackground 0x4BDEB0 - Screens/Background %s, the rig at its ctor's view (eye -1 -3 2, target 0 0 0.5)%s",
                  m_background.project ? "loaded" : "NOT loaded", m_track_built ? "; a track was built from it" : "" );
 }

@@ -6,6 +6,7 @@
 // verified by case breakable_properties) and "Initially Active" +0x84 (bool, 0).
 
 #include <workspace/core/entity/property.hxx>
+#include <workspace/core/world/force.hxx>
 #include <workspace/core/world/keyframe.hxx>
 #include <workspace/core/world/keymotion.hxx>
 #include <workspace/core/world/sound.hxx>
@@ -112,8 +113,27 @@ struct lens_emitter_state_t
     float drops = 64.0f, drops_default = 64.0f;
 };
 
+// VuForceAffectorEntity (world/force.hxx, ctor 0x439300): "Initially Active" +0x68 (bool, 1), "Acceleration" +0x6C (98.06), "Max Speed"
+// +0x70 (20), both VuBasicProperty<float> (0x737484: property_float).
+struct force_affector_state_t
+{
+    force_affector_t value;
+    std::uint8_t d_active = 1;
+    float d_acceleration = value.acceleration, d_speed = value.max_speed;
+};
+
+// VuDockedBoatEntity (ctor 0x4358E0): "Position X" +0x5C, "Position Y" +0x60, "Rotation Z" +0x64, each VuBasicProperty<float> 0x737484.
+struct docked_entity_state_t
+{
+    float x = 0.0f, y = 0.0f, rotation = 0.0f, d_x = 0.0f, d_y = 0.0f, d_rotation = 0.0f;
+};
+
 inline std::shared_ptr< void > audio_emitter_state_for( const std::string& cls )
 {
+    if ( cls == "VuDockedBoatEntity" )
+        return std::make_shared< docked_entity_state_t >( );
+    if ( cls == "VuForceAffectorEntity" )
+        return std::make_shared< force_affector_state_t >( );
     if ( cls == "VuLensWaterEmitterEntity" )
         return std::make_shared< lens_emitter_state_t >( );
     if ( cls == "VuControlEntity" )
@@ -175,6 +195,22 @@ inline void key_motion_mark_properties( entity_t& e )
 
 inline void audio_emitter_load_properties( entity_t& e, const value_t& p )
 {
+    if ( e.m_type == "VuDockedBoatEntity" && e.m_state )
+    {
+        docked_entity_state_t& s = *static_cast< docked_entity_state_t* >( e.m_state.get( ) );
+        property_float( p, "Position X", s.x, s.d_x, false );
+        property_float( p, "Position Y", s.y, s.d_y, false );
+        property_float( p, "Rotation Z", s.rotation, s.d_rotation, false );
+        return;
+    }
+    if ( e.m_type == "VuForceAffectorEntity" && e.m_state )
+    {
+        force_affector_state_t& s = *static_cast< force_affector_state_t* >( e.m_state.get( ) );
+        property_bool( p, "Initially Active", s.value.initially_active, s.d_active );
+        property_float( p, "Acceleration", s.value.acceleration, s.d_acceleration, false );
+        property_float( p, "Max Speed", s.value.max_speed, s.d_speed, false );
+        return;
+    }
     if ( e.m_type == "VuSubstituteAssetEntity" && e.m_state )
     {
         substitute_asset_state_t& s = *static_cast< substitute_asset_state_t* >( e.m_state.get( ) );
@@ -209,6 +245,13 @@ inline void audio_emitter_load_properties( entity_t& e, const value_t& p )
 
 inline void audio_emitter_mark_properties( entity_t& e )
 {
+    if ( e.m_type == "VuForceAffectorEntity" && e.m_state )
+    {
+        force_affector_state_t& s = *static_cast< force_affector_state_t* >( e.m_state.get( ) );
+        s.d_active = s.value.initially_active;
+        s.d_acceleration = s.value.acceleration;
+        s.d_speed = s.value.max_speed;
+    }
     if ( e.m_type == "VuLensWaterEmitterEntity" && e.m_state )
     {
         lens_emitter_state_t& s = *static_cast< lens_emitter_state_t* >( e.m_state.get( ) );

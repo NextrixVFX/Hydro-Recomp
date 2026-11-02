@@ -41,6 +41,38 @@ inline void collision_world_clean_algorithm( void* user, void* algorithm )
     dispatch_destroy_pair_algorithm( w.dispatcher, w.algorithms, static_cast< pair_algorithm_t* >( algorithm ) );
 }
 
+// btPairCachingGhostObject (vtable 0x74DFB4, ctor 0x548E00: internal type 4, the overlapping objects +0x114 count / +0x11C data).
+// Slot 6 addOverlappingObjectInternal 0x548FE0: a linear search of the array, push_back when absent, then the same pair into the
+// ghost's OWN hashed pair cache (+0x130). Slot 7 removeOverlappingObjectInternal 0x549120: the match swapped with the last. The
+// ghost's own cache is read by no recreated path: not modelled.
+struct ghost_object_t : collision_object_t
+{
+    std::vector< collision_object_t* > overlapping;
+};
+
+inline void collision_world_ghost_add( void*, void* ghost, broadphase_proxy_t* other, broadphase_proxy_t* )
+{
+    ghost_object_t& g = *static_cast< ghost_object_t* >( static_cast< collision_object_t* >( ghost ) );
+    collision_object_t* o = static_cast< collision_object_t* >( other->client );
+    for ( const collision_object_t* x : g.overlapping )
+        if ( x == o )
+            return;
+    g.overlapping.push_back( o );
+}
+
+inline void collision_world_ghost_remove( void*, void* ghost, broadphase_proxy_t* other, broadphase_proxy_t* )
+{
+    ghost_object_t& g = *static_cast< ghost_object_t* >( static_cast< collision_object_t* >( ghost ) );
+    const collision_object_t* o = static_cast< collision_object_t* >( other->client );
+    for ( std::size_t i = 0; i < g.overlapping.size( ); ++i )
+        if ( g.overlapping[ i ] == o )
+        {
+            g.overlapping[ i ] = g.overlapping.back( );
+            g.overlapping.pop_back( );
+            return;
+        }
+}
+
 // The world as Vu 0x4F8050 builds it for the collision stage: the
 // btDbvtBroadphase (own pair cache) with the btGhostPairCallback installed;
 // the cache's algorithm teardown and the broadphase's setAabb wired here.
@@ -51,6 +83,8 @@ inline void collision_world_init( collision_world_t& w )
     w.broadphase->cache.has_ghost = true;
     w.broadphase->cache.hooks.user = &w;
     w.broadphase->cache.hooks.clean_algorithm = collision_world_clean_algorithm;
+    w.broadphase->cache.hooks.ghost_add = collision_world_ghost_add;
+    w.broadphase->cache.hooks.ghost_remove = collision_world_ghost_remove;
     w.aabb.user = &w;
     w.aabb.set_aabb = collision_world_set_aabb;
 }
@@ -200,6 +234,17 @@ inline int world_add_rigid_body( world_t& w, collision_world_t& cw, collision_ob
     collision_object_sync_in( o );
     w.objects.push_back( &b );
     w.has_motion.push_back( has_motion ? 1 : 0 );
+    return collision_world_add_object( cw, o, group, mask );
+}
+
+// addCollisionObject (world vt+0x1C = 0x54C1D0) on an object that is no rigid body: the world's one object array, which ours
+// mirrors in w.objects / has_motion, then the proxy. The ghost's collision object reads a solver_rigid_t image too (see
+// collision_object_sync_in), so `o.body.object` must be set.
+inline int world_add_collision_object( world_t& w, collision_world_t& cw, collision_object_t& o, short group, short mask )
+{
+    collision_object_sync_in( o );
+    w.objects.push_back( o.body.object );
+    w.has_motion.push_back( 0 );
     return collision_world_add_object( cw, o, group, mask );
 }
 
