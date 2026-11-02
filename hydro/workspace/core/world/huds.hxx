@@ -449,8 +449,7 @@ inline void c_world::hud_env( hud_project_t& h )
     ui_hud_gauges_t& g = h.ui->gauges( );
     g.m_live = true;
 #if HYDRO_UI_PASS
-    // The speedometer ctor 0x42AB60's textures by name (the asset factory 0x426A90). The boost record's material stays 0: its callback
-    // 0x42C290 is not recreated.
+    // The speedometer ctor 0x42AB60's textures by name (the asset factory 0x426A90) and its "BoostMeter" material.
     if ( m_ui_pass && !g.m_speedometer )
         g.m_speedometer = [ this ]( const entity_t&, ui_speedometer_t& s ) {
             const auto at = [ this ]( const std::string& name ) {
@@ -462,6 +461,13 @@ inline void c_world::hud_env( hud_project_t& h )
             s.m_needle = at( "UI/HUD_Speed_Needle" );
             for ( int k = 0; k < 8; ++k )
                 s.m_boost[ k ] = at( "UI/HUD_Boost" + std::to_string( k + 1 ) + "x" );
+            s.m_active = at( "UI/HUD_Speed_BoostActive" );
+            s.m_inactive = at( "UI/HUD_Speed_BoostInactive" );
+            s.m_hold = at( "UI/HUD_Speed_BoostHold" );
+            s.m_mask = at( "UI/HUD_Speed_BoostMask" );
+            s.m_flash = at( "UI/HUD_Speed_BoostInactiveFlash" );
+            m_ui_pass->boost_material( s.m_material, s.m_material_key );
+            s.m_self = m_ui_pass->boost_add( s );
         };
 #endif
     g.m_display[ 0 ] = m_race.world.display_w;

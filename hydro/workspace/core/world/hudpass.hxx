@@ -8,8 +8,7 @@
 // 1 Basic/2dXyzUv. Each callback reads its program from the entry's asset (+0x58): the same program the material bound, except that
 // the walk's material is the entry's own +8.
 //
-// NOT recreated: the boost meter's 0x42C290 -> 0x42C2A0 and the minimap's 0x428060 / 0x428070 (0x428080, 0x4284F0): read, each
-// needs its entity's shader handles from the ctor; a command with such a callback counts in gfx_ui_pass_t::m_unknown.
+// NOT recreated: the minimap's 0x428060 / 0x428070 (0x428080, 0x4284F0): read, a command with such a callback counts in gfx_ui_pass_t::m_unknown.
 
 #include <impl/engine/engine.hxx>
 #include <workspace/core/assets/texture.hxx>
@@ -18,6 +17,7 @@
 #include <workspace/core/ui/screens.hxx>
 #include <workspace/core/world/gfxsort.hxx>
 
+#include <bit>
 #include <cstdint>
 #include <cstring>
 #include <functional>
@@ -82,6 +82,65 @@ inline void ui_record_outline( ui_record_device_t& d, const std::uint8_t* r )
     d.draw( 2u, 4u, v, 12u );
 }
 
+// What 0x42C2A0 reaches: the shader "BoostMeter" (+0x88) by the handles the ctor 0x42AB60 took (gBoostTransform +0x98, gBoostTextureVOffset +0x9C: 0
+// none; gBoostTexture +0x90, gBoostMaskTexture +0x94: -1 none).
+struct ui_boost_device_t
+{
+    virtual ~ui_boost_device_t( ) = default;
+    virtual void boost_matrix( const float* m ) = 0;                                                   // program vt+0x1C
+    virtual void boost_float( float v ) = 0;                                                           // program vt+0x10
+    virtual void boost_texture( bool mask, std::uint32_t handle ) = 0;                                 // g 0x75907C vt+0xB4
+    virtual void boost_draw( std::uint32_t kind, std::uint32_t primitives, const float* vertices, std::uint32_t stride ) = 0;   // vt+0xC0
+};
+
+// 0x42C290 -> 0x42C2A0 (thiscall the entity = the record's +0; the record): the dial's size by the units; the texture: +0x58 set the active one, else +0x59
+// clear the hold, else +0x5A set the inactive under 0.25 of the flash countdown and the flash past it, else the inactive; a strip of the mask's height.
+inline void ui_record_boost( ui_boost_device_t& d, const ui_speedometer_t& s, bool has_transform, bool has_offset, bool has_texture, bool has_mask, const std::uint8_t* r )
+{
+    const ui_texture_t& back = s.m_metric == 1 ? s.m_back_metric : s.m_back_imperial;
+    const float tex_w = static_cast< float >( back.m_width ), tex_h = static_cast< float >( back.m_height );
+    const float mask_w = static_cast< float >( s.m_mask.m_width ), mask_h = static_cast< float >( s.m_mask.m_height );
+    float b, rect[ 4 ];
+    std::memcpy( &b, r + 0x54, 4 );
+    std::memcpy( rect, r + 0x44, 16 );
+    const float per_v = 1.0f / mask_h;
+    const float v_top = per_v * 62.0f, v_span = per_v * 132.0f;   // 0x6F77D0, 0x6F77EC
+    if ( has_transform )
+    {
+        float m[ 16 ];
+        std::memcpy( m, r + 4, 64 );
+        d.boost_matrix( m );
+    }
+    if ( has_offset )
+        d.boost_float( s.m_v_offset );
+    std::uint32_t texture = s.m_active.m_handle;
+    if ( r[ 0x58 ] == 0 )
+    {
+        if ( r[ 0x59 ] == 0 )
+            texture = s.m_hold.m_handle;
+        else if ( r[ 0x5A ] == 0 )
+            texture = s.m_inactive.m_handle;
+        else
+            texture = 0.25f > s.m_countdown ? s.m_inactive.m_handle : s.m_flash.m_handle;   // 0x6F762C, cmova
+    }
+    if ( has_texture )
+        d.boost_texture( false, texture );
+    if ( has_mask )
+        d.boost_texture( true, s.m_mask.m_handle );
+    const float per_h = 1.0f / tex_h, per_w = 1.0f / tex_w;
+    float span = per_h * mask_h * rect[ 3 ];
+    const float top = per_h * 0.0f * rect[ 3 ] + rect[ 1 ] + span * v_top;
+    span = span * v_span;
+    const float y1 = ( 1.0f - b ) * span + top;
+    const float y0 = y1 + span * b;
+    const float x0 = per_w * 9.0f * rect[ 2 ] + rect[ 0 ];     // 0x6F7788
+    const float x1 = x0 + per_w * mask_w * rect[ 2 ];
+    const float v1 = ( 1.0f - b ) * v_span + v_top;
+    const float v0 = v_span * b + v1;
+    const float v[ 16 ] = { x0, y1, 0.0f, v1, x0, y0, 0.0f, v0, x1, y1, 1.0f, v1, x1, y0, 1.0f, v0 };
+    d.boost_draw( 4u, 2u, v, 0x10u );
+}
+
 // ---- the pass ---------------------------------------------------------------------------------------------------------------------
 //
 // One VuGfxSort for the UI: the frame's draws fill it, flip runs its walk 0x53ADC0 with the table's type 17 (blend on, depth off) over
@@ -109,12 +168,12 @@ inline void ui_record_outline( ui_record_device_t& d, const std::uint8_t* r )
 
 #if HYDRO_UI_PASS
 
-struct gfx_ui_pass_t final : gfx_sort_hooks_t, ui_record_device_t
+struct gfx_ui_pass_t final : gfx_sort_hooks_t, ui_record_device_t, ui_boost_device_t
 {
     using read_t = std::function< bool( const std::string& asset, std::vector< std::uint8_t >& out ) >;
 
     // VuGfxUtil +4's records (0x541DD0): the program, its declaration, its material. Then the three font sets (0x538840).
-    enum { k_flat, k_textured, k_font, k_outline, k_image, k_sets };
+    enum { k_flat, k_textured, k_font, k_outline, k_image, k_boost, k_sets };
     struct set_t
     {
         gfx_program_t* m_program = nullptr;
@@ -143,6 +202,14 @@ struct gfx_ui_pass_t final : gfx_sort_hooks_t, ui_record_device_t
         load( k_font, "Font/Simple", { xyz, uv, colour } );
         load( k_outline, "Font/Outline", { xyz, uv, colour } );
         load( k_image, "Font/DrawImage", { xyz, uv, colour } );
+        {
+            gfx_vertex_element_t xy, boost_uv;      // the ctor 0x42AB60's two 16-byte rows
+            xy.m_type = 1u;
+            boost_uv.m_offset = 8u;
+            boost_uv.m_type = 1u;
+            boost_uv.m_usage = 6u;
+            load( k_boost, "BoostMeter", { xy, boost_uv } );
+        }
 #if HYDRO_UI_TEXT
         // 0x538840's lookups (the handles here are 1 + the record's index in m_handles), 0x536A.. order: plain, outline, images.
         for ( int k = 0; k < 3; ++k )
@@ -222,6 +289,19 @@ struct gfx_ui_pass_t final : gfx_sort_hooks_t, ui_record_device_t
             ui_record_solid( *this, record );
         else if ( callback == k_ui_rect_callback )
             ui_record_outline( *this, record );
+        else if ( callback == k_ui_boost_callback )
+        {
+            std::uint32_t self;
+            std::memcpy( &self, record, 4 );
+            const gfx_program_t* p = m_sets[ k_boost ].m_program;
+            if ( !p || self >= m_boosts.size( ) )
+            {
+                ++m_unknown;
+                return;
+            }
+            ui_record_boost( *this, m_boosts[ self ], p->constant( "gBoostTransform" ) != nullptr, p->constant( "gBoostTextureVOffset" ) != nullptr,
+                             p->sampler( "gBoostTexture" ) != -1, p->sampler( "gBoostMaskTexture" ) != -1, record );
+        }
 #if HYDRO_UI_TEXT
         else if ( callback == k_ui_font_callback )
             font( record );
@@ -250,6 +330,36 @@ struct gfx_ui_pass_t final : gfx_sort_hooks_t, ui_record_device_t
     }
 
     void bind( std::uint32_t slots, std::uint32_t handle ) { m_gfx.set_texture( slots, handle ? m_textures[ handle - 1 ] : nullptr ); }
+
+    // ---- ui_boost_device_t -----------------------------------------------------------------------------------------------------
+    void boost_matrix( const float* m ) override
+    {
+        const gfx_program_t& p = *m_sets[ k_boost ].m_program;
+        gfx_programs_t::set_matrix( m_direct, p, *p.constant( "gBoostTransform" ), m );
+    }
+    void boost_float( float v ) override
+    {
+        const gfx_program_t& p = *m_sets[ k_boost ].m_program;
+        gfx_programs_t::set_word( m_direct, p, *p.constant( "gBoostTextureVOffset" ), std::bit_cast< std::uint32_t >( v ) );
+    }
+    void boost_texture( bool mask, std::uint32_t handle ) override
+    {
+        bind( static_cast< std::uint32_t >( m_sets[ k_boost ].m_program->sampler( mask ? "gBoostMaskTexture" : "gBoostTexture" ) ), handle );
+    }
+    void boost_draw( std::uint32_t kind, std::uint32_t primitives, const float* vertices, std::uint32_t stride ) override { m_gfx.draw_dynamic( kind, primitives, vertices, stride ); }
+
+    void boost_material( std::uint32_t& id, std::uint32_t& key ) const
+    {
+        id = m_material_ids[ k_boost ];
+        key = m_sets[ k_boost ].m_material ? m_sets[ k_boost ].m_material->m_key : 0u;
+    }
+
+    // The entity behind a boost record (the record's +0), this frame's copy: ours for its address.
+    std::uint32_t boost_add( const ui_speedometer_t& s )
+    {
+        m_boosts.push_back( s );
+        return static_cast< std::uint32_t >( m_boosts.size( ) - 1u );
+    }
 
     // ---- assets ---------------------------------------------------------------------------------------------------------------
     // The texture of an asset name ("UI/HUD_Speed_Needle"): 0x426A90's answer, null when the pack has none. Cached, as the asset is.
@@ -392,6 +502,7 @@ struct gfx_ui_pass_t final : gfx_sort_hooks_t, ui_record_device_t
         gfx_viewport_t v{ 0.0f, 0.0f, static_cast< float >( m_width ), static_cast< float >( m_height ), 0.0f, 1.0f };
         m_direct.set_viewport( v );
         m_sort.flip( );
+        m_boosts.clear( );
     }
 
 #  if HYDRO_HOST_WINDOWS
@@ -416,7 +527,8 @@ struct gfx_ui_pass_t final : gfx_sort_hooks_t, ui_record_device_t
 #endif
     ui_impl_t m_impl;
     std::int32_t m_width = 0, m_height = 0;
-    int m_unknown = 0;   // commands whose callback is not recreated: the boost meter, the minimap
+    std::vector< ui_speedometer_t > m_boosts;
+    int m_unknown = 0;   // commands whose callback is not recreated: the minimap
 };
 
 #endif

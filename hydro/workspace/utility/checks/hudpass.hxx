@@ -3,6 +3,7 @@
 #include <workspace/core/world/hudpass.hxx>
 #include <workspace/core/world/mode.hxx>
 
+#include <bit>
 #include <cstdint>
 #include <cstring>
 #include <vector>
@@ -84,6 +85,73 @@ inline bool verify_ui_record_draws( )
         return true;
     }
     LOG_ERROR( "ui_record_draws FAILED %d of %d words", g.failed, g.compared );
+    return false;
+}
+
+// 0x42C290 -> 0x42C2A0 against retail (case boost_record): row: the entity's fields, the record, then the device log.
+struct ui_boost_check_device_t final : ui_boost_device_t
+{
+    std::vector< std::uint32_t > m_log;
+    void boost_matrix( const float* m ) override
+    {
+        m_log.push_back( 1u );
+        for ( int k = 0; k < 16; ++k )
+            m_log.push_back( std::bit_cast< std::uint32_t >( m[ k ] ) );
+    }
+    void boost_float( float v ) override { m_log.insert( m_log.end( ), { 2u, std::bit_cast< std::uint32_t >( v ) } ); }
+    void boost_texture( bool mask, std::uint32_t handle ) override { m_log.insert( m_log.end( ), { 3u, mask ? 0x94u : 0x90u, handle } ); }
+    void boost_draw( std::uint32_t kind, std::uint32_t primitives, const float* vertices, std::uint32_t stride ) override
+    {
+        m_log.insert( m_log.end( ), { 4u, kind, primitives, stride } );
+        for ( int k = 0; k < 16; ++k )
+            m_log.push_back( std::bit_cast< std::uint32_t >( vertices[ k ] ) );
+    }
+};
+
+inline bool verify_boost_record( )
+{
+    anim_cursor_t g;
+    g.w = g_golden_brd_words;
+    g.size = g_golden_brd_size;
+    g.where = "boost_record";
+    const unsigned rows = g.take( );
+    unsigned logged = 0;
+    for ( unsigned k = 0; k < rows; ++k )
+    {
+        const auto tex = [ & ]( ui_texture_t& t ) {
+            t.m_handle = g.take( );
+            t.m_width = static_cast< std::int32_t >( g.take( ) );
+            t.m_height = static_cast< std::int32_t >( g.take( ) );
+        };
+        ui_speedometer_t s;
+        tex( s.m_back_imperial );
+        tex( s.m_back_metric );
+        tex( s.m_active );
+        tex( s.m_inactive );
+        tex( s.m_hold );
+        tex( s.m_mask );
+        tex( s.m_flash );
+        s.m_metric = static_cast< std::int32_t >( g.take( ) );
+        s.m_v_offset = std::bit_cast< float >( g.take( ) );
+        s.m_countdown = std::bit_cast< float >( g.take( ) );
+        const bool transform = g.take( ) != 0u, offset = g.take( ) != 0u, texture = g.take( ) != 0u, mask = g.take( ) != 0u;
+        std::uint32_t words[ 23 ];
+        for ( std::uint32_t& w : words )
+            w = g.take( );
+        ui_boost_check_device_t d;
+        ui_record_boost( d, s, transform, offset, texture, mask, reinterpret_cast< const std::uint8_t* >( words ) );
+        const unsigned n = g.take( );
+        logged += n;
+        g.eq( static_cast< std::uint32_t >( d.m_log.size( ) ), n );
+        for ( unsigned i = 0; i < n; ++i )
+            g.eq( i < d.m_log.size( ) ? d.m_log[ i ] : 0xDEADBEEFu, g.take( ) );
+    }
+    if ( !g.failed )
+    {
+        LOG_SUCCESS( "boost_record matches retail's 0x42C290 / 0x42C2A0 on %u records, %u log words", rows, logged );
+        return true;
+    }
+    LOG_ERROR( "boost_record FAILED %d of %d words", g.failed, g.compared );
     return false;
 }
 

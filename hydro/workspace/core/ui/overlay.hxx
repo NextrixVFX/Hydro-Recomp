@@ -300,6 +300,8 @@ private:
             ui_speedometer_t s;
             fields( s.m_screen_scale, s.m_rect, s.m_anchor, s.m_depth );
             s.m_metric = static_cast< std::int32_t >( b.m_speedometer->m_metric );
+            s.m_v_offset = b.m_speedometer->m_v_offset;
+            s.m_countdown = b.m_speedometer->m_countdown;
             if ( m_gauges.m_speedometer )
                 m_gauges.m_speedometer( e, s );
             ui_speedometer_draw( sort, env, impl.m_crop, s, m_gauges.m_boat, m_gauges.m_display );
