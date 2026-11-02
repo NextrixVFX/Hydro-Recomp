@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <xmmintrin.h>
 
 // The device side of retail's input (boat batch 31, oracle case input_device): what g_vuinputmanagerimpl 0x759038 reads.
 // VuGamePad / VuMetroGamePad g 0x759040 (ctor 0x57E910, vtable 0x74C8AC), VuMetroKeyboard g 0x75906C (ctor 0x538F10 + slot 5
@@ -13,8 +14,8 @@
 // the "Input" phase, in the order of c_input_device::tick.
 //
 // THE PLATFORM, each a hook (input_device_hooks_t): XInputGetState / XInputGetCapabilities (XINPUT1_4 ordinals 2 / 4), the
-// real frame time (tick manager vt+0x3C), the two event broadcasts. Not recreated, platform: the rumble (0x57EFE0's second
-// half, XInputSetState; the +0x30 / +0x34 fade), "RumbleActive" 0x57EFB0, the CoreWindow handlers 0x4DAEF0 / 0x4DAF70 (the
+// real frame time (tick manager vt+0x3C), the two event broadcasts, XInputSetState (ordinal 3, the rumble half of 0x57EFE0).
+// Not recreated, platform: the CoreWindow handlers 0x4DAEF0 / 0x4DAF70 (the
 // platform calls key_down / key_up: 0x4DAEF0 ignores a repeat, WasKeyDown set, and both ignore a key while the app's +0x3C
 // byte is set).
 // SUBSTITUTION: retail's keyboard callback list (+4, priorities +0x150; 0x4F6700 / 0x539020) is the one call to the control
@@ -39,6 +40,7 @@ struct input_device_hooks_t
     void* user = nullptr;
     std::uint32_t ( *get_state )( void* user, int pad, input_xinput_state_t* state ) = nullptr;   // 0 ok, 0x48F not connected
     std::uint32_t ( *get_caps )( void* user, int pad, std::uint8_t* caps20 ) = nullptr;           // 0 ok
+    std::uint32_t ( *set_state )( void* user, int pad, std::uint16_t left, std::uint16_t right ) = nullptr;   // XInputSetState (null: no device)
     float ( *real_dt )( void* user ) = nullptr;                                                   // [0x759008] vt+0x3C
     void ( *pad_event )( void* user, bool connected, int pad ) = nullptr;                         // OnGamePadConnected / Disconnected
     void ( *method_event )( void* user ) = nullptr;                                               // OnControlMethodChanged
@@ -52,6 +54,7 @@ struct input_controller_t
     std::int32_t subtype = 0;
     std::uint32_t buttons = 0;
     float axes[ 6 ] = { };
+    float rumble[ 2 ] = { };   // +0x30 low, +0x34 high (ctor 0x57F430: 0)
 };
 
 // 0x57E910's tables: the axes (0x57E8A0: name, hash, minimum, 1), then the buttons (name, hash), each at the index a
@@ -162,8 +165,25 @@ public:
             c.axes[ k ] = std::fabs( c.axes[ k ] ) * c.axes[ k ];
     }
 
-    // 0x57EFE0, past which the rumble is the platform's. Every second of real time, the unconnected pads are scanned.
-    void pad_tick( )
+    // The pad's slot 1 0x57EFB0: VuDevConfig g 0x75901C's "RumbleActive" (vt+0x18; `tag` its value's +0, `value` the byte +8): a bool
+    // (tag 3) replaces +0x24, anything else leaves it. No dev config: not called.
+    void rumble_config( std::int32_t tag, std::uint8_t value )
+    {
+        if ( tag == 3 )
+            m_rumble_active = value;
+    }
+
+    // The controller's slot 0 0x57F470 (cdecl-style args, the driver's 0x40FD30 is its caller through pad vt+0x18( 0 )): each motor
+    // keeps the larger (maxss: a NaN argument wins).
+    void rumble( int pad, float low, float high )
+    {
+        input_controller_t& c = m_controllers[ pad ];
+        _mm_store_ss( &c.rumble[ 0 ], _mm_max_ss( _mm_set_ss( c.rumble[ 0 ] ), _mm_set_ss( low ) ) );
+        _mm_store_ss( &c.rumble[ 1 ], _mm_max_ss( _mm_set_ss( c.rumble[ 1 ] ), _mm_set_ss( high ) ) );
+    }
+
+    // 0x57EFE0. Every second of real time, the unconnected pads are scanned. Past the pad loop, the rumble with +0x24 set.
+    void pad_tick( float dt )
     {
         m_timer -= hooks.real_dt( hooks.user );
         if ( _mm_comige_ss( _mm_setzero_ps( ), _mm_set_ss( m_timer ) ) != 0 )
@@ -200,6 +220,8 @@ public:
                     hooks.pad_event( hooks.user, false, p );
             }
         }
+        if ( m_rumble_active != 0 )
+            rumble_tick( dt );
     }
 
     // 0x539120 (+ the callback: 0x4AEBE0 here): the key's byte in +0xC and the latch +0x5D.
@@ -256,7 +278,7 @@ public:
     void tick( float dt )
     {
         keyboard_tick( );
-        pad_tick( );
+        pad_tick( dt );
         if ( m_manager != nullptr )
             m_manager->tick( dt );
         control_tick( );
@@ -276,6 +298,22 @@ public:
     float timer( ) const
     {
         return m_timer;
+    }
+
+    void connect( int pad, bool on )    // a test's: +4 by hand
+    {
+        m_controllers[ pad ].connected = on ? 1 : 0;
+    }
+
+    void set_rumble( int pad, float low, float high )    // a test's: +0x30 / +0x34 by hand
+    {
+        m_controllers[ pad ].rumble[ 0 ] = low;
+        m_controllers[ pad ].rumble[ 1 ] = high;
+    }
+
+    std::uint8_t rumble_active( ) const
+    {
+        return m_rumble_active;
     }
 
     const std::uint8_t* down( ) const
@@ -304,6 +342,48 @@ private:
         float out;
         std::memcpy( &out, &word, 4 );
         return out;
+    }
+
+    // fld / fistp dword, then the low word (movzx): round to nearest; a NaN or a value outside int32 is 0x80000000: word 0.
+    static std::uint16_t motor_word( float x )
+    {
+        const double r = std::nearbyint( static_cast< double >( x ) );
+        if ( !( r >= -2147483648.0 && r <= 2147483647.0 ) )
+            return 0;
+        return static_cast< std::uint16_t >( static_cast< std::int32_t >( r ) );
+    }
+
+    // minss( 1, v ), then maxss( 0, that ): a NaN stays NaN.
+    static float rumble_clamp( float v )
+    {
+        const __m128 low = _mm_min_ss( _mm_set_ss( 1.0f ), _mm_set_ss( v ) );
+        float out;
+        _mm_store_ss( &out, _mm_max_ss( _mm_setzero_ps( ), low ) );
+        return out;
+    }
+
+    // 0x57F1B8 .. 0x57F30C: every connected pad gets XInputSetState, both motors 0 on a step of exactly 0 (a paused game; ucomiss: a NaN
+    // step is not 0), else each motor * 65535. Every pad, connected or not, then fades: low by 4 * dt, high by dt, each into 0 .. 1.
+    void rumble_tick( float dt )
+    {
+        const float low_step = dt * 4.0f;
+        for ( int p = 0; p < 4; ++p )
+        {
+            input_controller_t& c = m_controllers[ p ];
+            if ( c.connected != 0 )
+            {
+                std::uint16_t left = 0, right = 0;
+                if ( !( dt == 0.0f ) )
+                {
+                    left = motor_word( c.rumble[ 0 ] * 65535.0f );
+                    right = motor_word( c.rumble[ 1 ] * 65535.0f );
+                }
+                if ( hooks.set_state )
+                    hooks.set_state( hooks.user, p, left, right );
+            }
+            c.rumble[ 0 ] = rumble_clamp( c.rumble[ 0 ] - low_step );
+            c.rumble[ 1 ] = rumble_clamp( c.rumble[ 1 ] - dt );
+        }
     }
 
     static void zone( float& v, float high, float low, float scale )
@@ -341,6 +421,7 @@ private:
     c_input_manager* m_manager = nullptr;
     input_controller_t m_controllers[ 4 ];
     float m_timer = 1.0f;          // +0x20
+    std::uint8_t m_rumble_active = 1;   // +0x24 (ctor 0x57E965)
     std::uint8_t m_down[ 81 ]{};     // keyboard +0xC
     std::uint8_t m_latch[ 81 ]{};    // +0x5D
     std::uint8_t m_last[ 81 ]{};     // +0xAE

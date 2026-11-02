@@ -236,6 +236,86 @@ inline bool verify_input_manager( )
     return failed == 0;
 }
 
+// The rumble half of 0x57EFE0, the controller's 0x57F470 and the pad's slot 1 0x57EFB0 against retail (case pad_rumble): per step the op, its
+// inputs, the XInputSetState calls in order and all eight motor words after.
+inline bool verify_pad_rumble( )
+{
+    const unsigned* w = g_golden_pad_rumble_words;
+    const auto next = [ & ]( ) { return *w++; };
+    const auto real = [ ]( unsigned u ) {
+        float f;
+        std::memcpy( &f, &u, 4 );
+        return f;
+    };
+    const auto word = [ ]( float f ) {
+        unsigned u;
+        std::memcpy( &u, &f, 4 );
+        return u;
+    };
+    struct call_t
+    {
+        unsigned pad, left, right;
+    };
+    static std::vector< call_t > s_calls;
+    const unsigned n = next( );
+    int bad = 0;
+    c_input_device device;
+    device.hooks.real_dt = []( void* ) { return 0.0f; };
+    device.hooks.get_state = []( void*, int, input_xinput_state_t* ) -> std::uint32_t { return 1u; };
+    device.hooks.get_caps = []( void*, int, std::uint8_t* ) -> std::uint32_t { return 1u; };
+    device.hooks.set_state = []( void*, int pad, std::uint16_t left, std::uint16_t right ) -> std::uint32_t {
+        s_calls.push_back( { static_cast< unsigned >( pad ), left, right } );
+        return 0u;
+    };
+    for ( unsigned k = 0; k < n; ++k )
+    {
+        s_calls.clear( );
+        const unsigned op = next( );
+        for ( int p = 0; p < 4; ++p )
+            device.connect( p, next( ) != 0u );
+        for ( int p = 0; p < 4; ++p )
+        {
+            const float low = real( next( ) );
+            const float high = real( next( ) );
+            device.set_rumble( p, low, high );
+        }
+        const unsigned a = next( ), b = next( ), c = next( );
+        if ( op == 0 )
+        {
+            device.rumble_config( 3, static_cast< std::uint8_t >( a ) );
+            device.pad_tick( real( b ) );
+        }
+        else if ( op == 1 )
+        {
+            device.rumble_config( 3, 1 );
+            device.rumble( static_cast< int >( a ), real( b ), real( c ) );
+        }
+        else
+        {
+            device.rumble_config( 3, static_cast< std::uint8_t >( 1u - c ) );
+            device.rumble_config( static_cast< std::int32_t >( b ), static_cast< std::uint8_t >( c ) );
+        }
+        const unsigned active = next( ), calls = next( );
+        if ( active != device.rumble_active( ) || calls != s_calls.size( ) )
+            ++bad;
+        for ( unsigned j = 0; j < calls; ++j )
+        {
+            const unsigned pad = next( ), left = next( ), right = next( );
+            if ( j < s_calls.size( ) && ( s_calls[ j ].pad != pad || s_calls[ j ].left != left || s_calls[ j ].right != right ) )
+                ++bad;
+        }
+        for ( int p = 0; p < 4; ++p )
+            for ( int m = 0; m < 2; ++m )
+                if ( word( device.controller( p ).rumble[ m ] ) != next( ) )
+                    ++bad;
+    }
+    if ( bad )
+        LOG_ERROR( "pad_rumble FAILED %d of %u", bad, n );
+    else
+        LOG_SUCCESS( "verify_pad_rumble: %u steps of 0x57EFE0's rumble half, 0x57F470 and 0x57EFB0 match retail", n );
+    return bad == 0;
+}
+
 // c_input_device + c_input_manager against retail's own gamepad, keyboard, control method and manager on the real InputDB
 // (case input_device, boat batch 31): the name tables, the key table, the lookups, the dead zone, then frames of fake XInput
 // and key events through the four "Input" ticks, down to the channels VuHumanDriver reads.
