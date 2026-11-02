@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <fstream>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -837,3 +838,315 @@ inline bool verify_asset_package( )
             static_cast< int >( g_golden_asset_package_load_count ) );
     return failed == 0;
 }
+
+// VuAssetFactoryImpl's remaining slots against retail's (case asset_slots, boat batch 30): the same op list replayed on
+// c_asset_factory over the real Base.apf (Extra*.apf = the same file, Bad.apf a bad magic). Every op's answer text and
+// event log must match. Slots 25 / 37's asset lists are compared sorted (head comment of factory.hxx).
+struct asset_slots_state_t
+{
+    std::string pack;
+    unsigned char bad[ 68 ]{};
+    c_asset_factory* factory = nullptr;
+    std::vector< vu_asset_t* > assets;
+    std::string events, game, lang;
+    bool has_game = false;
+    std::vector< std::size_t > reloads;
+
+    std::size_t index_of( const vu_asset_t* a ) const
+    {
+        return static_cast< std::size_t >( std::find( assets.begin( ), assets.end( ), a ) - assets.begin( ) );
+    }
+};
+
+inline std::string asset_slots_list( std::vector< std::size_t > v )
+{
+    std::sort( v.begin( ), v.end( ) );
+    std::string out;
+    for ( std::size_t k = 0; k < v.size( ); ++k )
+        out += ( k != 0 ? "," : "" ) + std::to_string( v[ k ] );
+    return out;
+}
+
+inline void asset_slots_hooks( c_asset_factory& f, asset_slots_state_t& c )
+{
+    f.hooks.user = &c;
+    f.hooks.pack_path = []( void* u, const std::string& file ) {
+        auto* c = static_cast< asset_slots_state_t* >( u );
+        if ( file != "Base.apf" && file != "Extra.apf" && file != "Extra2.apf" && file != "Extra3.apf" && file != "Bad.apf" )
+            return std::string( );
+        c->factory->hooks.pack_header = file == "Bad.apf" ? c->bad : nullptr;
+        return c->pack;
+    };
+    f.hooks.create = []( void* u, const std::string& ) {
+        auto* c = static_cast< asset_slots_state_t* >( u );
+        c->assets.push_back( new vu_asset_t );
+        return c->assets.back( );
+    };
+    f.hooks.load_data = []( void* u, vu_asset_t& a, const std::vector< std::uint8_t >& data ) {
+        auto* c = static_cast< asset_slots_state_t* >( u );
+        char text[ 64 ];
+        std::snprintf( text, sizeof( text ), "L%u:%u:%x;", static_cast< unsigned >( c->index_of( &a ) ), static_cast< unsigned >( data.size( ) ),
+            c_archive::fnv( data.data( ), data.size( ) ) );
+        c->events += text;
+        return true;
+    };
+    f.hooks.patch = []( void* u, vu_asset_t& a, vu_asset_t& from ) {
+        auto* c = static_cast< asset_slots_state_t* >( u );
+        c->events += "P" + std::to_string( c->index_of( &a ) ) + ":" + std::to_string( c->index_of( &from ) ) + ";";
+        return true;
+    };
+    f.hooks.destroy = []( void* u, vu_asset_t* a ) {
+        auto* c = static_cast< asset_slots_state_t* >( u );
+        c->events += "D" + std::to_string( c->index_of( a ) ) + ";";
+    };
+    f.hooks.reload = []( void* u, vu_asset_t& a ) {
+        auto* c = static_cast< asset_slots_state_t* >( u );
+        c->reloads.push_back( c->index_of( &a ) );
+    };
+    f.hooks.language = []( void* u ) { return static_cast< asset_slots_state_t* >( u )->lang; };
+    f.hooks.game_info = []( void* u, value_t& document, bool& parsed ) {
+        auto* c = static_cast< asset_slots_state_t* >( u );
+        if ( !c->has_game )
+            return false;
+        json_text_reader_t r;
+        parsed = json_read_text( r, document, c->game.c_str( ) ) != 0;
+        return true;
+    };
+}
+
+inline bool verify_asset_slots( )
+{
+    const std::string pack = package_check_pack( );
+    if ( pack.empty( ) )
+    {
+        LOG_ERROR( "verify_asset_slots: Base.apf not found" );
+        return false;
+    }
+    asset_slots_state_t c;
+    c.pack = pack;
+{
+        std::ifstream file( pack, std::ios::binary );
+        file.read( reinterpret_cast< char* >( c.bad ), sizeof( c.bad ) );
+    }
+    std::memcpy( c.bad, "VUPG", 4 );
+    const std::uint32_t head_hash = c_archive::fnv( c.bad, 0x40 );
+    std::memcpy( c.bad + 0x40, &head_hash, 4 );
+
+    const unsigned* w = g_golden_asset_slots_words;
+    const auto text = [ & ]( ) {
+        const unsigned n = *w++;
+        std::string out( reinterpret_cast< const char* >( w ), n );
+        w += ( n + 3 ) / 4;
+        return out;
+    };
+    const unsigned rows = *w++;
+    std::unique_ptr< c_asset_factory > f;
+    asset_listener_t l[ 2 ];
+    for ( int k = 0; k < 2; ++k )
+    {
+        l[ k ].user = reinterpret_cast< void* >( static_cast< std::intptr_t >( k ) );
+    }
+    static asset_slots_state_t* s_c;
+    s_c = &c;
+    l[ 0 ].package_loaded = []( void*, const std::string& n ) { s_c->events += "p0:" + n + ";"; };
+    l[ 1 ].package_loaded = []( void*, const std::string& n ) { s_c->events += "p1:" + n + ";"; };
+    l[ 0 ].created = []( void*, vu_asset_t& a ) { s_c->events += "c0:" + std::to_string( s_c->index_of( &a ) ) + ";"; };
+    l[ 1 ].created = []( void*, vu_asset_t& a ) { s_c->events += "c1:" + std::to_string( s_c->index_of( &a ) ) + ";"; };
+    l[ 0 ].unloaded = []( void* ) { s_c->events += "u0;"; };
+    l[ 1 ].unloaded = []( void* ) { s_c->events += "u1;"; };
+
+    int failed = 0;
+    for ( unsigned i = 0; i < rows; ++i )
+    {
+        ( void )*w++;
+        const std::string op = text( ), a = text( ), b = text( ), cc = text( ), d = text( ), want = text( ), want_events = text( );
+        std::string got = "0";
+        const auto flag = []( bool v ) { return std::string( v ? "1" : "0" ); };
+        const auto dump = []( const value_t& v ) {
+            std::string t;
+            vujb_dump( v, t );
+            return t;
+        };
+        if ( op == "init" )
+        {
+            f = std::make_unique< c_asset_factory >( );
+            for ( vu_asset_t* x : c.assets )
+                delete x;
+            c.assets.clear( );
+            c.factory = f.get( );
+            c.has_game = a != "\x01";
+            c.game = c.has_game ? a : std::string( );
+            c.lang = cc;
+            asset_slots_hooks( *f, c );
+            got = flag( f->init( []( void* ) { s_c->events += "cb;"; }, nullptr, b ) );
+        }
+        else if ( op == "listeners" )
+        {
+            f->add_listener( &l[ 0 ] );
+            f->add_listener( &l[ 1 ] );
+            f->add_listener( &l[ 0 ] );
+            for ( const char* t : { "VuDBAsset", "VuFontAsset", "VuTemplateAsset" } )
+                f->register_type( t, 1u, 0u, 1u, true );
+        }
+        else if ( op == "exists" )
+            got = flag( f->exists( a, b ) );
+        else if ( op == "used" )
+            got = flag( f->used( a, b ) );
+        else if ( op == "base_lists" )
+            got = flag( f->base_lists( a, b ) );
+        else if ( op == "info" )
+            got = dump( f->info( a, b, cc ) );
+        else if ( op == "info_in" )
+            got = dump( f->info_in( a, b, cc, d ) );
+        else if ( op == "names" )
+        {
+            std::string all;
+            const auto& n = f->names( a );
+            for ( const std::string& x : n )
+                all.append( x.c_str( ), x.size( ) + 1 );
+            char t[ 32 ];
+            std::snprintf( t, sizeof( t ), "%u:%x", static_cast< unsigned >( n.size( ) ), c_archive::fnv( reinterpret_cast< const unsigned char* >( all.data( ) ), all.size( ) ) );
+            got = t;
+        }
+        else if ( op == "category" )
+            got = std::to_string( f->category( a ) );
+        else if ( op == "count" )
+            got = std::to_string( f->package_count( ) );
+        else if ( op == "package" )
+        {
+            const asset_package_t& p = f->package_at( static_cast< std::size_t >( std::atoi( a.c_str( ) ) ) );
+            char t[ 32 ];
+            std::snprintf( t, sizeof( t ), "|%x|%x", p.words[ 0 ], p.words[ 1 ] );
+            got = p.name + t;
+        }
+        else if ( op == "mask" )
+            got = std::to_string( f->license_mask( a ) );
+        else if ( op == "skus" )
+            got = dump( f->game_skus( ) );
+        else if ( op == "packages" )
+            got = dump( f->game_packages( ) );
+        else if ( op == "create" )
+        {
+            vu_asset_t* made = f->create( a, b );
+            got = std::to_string( made != nullptr ? static_cast< int >( c.index_of( made ) ) : -1 );
+        }
+        else if ( op == "remove_listener" )
+            f->remove_listener( &l[ 0 ] );
+        else if ( op == "forget" )
+            f->forget( a, b );
+        else if ( op == "loaded" )
+        {
+            std::vector< vu_asset_t* > v;
+            f->loaded( v );
+            std::vector< std::size_t > ids;
+            for ( vu_asset_t* x : v )
+                ids.push_back( c.index_of( x ) );
+            got = asset_slots_list( ids );
+        }
+        else if ( op == "install" )
+            got = flag( f->load_installed( ) );
+        else if ( op == "set_sku" )
+            f->set_sku_all( a );
+        else if ( op == "sku" )
+            got = f->sku( ) + "|" + f->package_at( 0 ).sku;
+        else if ( op == "unload" )
+        {
+            c.reloads.clear( );
+            f->unload_packages( );
+            got = asset_slots_list( c.reloads );
+        }
+        else if ( op == "reset" )
+            got = flag( f->reset( ) );
+        else
+            got = "?" + op;
+        if ( got != want || c.events != want_events )
+        {
+            if ( ++failed <= 8 )
+                LOG_ERROR( "asset_slots row %u %s( %s, %s ): ours '%s' [%s], retail '%s' [%s]", i, op.c_str( ), a.substr( 0, 24 ).c_str( ),
+                    b.c_str( ), got.substr( 0, 80 ).c_str( ), c.events.substr( 0, 80 ).c_str( ), want.substr( 0, 80 ).c_str( ), want_events.substr( 0, 80 ).c_str( ) );
+        }
+        c.events.clear( );
+    }
+    for ( vu_asset_t* x : c.assets )
+        delete x;
+    if ( failed == 0 )
+        LOG_SUCCESS( "VuAssetFactoryImpl's slots 5 10 12-16 24-26 28-30 32-41 match retail's on the real Base.apf: %u ops", rows );
+    else
+        LOG_ERROR( "VuAssetFactoryImpl's slots FAILED %d of %u", failed, rows );
+    return failed == 0;
+}
+
+// project_asset_load and timed_events_load against retail's slot 5s on real pack records (case asset_loads, boat batch 30).
+inline bool verify_asset_loads( )
+{
+    c_archive archive;
+    const std::string pack = package_check_pack( );
+    if ( pack.empty( ) || !archive.open( pack.c_str( ) ) )
+    {
+        LOG_ERROR( "verify_asset_loads: Base.apf not readable" );
+        return false;
+    }
+    const unsigned* w = g_golden_asset_loads_words;
+    const auto text = [ & ]( ) {
+        const unsigned n = *w++;
+        std::string out( reinterpret_cast< const char* >( w ), n );
+        w += ( n + 3 ) / 4;
+        return out;
+    };
+    const auto hash_of = []( const value_t& v ) {
+        std::string t;
+        vujb_dump( v, t );
+        return c_archive::fnv( reinterpret_cast< const unsigned char* >( t.data( ) ), t.size( ) );
+    };
+    const unsigned n = *w++;
+    int failed = 0;
+    for ( unsigned i = 0; i < n; ++i )
+    {
+        const std::string name = text( );
+        const unsigned broken = *w++, eax = *w++, pos = *w++, word = *w++, doc = *w++, events = *w++;
+        std::vector< std::uint8_t > bytes;
+        bool bad = !archive.read( name.c_str( ), bytes );
+        if ( broken != 0 )
+        {
+            static const char magic[ ] = "VUJB";
+            auto at = std::search( bytes.begin( ), bytes.end( ), magic, magic + 4 );
+            if ( at != bytes.end( ) )
+                at[ 3 ] = 'X';
+        }
+        if ( name.rfind( "VuProject", 0 ) == 0 )
+        {
+            std::size_t position = 0;
+            value_t document;
+            std::uint32_t got = 0;
+            const bool ok = project_asset_load( bytes, position, document, got );
+            bad = bad || ( ok ? 1u : 0u ) != eax || position != pos || got != word || ( ok && hash_of( document ) != doc );
+        }
+        else
+        {
+            std::vector< timed_event_t > out;
+            const bool ok = timed_events_load( bytes, out );
+            bad = bad || ( ok ? 1u : 0u ) != eax || ( ok && out.size( ) != events );
+            for ( unsigned e = 0; e < events; ++e )
+            {
+                const unsigned time = *w++;
+                const std::string event = text( );
+                const unsigned hash = *w++;
+                if ( e < out.size( ) )
+                {
+                    unsigned bits;
+                    std::memcpy( &bits, &out[ e ].time, 4 );
+                    bad = bad || bits != time || out[ e ].name != event || hash_of( out[ e ].params ) != hash;
+                }
+            }
+        }
+        if ( bad && ++failed <= 6 )
+            LOG_ERROR( "asset_loads: %s (broken %u) differs (retail eax %u, position %u)", name.c_str( ), broken, eax, pos );
+    }
+    if ( failed == 0 )
+        LOG_SUCCESS( "VuProjectAsset's load 0x5551B0 and VuTimedEventAsset's load 0x5C95B0 match retail on %u real records", n );
+    else
+        LOG_ERROR( "asset loads FAILED %d of %u", failed, n );
+    return failed == 0;
+}
+
+#include <workspace/utility/checks/input.hxx>
