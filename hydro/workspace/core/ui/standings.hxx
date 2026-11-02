@@ -60,6 +60,7 @@ struct ui_champ_env_t
     std::function< void( float dt ) > m_award_tick;   // vt+0xC
     std::function< bool( ) > m_award_done;            // 0x47F720
     std::function< void( ) > m_award_exit;            // 0x47F4C0, then the scalar deleting dtor (the object freed)
+    std::function< void( ) > m_award_draw;            // 0x451CA0's end: vt+0x10
 };
 
 struct ui_champ_state_t

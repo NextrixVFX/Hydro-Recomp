@@ -2312,6 +2312,87 @@ inline bool verify_ui_remap_logic( )
     return failed == 0;
 }
 
+// Batch 30, ROUTING only (the slots are compared with retail by verify_ui_championship_load, the award by verify_ui_award_screen): a bound
+// Screens/Championship reaches 0x451370 / 0x451540 through the game slots, its OnUITick and the inputs IsBusy / Exit / PlayNext reach
+// standings.hxx, the frame's m_champ draws the standings the load built; ui_game_screens_t::award_open builds the second VuAwardScreen
+// on Screens/AwardChampionship and its slots run through ui_champ_award_bind.
+inline bool verify_ui_champ_bind( )
+{
+    const ui_loaded_t& loaded = ui_loaded( );
+    entity_t* root = nullptr, * award_root = nullptr, * table = nullptr;
+    for ( std::size_t p = 0; p < g_golden_ui_projects_count; ++p )
+    {
+        if ( loaded.trees[ p ].empty( ) )
+            continue;
+        if ( std::strcmp( g_golden_ui_projects[ p ].m_asset, "Screens/Championship" ) == 0 )
+        {
+            root = const_cast< entity_t* >( loaded.trees[ p ][ 0 ].second );
+            for ( const auto& leaf : loaded.trees[ p ] )
+                if ( leaf.second->m_ctor && leaf.second->m_ctor->m_vtable == k_ui_champ_vtable )
+                    table = const_cast< entity_t* >( leaf.second );
+        }
+        if ( std::strcmp( g_golden_ui_projects[ p ].m_asset, "Screens/Award" ) == 0 )
+            award_root = const_cast< entity_t* >( loaded.trees[ p ][ 0 ].second );
+    }
+    if ( !root || !table )
+    {
+        LOG_ERROR( "ui champ bind: Screens/Championship is not in the loaded projects" );
+        return false;
+    }
+    value_t data;
+    ui_json_set_string( ui_json_child( ui_json_child( data, "GameConfig" ), "Championship" ), "Nothing" );
+    const value_t boat_db = ui_gd_document( 0 );
+    value_t champ_db;
+    value_t& entry = ui_json_child( ui_json_child( champ_db, "VuDBAsset" ), "Nothing" );
+    ui_json_at( ui_json_child( entry, "Events" ), 0 );
+    fleet_random_t rng;
+    std::string log;
+    ui_champ_env_t env;
+    env.m_root = &data;
+    env.m_boat_db = &boat_db;
+    env.m_champ_db = &champ_db;
+    env.m_random = &rng;
+    env.m_string = [ ]( const char* id ) { return std::string( id ); };
+    env.m_load = [ & ]( value_t& ) { log += "load;"; };
+    env.m_save = [ & ]( const value_t& ) { log += "save;"; };
+    env.m_broadcast = [ & ]( const char* e, const ui_params_t& ) { log += e; log += ";"; };
+    ui_game_screens_t screens;
+    screens.m_load = [ & ]( const std::string& project ) -> std::unique_ptr< entity_t > { log += project + ";"; (void) award_root; return nullptr; };
+    ui_champ_award_bind( env, screens );
+    int ticks = 0;
+    env.m_value = [ ]( const std::string&, std::int32_t ) { return 7; };
+    ui_bind_hooks_t hooks;
+    hooks.m_root = &data;
+    hooks.m_champ = &env;
+    int failed = 0;
+    {
+        c_ui_binding binding( *root, hooks );
+        binding.project_initialize( );
+        ui_champ_state_t* state = binding.champ( *table );
+        failed += state && state->m_rows.list.size( ) == 16u ? 0 : 1;
+        const ui_ret_t busy = binding.input( *table, "IsBusy", ui_params_t( ) );
+        failed += busy.m_words[ 0 ] == 3u && busy.m_words[ 1 ] == 0u ? 0 : 1;
+        ui_json_set_int( ui_json_child( state->m_data, "Round" ), 1 );
+        binding.input( *table, "Exit", ui_params_t( ) );
+        failed += state->m_award && screens.m_award ? 0 : 1;
+        const ui_ret_t busy2 = binding.input( *table, "IsBusy", ui_params_t( ) );
+        failed += busy2.m_words[ 1 ] == 1u ? 0 : 1;
+        ui_params_t tick;
+        ui_params_add( tick, 2, 0x3D000000u );
+        binding.post( fsm_hash( "OnUITick" ), tick );
+        ++ticks;
+        failed += log.find( "Screens/AwardChampionship" ) != std::string::npos ? 0 : 1;
+        binding.project_release( );
+        failed += screens.m_award ? 0 : 1;
+    }
+    failed += log.find( "load;" ) == 0 && log.find( "save;" ) != std::string::npos ? 0 : 1;
+    if ( failed == 0 )
+        LOG_SUCCESS( "VuChampionshipEntity's binding: slots 6 / 7, OnUITick, IsBusy / Exit / PlayNext reach standings.hxx; ui_game_screens_t::award_open builds the second VuAwardScreen; ROUTING only (%d tick)", ticks );
+    else
+        LOG_ERROR( "ui champ bind: %d routing tests failed (log %s)", failed, log.c_str( ) );
+    return failed == 0;
+}
+
 // c_ui_award_screen (core/ui award.hxx) against retail's VuAwardScreen (oracle case award_screen: ctor 0x47ECC0, then per
 // run 0x47F350 and a script of ticks, draws, the listeners and the exit): each step's calls in order (the events' VuParams
 // bytes included), the state, every field after.
@@ -2659,6 +2740,7 @@ inline bool verify_ui_widgets_all( )
     ok = verify_ui_wired_bind( ) && ok;
     ok = verify_ui_pause_menu( ) && ok;
     ok = verify_ui_award_screen( ) && ok;
+    ok = verify_ui_champ_bind( ) && ok;
     ok = verify_ui_font_wrap( ) && ok;
     ok = verify_ui_screen_inputs( ) && ok;
     ok = verify_ui_common_screen( ) && ok;

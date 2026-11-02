@@ -298,3 +298,84 @@ private:
     std::deque< ui_award_unlock_t > m_queue;// +0x7C
     bool m_select = true;                   // +0x90 (the ctor's 1: a held Select is not a press)
 };
+
+// VuAwardScreen in the game: VuGame's Awards enter 0x484320 (+0x88) and the championship's 0x454C70 (+0x294). `m_award_hooks` of
+// ui_game_award_setup_t is the world's (the game manager's credits and unlocks are platform hooks). The root's event 0x501260
+// (the project's tree, each entity's map +0xC): c_ui_binding::post over the bound maps, ROUTING (verify_ui_champ_bind).
+struct ui_game_award_t
+{
+    std::unique_ptr< entity_t > m_root;
+    std::unique_ptr< c_ui_binding > m_binding;
+    std::unique_ptr< c_ui_award_screen > m_screen;
+};
+
+struct ui_game_award_setup_t
+{
+    ui_award_hooks_t m_hooks;
+};
+
+// One per process, as the hooks of ui_game_screens_t are: set by the owner before the first award_open.
+inline ui_game_award_setup_t& ui_game_award_setup( )
+{
+    static ui_game_award_setup_t setup;
+    return setup;
+}
+
+// new 0x94, ctor 0x47ECC0 ( project ), 0x47F350. A project that does not load: the object still exists with a null root (every
+// common slot empty), as Results' enter.
+inline bool ui_game_screens_t::award_open( const char* project, std::int32_t tier, const std::string& boat_class, std::int32_t value, const std::vector< std::string >& names )
+{
+    auto award = std::make_shared< ui_game_award_t >( );
+    award->m_root = m_load ? m_load( project ) : nullptr;
+    ui_common_ops_t ops;
+    ops.m_repository_add = m_repository_add;
+    ops.m_repository_remove = m_repository_remove;
+    ops.m_device = m_device;
+    ui_award_hooks_t hooks = ui_game_award_setup( ).m_hooks;
+    if ( award->m_root )
+    {
+        award->m_binding = std::make_unique< c_ui_binding >( *award->m_root, m_hooks );
+        c_ui_binding* b = award->m_binding.get( );
+        entity_t* root = award->m_root.get( );
+        ops.m_initialize = [ b ] { b->project_initialize( ); };
+        ops.m_release = [ b ] { b->project_release( ); };
+        ops.m_tick = [ b ]( float dt ) { b->tick( dt, true ); };
+        ops.m_draw = [ this, b, root ] { if ( m_frame ) m_frame( *root, *b ); };
+        hooks.m_event = [ b ]( const char* name, const ui_params_t& p ) { b->post( fsm_hash( name ), p ); };
+    }
+    award->m_screen = std::make_unique< c_ui_award_screen >( award->m_root.get( ), std::move( ops ), std::move( hooks ) );
+    m_award = award;
+    m_award->m_screen->start( tier, boat_class, value, names );
+    return true;
+}
+
+// verb 0 0x47F4C0, 1 its deletion, 2 its tick, 3 its draw.
+inline void ui_game_screens_t::award_screen( int verb, float dt )
+{
+    if ( !m_award )
+        return;
+    if ( verb == 0 )
+        m_award->m_screen->exit( );
+    else if ( verb == 1 )
+    {
+        m_award->m_screen->close( );
+        m_award.reset( );
+    }
+    else if ( verb == 2 )
+        m_award->m_screen->tick( dt );
+    else if ( verb == 3 )
+        m_award->m_screen->draw( );
+}
+
+inline bool ui_game_screens_t::award_done( ) const { return m_award && m_award->m_screen->done( ); }
+
+// The championship's award slots over the same object (standings.hxx ui_champ_env_t).
+inline void ui_champ_award_bind( ui_champ_env_t& env, ui_game_screens_t& screens )
+{
+    ui_game_screens_t* g = &screens;
+    env.m_award_open = [ g ]( const char* project, std::int32_t place, const std::string& cls, std::int32_t value, const std::vector< std::string >& names ) { g->award_open( project, place, cls, value, names ); };
+    env.m_award_tick = [ g ]( float dt ) { g->award_screen( 2, dt ); };
+    env.m_award_done = [ g ] { return g->award_done( ); };
+    env.m_award_exit = [ g ] { g->award_screen( 0, 0.0f ); g->award_screen( 1, 0.0f ); };
+    env.m_award_draw = [ g ] { g->award_screen( 3, 0.0f ); };
+}
