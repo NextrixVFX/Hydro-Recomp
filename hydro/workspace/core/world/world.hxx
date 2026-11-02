@@ -552,6 +552,7 @@ private:
 
     // The race HUD projects and their countdown (world/huds.hxx).
     void load_huds( const char* const* names = k_race_hud_projects );
+    void bind_game_screens( );   // huds.hxx: Results' VuCommonScreen into s.rules.screen_hooks
     void hud( int project, race_hud_verb_t verb, float dt );
     void race_broadcast( const char* name, const ui_params_t* params = nullptr, int origin = -1 );
     void race_broadcast_hash( std::uint32_t hash, const char* name, const ui_params_t& p, int origin );
@@ -1105,6 +1106,7 @@ public:
             project_initialized( );   // the session stopped before 0x4BA060 reached it: the event still goes out
         if ( !started )
             return;
+        bind_game_screens( );
         // THE TEST INPUT (ours, flagged): --input-script answers the platform input hook from a file (world/drive.hxx).
         if ( const char* script = c_engine::option( "input-script" ) )
         {
