@@ -489,6 +489,8 @@ inline void race_drive_driver( void* user, float dt )
         ghost_driver_tick( *s.track, r.ghost_pilot, r.d.transform );   // slot 18 0x40EBA0
         return;
     }
+    if ( s.dock )
+        return;   // VuAiUiDriver's tick 0x40E5C0: not recreated (world/dock.hxx)
     race_unwired( s, "a driver tick of a class not wired here (UI, or an AI boat with no pilot) - UNKNOWN" );
 }
 

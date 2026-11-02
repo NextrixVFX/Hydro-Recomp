@@ -319,8 +319,7 @@ inline void c_world::award_event( const char* name, const ui_params_t& p )
     }
 }
 
-// VuPosterEntity's two listeners (ctor 0x43A8F0: 0x43AC50, 0x43ADA0) on gameutil +0x50: the document half. Its model reload 0x43AF50 and draw are the background
-// scene's (Screens/Background's entity is not drawn yet): hook `reload` answers nothing.
+// VuPosterEntity's two listeners (ctor 0x43A8F0: 0x43AC50, 0x43ADA0) on gameutil +0x50; the reload 0x43AF50 and the draw 0x43AEA0: world/dock.hxx.
 inline bool c_world::menu_poster( std::uint32_t hash, const ui_params_t& p )
 {
     static const std::uint32_t change = fsm_hash( "OnChangePoster" ), reset = fsm_hash( "OnResetPoster" );
@@ -329,7 +328,7 @@ inline bool c_world::menu_poster( std::uint32_t hash, const ui_params_t& p )
     poster_hooks_t h;
     h.game_data = &m_menu_util;
     h.has_asset = [ this ]( const std::string& name ) { return !m_archive.names( "VuStaticModelAsset/" + name ).empty( ); };   // 0x43B080: the factory's vt+0x28 ( the type, name )
-    h.reload = [ ] { };
+    h.reload = [ this ] { poster_reload( ); };
     if ( hash == change )
         poster_change( p, h );
     else

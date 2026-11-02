@@ -15,6 +15,7 @@
 #include <workspace/core/game/input.hxx>
 #include <workspace/core/game/identity.hxx>
 #include <workspace/core/game/language.hxx>
+#include <workspace/core/game/docked.hxx>
 #include <workspace/core/world/control.hxx>
 #include <workspace/core/world/effects.hxx>
 #include <workspace/core/world/pfx.hxx>
@@ -1350,75 +1351,78 @@ public:
         // Boat_proxy/Proxy_diffuse placeholder) - retail's state at that point, not a stand-in. The damage pieces'
         // skins (+0x238, 0x4119F0) are not built here: our renderer does not draw the pieces. race_draw moves the
         // shown instance each frame (0x41EAE0's matrix).
-        m_race.boat_models = [ this ]( std::size_t k ) {
-            race_session_boat_t& b = *m_race.boats[ k ];
-            const std::uint8_t* transform = m_race.start_boats[ k ].transform;
-            if ( !transform )
-                return;
-            float m[ 16 ];
-            race_boat_draw_matrix( b.graph.objects[ 0 ].image.data( ), transform, m );
-            const int at[ 3 ] = { 0xC4, 0xDC, 0xF4 };
-            std::vector< livery_draw_t > draws[ 3 ];
-            std::vector< scene_table_t > skin_tables[ 3 ];
-            m_retail_boats.resize( m_race.boats.size( ) );
-            m_retail_boats[ k ] = std::make_unique< gfx_retail_boat_t >( );
-            gfx_retail_boat_t* retail_boat = m_retail_boats[ k ].get( );
-            int skinned = 0;
-            if ( b.sections )
-            {
-                livery_scene_t scenes[ 3 ];
-                const livery_scene_t* pointers[ 3 ] = { };
-                for ( int i = 0; i < 3; ++i )
-                    if ( livery_scene_for( b.io.boat_strings[ at[ i ] ], scenes[ i ] ) )
-                        pointers[ i ] = &scenes[ i ];
-                std::vector< std::vector< livery_material_t > > skins;
-                if ( livery_pass( m_skin_db.tag == 6 ? &m_skin_db : nullptr, b.skin, pointers, { }, skins ) )
-                    for ( int i = 0; i < 3; ++i )
-                        for ( std::size_t s = 0; pointers[ i ] && s < skins[ i ].size( ) && s < scenes[ i ].size( ); ++s )
-                        {
-                            draws[ i ].push_back( livery_draw_of( scenes[ i ][ s ], skins[ static_cast< std::size_t >( i ) ][ s ] ) );
-                            skinned += draws[ i ].back( ).texture_set ? 1 : 0;
-                            skin_tables[ i ].emplace_back( );
-                            livery_table_of( skins[ static_cast< std::size_t >( i ) ][ s ], skin_tables[ i ].back( ) );
-                        }
-                else
-                    LOG_WARNING( "race: %s skin pass 0x421490 UNKNOWN (a texture name of 64 bytes or more: strcpy_s's invalid-parameter path)",
-                                 b.name.c_str( ) );
-            }
-            for ( int i = 0; i < 3; ++i )
-            {
-                const std::string& asset = b.io.boat_strings[ at[ i ] ];
-                if ( asset.empty( ) )
-                    continue;
-                // The three instances on retail's path (stage.hxx): gMatrixArray in the vertex shader for the two animated ones, each skin's materials through the instance's map.
-                if ( !m_retail )
-                    continue;
-                gfx_retail_boat_t& r = *retail_boat;
-                const gfx_retail_model_t* model = m_retail->record( asset );
-                if ( model == nullptr )
-                    continue;
-                for ( std::size_t s = 0; s < skin_tables[ i ].size( ) && s < model->m_program_ids.size( ); ++s )
-                    r.m_maps[ i ].m_ids[ static_cast< std::uint32_t >( model->m_scene.shaders[ s ].index ) ] = m_retail->skinned_material( *model, s, skin_tables[ i ][ s ] );
-                if ( i == 2 )
-                {
-                    gfx_scene_view_attach( r.m_low, model->m_view );
-                    r.m_low.m_map = r.m_maps[ 2 ].m_ids.empty( ) ? nullptr : &r.m_maps[ 2 ];
-                }
-                else
-                {
-                    gfx_animated_model_t& a = i == 0 ? r.m_high : r.m_middle;
-                    gfx_scene_view_attach( a, model->m_view );
-                    a.m_map = r.m_maps[ i ].m_ids.empty( ) ? nullptr : &r.m_maps[ i ];
-                }
-            }
-            b.shown = -1;
-            LOG_INFO( "race: %s hull at %.1f %.1f %.1f - models '%s' / '%s' / '%s', skin '%s': %s", b.name.c_str( ), m[ 12 ], m[ 13 ], m[ 14 ],
-                      b.io.boat_strings[ 0xC4 ].c_str( ), b.io.boat_strings[ 0xDC ].c_str( ), b.io.boat_strings[ 0xF4 ].c_str( ), b.skin.c_str( ),
-                      b.sections ? ( skinned ? "skin pass 0x421490 applied" : "skin pass 0x421490 ran, no texture changed" )
-                                 : "skin pass 0x421490 not reached (0x420A70 stopped) - the models' own materials" );
-        };
+        m_race.boat_models = [ this ]( std::size_t k ) { race_boat_models( k ); };
         for ( std::size_t k = 0; k < m_race.boats.size( ); ++k )
             m_race.boat_models( k );
+    }
+
+    void race_boat_models( std::size_t k )
+    {
+        race_session_boat_t& b = *m_race.boats[ k ];
+        const std::uint8_t* transform = m_race.start_boats[ k ].transform;
+        if ( !transform )
+            return;
+        float m[ 16 ];
+        race_boat_draw_matrix( b.graph.objects[ 0 ].image.data( ), transform, m );
+        const int at[ 3 ] = { 0xC4, 0xDC, 0xF4 };
+        std::vector< livery_draw_t > draws[ 3 ];
+        std::vector< scene_table_t > skin_tables[ 3 ];
+        m_retail_boats.resize( m_race.boats.size( ) );
+        m_retail_boats[ k ] = std::make_unique< gfx_retail_boat_t >( );
+        gfx_retail_boat_t* retail_boat = m_retail_boats[ k ].get( );
+        int skinned = 0;
+        if ( b.sections )
+        {
+            livery_scene_t scenes[ 3 ];
+            const livery_scene_t* pointers[ 3 ] = { };
+            for ( int i = 0; i < 3; ++i )
+                if ( livery_scene_for( b.io.boat_strings[ at[ i ] ], scenes[ i ] ) )
+                    pointers[ i ] = &scenes[ i ];
+            std::vector< std::vector< livery_material_t > > skins;
+            if ( livery_pass( m_skin_db.tag == 6 ? &m_skin_db : nullptr, b.skin, pointers, { }, skins ) )
+                for ( int i = 0; i < 3; ++i )
+                    for ( std::size_t s = 0; pointers[ i ] && s < skins[ i ].size( ) && s < scenes[ i ].size( ); ++s )
+                    {
+                        draws[ i ].push_back( livery_draw_of( scenes[ i ][ s ], skins[ static_cast< std::size_t >( i ) ][ s ] ) );
+                        skinned += draws[ i ].back( ).texture_set ? 1 : 0;
+                        skin_tables[ i ].emplace_back( );
+                        livery_table_of( skins[ static_cast< std::size_t >( i ) ][ s ], skin_tables[ i ].back( ) );
+                    }
+            else
+                LOG_WARNING( "race: %s skin pass 0x421490 UNKNOWN (a texture name of 64 bytes or more: strcpy_s's invalid-parameter path)",
+                             b.name.c_str( ) );
+        }
+        for ( int i = 0; i < 3; ++i )
+        {
+            const std::string& asset = b.io.boat_strings[ at[ i ] ];
+            if ( asset.empty( ) )
+                continue;
+            // The three instances on retail's path (stage.hxx): gMatrixArray in the vertex shader for the two animated ones, each skin's materials through the instance's map.
+            if ( !m_retail )
+                continue;
+            gfx_retail_boat_t& r = *retail_boat;
+            const gfx_retail_model_t* model = m_retail->record( asset );
+            if ( model == nullptr )
+                continue;
+            for ( std::size_t s = 0; s < skin_tables[ i ].size( ) && s < model->m_program_ids.size( ); ++s )
+                r.m_maps[ i ].m_ids[ static_cast< std::uint32_t >( model->m_scene.shaders[ s ].index ) ] = m_retail->skinned_material( *model, s, skin_tables[ i ][ s ] );
+            if ( i == 2 )
+            {
+                gfx_scene_view_attach( r.m_low, model->m_view );
+                r.m_low.m_map = r.m_maps[ 2 ].m_ids.empty( ) ? nullptr : &r.m_maps[ 2 ];
+            }
+            else
+            {
+                gfx_animated_model_t& a = i == 0 ? r.m_high : r.m_middle;
+                gfx_scene_view_attach( a, model->m_view );
+                a.m_map = r.m_maps[ i ].m_ids.empty( ) ? nullptr : &r.m_maps[ i ];
+            }
+        }
+        b.shown = -1;
+        LOG_INFO( "race: %s hull at %.1f %.1f %.1f - models '%s' / '%s' / '%s', skin '%s': %s", b.name.c_str( ), m[ 12 ], m[ 13 ], m[ 14 ],
+                  b.io.boat_strings[ 0xC4 ].c_str( ), b.io.boat_strings[ 0xDC ].c_str( ), b.io.boat_strings[ 0xF4 ].c_str( ), b.skin.c_str( ),
+                  b.sections ? ( skinned ? "skin pass 0x421490 applied" : "skin pass 0x421490 ran, no texture changed" )
+                             : "skin pass 0x421490 not reached (0x420A70 stopped) - the models' own materials" );
     }
 
     // Per frame: the draw 0x41EAE0's instance choice against this frame's eye, and its matrix: the transform's world
@@ -1428,7 +1432,7 @@ public:
     // (0x80 with +0x466); 0x532AD0 / 0x520130 under 0x41EB7C's matrix. The middle instance's palette is the first's (0x532990, Build step 4).
     void retail_boats( gfx_sort_t& sort, const gfx_draw_params_t& p )
     {
-        for ( std::size_t k = 0; k < m_race.boats.size( ) && k < m_retail_boats.size( ) && m_race.active; ++k )
+        for ( std::size_t k = 0; k < m_race.boats.size( ) && k < m_retail_boats.size( ) && ( m_race.active || m_race.dock ); ++k )
         {
             race_session_boat_t& b = *m_race.boats[ k ];
             const std::uint8_t* transform = m_race.start_boats[ k ].transform;
@@ -1589,6 +1593,11 @@ public:
                     item.retail->draw( sort, p );
                 }
             retail_boats( sort, p );
+            if ( m_poster_on )   // VuPosterEntity's draw 0x43AEA0
+            {
+                m_poster_model.m_colour = m_poster_colour;
+                m_poster_model.draw( sort, m_poster_matrix, p );
+            }
             for ( foliage_entity_t& f : m_foliage_entities )
                 if ( ( p.m_reflecting & f.m_reflect ) == p.m_reflecting )
                     f.draw( p.m_eye, p.m_eye );
@@ -2046,6 +2055,19 @@ private:
     };
     std::vector< retail_corona_t > m_retail_coronas;
     std::vector< std::unique_ptr< gfx_retail_boat_t > > m_retail_boats;
+    // The front end's dock and poster (world/dock.hxx).
+    float m_dock_spot[ 3 ] = { };           // VuDockedBoatEntity +0x5C +0x60 +0x64
+    entity_t* m_poster_entity = nullptr;
+    gfx_static_model_t m_poster_model{ };
+    float m_poster_matrix[ 16 ] = { };
+    std::uint32_t m_poster_colour = 0xFFFFFFFFu;
+    bool m_poster_on = false;
+    static void dock_tick( void* user, float dt );
+    bool dock_make( const value_t& document );
+    docked_hooks_t dock_hooks( );
+    void dock_start( );
+    bool menu_dock( std::uint32_t hash, const ui_params_t& p );
+    void poster_reload( );
     // VuPfxGeomPattern's particles this frame: 0x5903A0's tail, the model's draw 0x520130 at the particle's matrix and colour.
     struct retail_geom_t
     {
@@ -2366,6 +2388,7 @@ private:
 #include <workspace/core/world/graph.hxx>
 #include <workspace/core/world/menu.hxx>
 #include <workspace/core/world/external.hxx>
+#include <workspace/core/world/dock.hxx>
 #include <workspace/core/world/msgbox.hxx>
 #include <workspace/core/world/saves.hxx>
 #include <workspace/core/world/motion.hxx>

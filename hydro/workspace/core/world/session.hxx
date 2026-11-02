@@ -450,6 +450,7 @@ struct race_session_t
     // answered by the platform input hook in place of the device; null: the device (input below). frames: the session frames
     // run (race_session_frame), the script's clock.
     std::shared_ptr< struct race_input_script_t > input_script;
+    bool dock = false;        // the front end's dock boat (world/dock.hxx): ticks run, `active` stays false
     bool autopilot = false;   // --autopilot (world/autopilot.hxx)
     bool autopilot_keys = false;   // --autopilot-keys
     int autopilot_held = 0;

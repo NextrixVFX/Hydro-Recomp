@@ -715,7 +715,7 @@ inline bool race_session_start( race_session_t& s, const std::string& mode, cons
 // frame time (the clock g_vumetrosys vt+0x28 is the platform layer).
 inline void race_session_frame( race_session_t& s, float dt )
 {
-    if ( !s.active )
+    if ( !s.active && !s.dock )
         return;
     s.clock += static_cast< double >( dt );
     tick_run( s.ticks, s.clock );

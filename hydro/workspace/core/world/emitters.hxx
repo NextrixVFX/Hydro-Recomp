@@ -122,8 +122,16 @@ struct force_affector_state_t
     float d_acceleration = value.acceleration, d_speed = value.max_speed;
 };
 
+// VuDockedBoatEntity (ctor 0x4358E0): "Position X" +0x5C, "Position Y" +0x60, "Rotation Z" +0x64, each VuBasicProperty<float> 0x737484.
+struct docked_entity_state_t
+{
+    float x = 0.0f, y = 0.0f, rotation = 0.0f, d_x = 0.0f, d_y = 0.0f, d_rotation = 0.0f;
+};
+
 inline std::shared_ptr< void > audio_emitter_state_for( const std::string& cls )
 {
+    if ( cls == "VuDockedBoatEntity" )
+        return std::make_shared< docked_entity_state_t >( );
     if ( cls == "VuForceAffectorEntity" )
         return std::make_shared< force_affector_state_t >( );
     if ( cls == "VuLensWaterEmitterEntity" )
@@ -187,6 +195,14 @@ inline void key_motion_mark_properties( entity_t& e )
 
 inline void audio_emitter_load_properties( entity_t& e, const value_t& p )
 {
+    if ( e.m_type == "VuDockedBoatEntity" && e.m_state )
+    {
+        docked_entity_state_t& s = *static_cast< docked_entity_state_t* >( e.m_state.get( ) );
+        property_float( p, "Position X", s.x, s.d_x, false );
+        property_float( p, "Position Y", s.y, s.d_y, false );
+        property_float( p, "Rotation Z", s.rotation, s.d_rotation, false );
+        return;
+    }
     if ( e.m_type == "VuForceAffectorEntity" && e.m_state )
     {
         force_affector_state_t& s = *static_cast< force_affector_state_t* >( e.m_state.get( ) );

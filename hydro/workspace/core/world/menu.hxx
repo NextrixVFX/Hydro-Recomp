@@ -89,6 +89,7 @@ inline ui_bind_hooks_t c_world::menu_hooks( int id )
     hooks.m_root = &m_menu_util;
     hooks.m_broadcast_out = [ this ]( std::uint32_t hash, const ui_params_t& p ) {
         menu_poster( hash, p );
+        menu_dock( hash, p );
         if ( m_menu )
             m_menu->handle( hash, p );
     };
