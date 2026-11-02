@@ -1606,9 +1606,8 @@ public:
         if ( m_retail && m_race.active && m_race.slalom_draw )
             for ( const slalom_gate_t& g : m_race.slalom_gates )   // the gates' instances +0xA8 / +0xC8: their Model Asset watchers, at the load in retail
                 for ( const std::string* name : { &g.model, &g.reflection } )
-                    if ( m_gate_models.find( *name ) == m_gate_models.end( ) )
+                    if ( gfx_static_model_t& model = m_gate_models[ *name ]; !model.m_scene )   // the draw's own m_gate_models[ ] may have made the entry: an entry is not an attach
                     {
-                        gfx_static_model_t& model = m_gate_models[ *name ];
                         if ( const gfx_scene_view_t* v = name->empty( ) ? nullptr : m_retail->model( *name ) )
                             gfx_scene_view_attach( model, *v );
                     }
