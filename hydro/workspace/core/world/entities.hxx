@@ -59,8 +59,6 @@ inline void c_world::load_entity_tree( const char* asset, const value_t& project
     std::map< std::string, int > unknown_types;
     int models = 0;
     int models_unplaced = 0;
-    // Every static placement, by owner, for the rotators (adopt_rotators).
-    std::vector< collected_t > collected;
     std::vector< trigger_t > fresh_triggers;
     int pfx_placed = 0;
     int pfx_unplaced = 0;
@@ -69,10 +67,6 @@ inline void c_world::load_entity_tree( const char* asset, const value_t& project
     int triggers_unplaced = 0;
     // The logic / action / motion / settings consumers (engine entity/actions.hxx).
     std::vector< rotator_t > fresh_rotators;
-    std::map< const entity_t*, int > rotator_of;
-    std::vector< std::pair< int, std::string > > fresh_adopters;
-    int rotators_unplaced = 0;
-    std::vector< attach_t > fresh_attaches;
     std::map< std::string, play_t > fresh_play;
     std::map< std::string, action_t > fresh_actions;
     std::map< std::string, delay_t > fresh_delays;
@@ -87,7 +81,6 @@ inline void c_world::load_entity_tree( const char* asset, const value_t& project
     // The event graph addresses an entity by its names below the project
     // root, '/'-joined.
     std::map< std::string, std::string > fresh_types;
-    std::map< std::string, std::array< float, 16 > > fresh_worlds;
     std::map< std::string, int > fresh_census;
     // THE EVENT GRAPH, as the script components' loads resolved it (engine
     // entity/script.hxx, verify_script_graph): every plug's +0x50 list in link
@@ -128,45 +121,40 @@ inline void c_world::load_entity_tree( const char* asset, const value_t& project
         {
             fresh_types[ trail ] = e.m_type;
             ++fresh_census[ e.m_type ];
-            const transform_component_t* t = entity_transform( e );
-            if ( t && !e.m_world_unknown )
-            {
-                std::array< float, 16 > w{};
-                std::memcpy( w.data( ), t->world, sizeof( t->world ) );
-                fresh_worlds[ trail ] = w;
-            }
         }
-        // VuRotateMotionEntity: Axis / Speed (radians) / Local, its base the
-        // transform world; its DIRECT parent adopts it (recorded after the
-        // parent's subtree, below - the old walk's post-order).
+        // VuRotateMotionEntity (world/rotate.hxx): its properties and the "Entity" ref's target (script component), whose
+        // motion component slot 6 finds.
         if ( const auto* p = entity_action< rotate_motion_properties_t >( e ); p && e.m_type == "VuRotateMotionEntity" )
         {
-            const transform_component_t* t = entity_transform( e );
-            if ( !t || e.m_world_unknown )
-                ++rotators_unplaced;
-            else
-            {
-                rotator_t motion{};
-                motion.path = trail;
-                std::memcpy( motion.base, t->world, sizeof( motion.base ) );
-                std::memcpy( motion.axis, p->axis, sizeof( motion.axis ) );
-                motion.speed = p->speed;
-                motion.local = p->local != 0;
-                rotator_of[ &e ] = static_cast< int >( fresh_rotators.size( ) );
-                fresh_rotators.push_back( motion );
-            }
+            rotator_t motion{};
+            motion.path = trail;
+            motion.entity = &e;
+            vu_identity( motion.value.base );
+            std::memcpy( motion.value.axis, p->axis, sizeof( motion.value.axis ) );
+            motion.value.speed = p->speed;
+            motion.value.local = p->local != 0;
+            motion.initially_active = p->initially_active != 0;
+            motion.one_shot = p->one_shot != 0;
+            if ( const script_component_t* sc = script_of( e ) )
+                for ( const script_ref_t& ref : sc->m_refs )
+                    if ( std::string( ref.m_row->m_name ) == "Entity" && ref.m_target )
+                        motion.target = ref.m_target;
+            fresh_rotators.push_back( std::move( motion ) );
         }
-        // VuAttachEntity: the relative position / rotation (radians) and node
-        // name; its Parent / Child refs are the script component's (m_refs).
+        // VuAttachEntity (world/joints.hxx): its properties, the Parent / Child refs' entities (script component).
         if ( const auto* p = entity_action< attach_properties_t >( e ); p && e.m_type == "VuAttachEntity" )
         {
-            attach_t join{};
-            join.path = trail;
-            join.at_start = p->attach_at_start != 0;
-            std::memcpy( join.position, p->relative_position, sizeof( join.position ) );
-            std::memcpy( join.rotation, p->relative_rotation, sizeof( join.rotation ) );
-            join.node = p->node_name;
-            fresh_attaches.push_back( std::move( join ) );
+            entity_t* ends[ 2 ] = { nullptr, nullptr };
+            if ( const script_component_t* sc = script_of( e ) )
+                for ( const script_ref_t& ref : sc->m_refs )
+                {
+                    const std::string name( ref.m_row->m_name );
+                    if ( name == "Parent" )
+                        ends[ 0 ] = ref.m_target;
+                    else if ( name == "Child" )
+                        ends[ 1 ] = ref.m_target;
+                }
+            m_joints.add( e, *p, ends[ 0 ], ends[ 1 ] );
         }
         // VuPlayAnimationEntity: the clip and its params from the loaded
         // targets; which props it drives and what triggers it are its script
@@ -359,13 +347,10 @@ inline void c_world::load_entity_tree( const char* asset, const value_t& project
                 static_draw_item_t item{};
                 item.draw = m;
                 const std::string* names[ 3 ] = { &m.model_asset, &m.lod1_model_asset, &m.lod2_model_asset };
-                m_collect = &collected;
-                m_place_owner = trail;
                 for ( int instance = 0; instance < 3; ++instance )
                     if ( !names[ instance ]->empty( ) )
                         place_model( *names[ instance ], matrix, 0, -1, tint, nullptr, -1, &item.placements[ instance ], &item.nodes[ instance ] );
                 item.owner = &e;
-                m_collect = nullptr;
                 // 0x531D10 with the LOD 0 instance's scene aabb (its +0x10 scene's +0x5C), or the zero aabb
                 // 0x7593F0 when it holds no scene; +0x1E's draw-manager hand-off is the renderer's (a hook).
                 const auto box = m_scene_aabbs.find( m.model_asset );
@@ -403,26 +388,15 @@ inline void c_world::load_entity_tree( const char* asset, const value_t& project
         }
         for ( auto& child : e.m_children )
             self( self, *child, trail.empty( ) ? child->m_name : trail + "/" + child->m_name );
-        // After the subtree, as the old walk recorded it: this entity adopts each
-        // motion entity that is its DIRECT child.
-        for ( auto& child : e.m_children )
-        {
-            const auto it = rotator_of.find( child.get( ) );
-            if ( it != rotator_of.end( ) )
-                fresh_adopters.emplace_back( it->second, trail );
-        }
     };
     walk( walk, *m_tree, std::string( ) );
     m_graph = std::move( fresh_graph );
     m_refs = std::move( fresh_refs );
     LOG_INFO( "event graph: %u linked plugs, %d link entries (each connection on both ends), %u bound refs - from the tree",
         static_cast< unsigned >( m_graph.size( ) ), graph_links, static_cast< unsigned >( m_refs.size( ) ) );
-    m_seat_world = std::move( fresh_worlds );
     m_entity_type = std::move( fresh_types );
     m_type_census = std::move( fresh_census );
     m_rotators = std::move( fresh_rotators );
-    m_adopters = std::move( fresh_adopters );
-    m_attaches = std::move( fresh_attaches );
     m_play = std::move( fresh_play );
     m_actions = std::move( fresh_actions );
     m_delays = std::move( fresh_delays );
@@ -443,7 +417,6 @@ inline void c_world::load_entity_tree( const char* asset, const value_t& project
                              edge.plug.c_str( ) );
     if ( !fresh_sky.empty( ) )
         m_sky = fresh_sky;
-    adopt_rotators( std::move( collected ) );
     for ( trigger_t& gate : fresh_triggers )
         m_triggers.add( std::move( gate ) );
     LOG_INFO( "entity tree: %s (%s) - %d entities, %d UNKNOWN (nothing below one is loaded); %d coronas placed, %d with an "

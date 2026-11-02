@@ -503,15 +503,7 @@ inline void c_world::bind_animations( )
         static_cast< unsigned >( m_filters.size( ) ),
         static_cast< unsigned >( m_actions.size( ) ),
         static_cast< unsigned >( m_graph.size( ) ) );
-    // "Attach at Start" is the property VuAttachEntity_ctor @0x5f4fa0
-    // declares first; the entity attaches itself at load rather than
-    // waiting for its "Attach" input plug. Run the composition once here
-    // so the audit below reports the result rather than the authored
-    // state, and every frame afterwards in case the parent moves.
-    for ( attach_t& join : m_attaches )
-        if ( join.at_start )
-            join.attached = true;
-    update_attaches( );
+    motions_game_initialize( );
     audit_graph( );
     m_triggers.test_geometry( );
     test_wiring( );

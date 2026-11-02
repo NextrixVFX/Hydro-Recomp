@@ -24,6 +24,8 @@
 #include <workspace/core/world/race.hxx>
 #include <workspace/core/world/strings.hxx>
 #include <workspace/core/world/session.hxx>
+#include <workspace/core/world/joints.hxx>
+#include <workspace/core/world/latch.hxx>
 #include <workspace/core/world/build.hxx>
 #include <workspace/core/world/drive.hxx>
 #include <workspace/core/world/water.hxx>
@@ -73,37 +75,17 @@ public:
     float far_plane( ) const { return m_far; }
 
 private:
-    // A placement captured inside a rotating subtree, with the world matrix
-    // it was placed at.
-    struct collected_t
-    {
-        int handle = -1;
-        std::array< float, 16 > world{};
-        // The entity that owns this placement. A motion entity's ref names ONE
-        // node, so the adopt step has to know which handles came from it.
-        std::string owner;
-    };
-
-    // A VuRotateMotionEntity. Every field and the integration below are
-    // transliterated from VuRotateMotionEntity_ctor @0x5d0dc0 and
-    // VuRotateMotionEntity_tick @0x5d1090 - see memory/decompile.md.
+    // A VuRotateMotionEntity (world/rotate.hxx): slot 6 0x61A420 finds the "Entity" ref's motion component and, with "Initially
+    // Active", runs "Activate" 0x61A4F0; the "Motion" tick 0x61A6E0 runs slot 14 while active.
     struct rotator_t
     {
         std::string path;
-        float base[ 16 ]{};
-        // ctor defaults: Axis (0,0,1), Speed pi/2 rad/s (a VuAngleProperty,
-        // so radians), Local true, angle 0.
-        float axis[ 3 ]{ 0.0f, 0.0f, 1.0f };
-        float speed = 1.5707964f;
-        bool local = true;
-        float angle = 0.0f;
-        // Each driven placement with its transform expressed RELATIVE to the
-        // rotator's base. The retail engine re-derives a child's transform
-        // from its parent every frame; capturing the relative matrix once and
-        // re-composing gives the same result without an entity hierarchy.
-        // FLAGGED as an implementation difference, not a derived constant.
-        std::vector< int > placements;
-        std::vector< std::array< float, 16 > > relative;
+        entity_t* entity = nullptr;
+        entity_t* target = nullptr;              // the ref's entity
+        c_joints::motion_t* motion = nullptr;    // +0x68
+        rotate_motion_t value;
+        bool initially_active = false, one_shot = false;
+        bool active = false, latch = false;      // +0x6C / +0x6D
     };
 
     struct cached_part_t
@@ -474,26 +456,27 @@ private:
 
     }
 
-    // adopt_rotator: motion.hxx
-    void adopt_rotator( int rotator, const std::vector< collected_t >& collected );
 
-    // adopt_rotators: motion.hxx
-    void adopt_rotators( std::vector< collected_t > pool );
 
-    // owned_by: motion.hxx
-    static bool owned_by( const std::string& owner, const std::string& target );
 
     // ref_target: motion.hxx
     std::string ref_target( const std::string& owner, const std::string& name ) const;
 
+    // generic_event: graph.hxx
+    void generic_event( const std::string& name, int depth );
+
     // update_rotators: motion.hxx
     void update_rotators( float dt );
 
-    // update_attaches: motion.hxx
-    void update_attaches( );
+    // motion_child / motions_game_initialize / rotator_activate / rotator_deactivate: motion.hxx
+    void motion_child( entity_t& child, const float* matrix, const float* linear, const float* angular );
+    void motions_game_initialize( );
+    void rotator_activate( rotator_t& motion );
+    void rotator_deactivate( rotator_t& motion );
+    skel_instance_t* prop_instance( entity_t& e );
+    void animated_attach_tick( );
+    bool motion_release( const entity_t& e );
 
-    // rigid_inverse: motion.hxx
-    static void rigid_inverse( float* out, const float* m );
 
 
     // One end of an event-graph link: the other plug's owner (its path) and name.
@@ -632,7 +615,9 @@ private:
         m_events.clear( );
         m_initialized.clear( );
         m_ifs.clear( );
-        m_attaches.clear( );
+        m_joints.clear( );
+        m_prop_skels.clear( );
+        m_motion_unknown = 0;
         m_refs.clear( );
         m_booleans.clear( );
         m_graph.clear( );
@@ -647,12 +632,9 @@ private:
         m_rotators.clear( );
         m_coronas.clear( );
         m_entity_world.clear( );
-        m_seat_world.clear( );
         m_overrides_seen = 0;
         m_overrides_placed = 0;
         m_override_components.clear( );
-        m_collect = nullptr;
-        m_adopters.clear( );
         m_rig.clear( );
         m_shaded.clear( );
         m_asset_objects.clear( );
@@ -1097,6 +1079,8 @@ public:
         m_race.world.fire = [ this ]( const entity_t& owner, const char* plug ) { fire( entity_path( owner ), plug ); };
         m_race.world.sound = &m_sound;
         m_race.world.prop_moved = [ this ]( const entity_t& owner ) { prop_moved( owner ); };
+        m_race.world.attach_update = [ this ]( const entity_t& parent, const float* m, const float* l, const float* a ) { m_joints.parent_moved( parent, m, l, a ); };
+        m_race.world.motion_release = [ this ]( const entity_t& e ) { return motion_release( e ); };
         // VuRaceGame's ctor 0x489030 loads its three HUD projects (0x4B4360) - before the boat load; VuTimeTrialGame's 0x48ED30
         // its own three (game_mode_defs: HUDs/TimeTrial*).
         load_huds( mode == "TimeTrial" ? game_mode_defs( )[ 1 ].huds : mode == "Slalom" ? game_mode_defs( )[ 0 ].huds
@@ -1315,6 +1299,8 @@ public:
         m_race.world.vo = m_vo_ready ? &m_vo : nullptr;
         m_race.world.vo_hooks = m_vo_ready ? &m_vo_hooks : nullptr;
         m_race.world.prop_moved = [ this ]( const entity_t& owner ) { prop_moved( owner ); };
+        m_race.world.attach_update = [ this ]( const entity_t& parent, const float* m, const float* l, const float* a ) { m_joints.parent_moved( parent, m, l, a ); };
+        m_race.world.motion_release = [ this ]( const entity_t& e ) { return motion_release( e ); };
         if ( !m_race.active )
             water_frame( dt );
 
@@ -1435,10 +1421,10 @@ public:
             m_triggers.update( m_target, [ this ]( const std::string& path, const std::string& plug ) { fire( path, plug ); } );
         update_delays( dt );
         update_rotators( dt );
-        update_attaches( );
 
         const double props_start = trace::now( );
         skin_props( dt );
+        animated_attach_tick( );
         update_static_draws( );
         trace::frame( ).props += trace::now( ) - props_start;
 
@@ -1505,12 +1491,6 @@ private:
     // attach's "Parent" ref seats its child on (VuOffsetAttachComponent_update
     // 0x5af900 composes onto the parent's transform world). m_entity_world above
     // (the old walk's, scale baked) now only feeds the dev vantage scaffold.
-    std::map< std::string, std::array< float, 16 > > m_seat_world;
-    std::vector< collected_t >* m_collect = nullptr;
-    std::string m_place_owner;
-    // (rotator, the entity that adopts it - the motion entity's direct
-    // parent), in visit()'s post-order; consumed by adopt_rotators.
-    std::vector< std::pair< int, std::string > > m_adopters;
     // The template instance override map in scope for the current child loop,
     // and the single override handed to the next visit().
     const value_t* m_child_overrides = nullptr;
@@ -1677,24 +1657,6 @@ private:
         bool done = false;
     };
 
-    // VuAttachEntity, keyed by its own path. The refs live in m_refs.
-    struct attach_t
-    {
-        std::string path;
-        std::string node;
-        float position[ 3 ]{};
-        // RADIANS: the loaded target - the level authors degrees and the
-        // property's filter 0x45CB50 converts (VuAttachEntity_ctor 0x5f4fa0
-        // re-tags "Relative Rotation" to that class, 0x73D24C).
-        float rotation[ 3 ]{};
-        bool at_start = false;
-        // The live half. VuOffsetAttachComponent_attach @0x5af7a0 refuses a
-        // child that is already claimed (its motion component's slot at +20),
-        // so an attach is either in the list or it is not; "attached" is that
-        // claim.
-        bool attached = false;
-    };
-
     // VuDelayEntity: the two authored floats and the two runtime fields the
     // constructor zeroes, in the same roles - pending at +104, remaining at
     // +108.
@@ -1717,6 +1679,9 @@ private:
     std::map< std::string, action_t > m_actions;
     std::map< std::string, delay_t > m_delays;
     std::map< std::string, front_end_camera_t > m_front_end;
+    // update_delay: graph.hxx
+    void update_delay( const std::string& path, delay_t& wait, float dt );
+
     // Every VuGenericEventEntity's Event Name, which is the whole bus.
     std::map< std::string, std::string > m_events;
     std::vector< std::string > m_initialized;
@@ -1749,7 +1714,19 @@ private:
     std::map< std::string, multi_delay_node_t > m_multi_delays;
     std::set< std::string > m_start_lights;
     std::set< std::string > m_ifs;
-    std::vector< attach_t > m_attaches;
+    c_joints m_joints;
+    // An animated prop with attach records: its VuAnimatedModelInstance (+0x64 +0x68) and VuAnimatedSkeleton (+0x100), on
+    // world/skeleton.hxx; the clip's time is the old pose path's control (animate.hxx). FLAGGED: one clip, no blend (0x5ED067's fade).
+    struct prop_skel_t
+    {
+        skel_model_t model;
+        skel_animation_t clip;
+        skel_animated_t animated;
+        skel_control_t control;
+        bool has_clip = false, added = false;
+    };
+    std::map< entity_t*, std::unique_ptr< prop_skel_t > > m_prop_skels;
+    int m_motion_unknown = 0;   // a motion child's IF slot 0 not read
     // (entity, refName) -> the full path the ref points at.
     std::map< std::pair< std::string, std::string >, std::string > m_refs;
     std::map< std::string, bool > m_booleans;

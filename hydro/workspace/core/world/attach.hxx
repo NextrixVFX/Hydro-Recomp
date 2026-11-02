@@ -1,10 +1,13 @@
 #pragma once
 
 #include <workspace/core/boat/hull.hxx>
+#include <workspace/core/boat/math.hxx>
 
 #include <cstdint>
 #include <cstring>
+#include <string>
 #include <utility>
+#include <vector>
 #include <vector>
 
 // The attach components, recreated 1:1 from the disassembly (world batch 33, tools tmp/b33):
@@ -142,4 +145,85 @@ inline void attach_animated_update( const attach_component_t& c, const float* wo
         if ( m.updated )
             m.updated( m.user );
     }
+}
+
+// ---- VuAttachEntity (vtable 0x7571A8, ctor 0x5F4FA0; properties: engine entity/actions.hxx attach_properties_t) --------------
+//
+// Slot 6 0x5F54F0 (gameInitialize): "Attach at Start" +0x60 -> the Attach plug's body. Slot 7 0x5F5520 (gameRelease) and the plug
+// "Detach" 0x5F5690: the refs resolved, the attach component's slot 13 on the motion. Plug "Attach" 0x5F5550 (both plugs answer
+// the empty VuRetVal): the refs resolved; relative = identity . VuMatrix_fromEuler( "Relative Rotation" +0x74, radians ) through
+// 0x4078C0, its translation overwritten with "Relative Position" +0x64; the component's slot 12( motion, relative, "Node Name"
+// +0x84 ); then, when the component's owner (+8) has a transform (+0x50), slot 14( the transform's +0x50, linear 0, angular 0 ).
+// The two ends are VuScriptRefs (+0x9C / +0xA0: +0x18 the link, link +8 the entity); 0x5F56D0 stops at a missing link and answers
+// true only when the parent has an attach component (0x5F57E0) and the child a motion component (0x5F5810).
+template < typename entity_t_, typename component_t_, typename motion_t_ >
+struct attach_entity_hooks_t
+{
+    component_t_* ( *find_attach )( void* user, entity_t_* entity ) = nullptr;   // 0x5F57E0
+    motion_t_* ( *find_motion )( void* user, entity_t_* entity ) = nullptr;      // 0x5F5810
+    void ( *attach )( void* user, component_t_* c, motion_t_* m, const float* relative, const std::string& node ) = nullptr;  // slot 12
+    void ( *detach )( void* user, component_t_* c, motion_t_* m ) = nullptr;     // slot 13
+    // Slot 14 with the owner's transform +0x50 and two zero vectors (the caller zeroes them): a false answer = no transform, no call.
+    void ( *update_from_owner )( void* user, component_t_* c ) = nullptr;
+    void* user = nullptr;
+};
+
+// 0x5F56D0.
+template < typename entity_t_, typename component_t_, typename motion_t_ >
+inline bool attach_entity_resolve( entity_t_* parent, entity_t_* child, component_t_*& c, motion_t_*& m,
+                                   const attach_entity_hooks_t< entity_t_, component_t_, motion_t_ >& h )
+{
+    if ( parent == nullptr || child == nullptr )
+        return false;
+    c = h.find_attach( h.user, parent );
+    m = h.find_motion( h.user, child );
+    return c != nullptr && m != nullptr;
+}
+
+// 0x5F5550's relative matrix.
+inline void attach_entity_relative( const float* position, const float* rotation, float* relative )
+{
+    float identity[ 16 ], euler[ 16 ];
+    vu_identity( identity );
+    vu_matrix_from_euler( euler, rotation );
+    hull_multiply( identity, relative, euler );
+    relative[ 12 ] = position[ 0 ];
+    relative[ 13 ] = position[ 1 ];
+    relative[ 14 ] = position[ 2 ];
+}
+
+// The plug "Attach" 0x5F5550.
+template < typename entity_t_, typename component_t_, typename motion_t_ >
+inline void attach_entity_attach( const float* position, const float* rotation, const std::string& node, entity_t_* parent, entity_t_* child,
+                                  const attach_entity_hooks_t< entity_t_, component_t_, motion_t_ >& h )
+{
+    component_t_* c = nullptr;
+    motion_t_* m = nullptr;
+    if ( !attach_entity_resolve( parent, child, c, m, h ) )
+        return;
+    float relative[ 16 ];
+    attach_entity_relative( position, rotation, relative );
+    h.attach( h.user, c, m, relative, node );
+    h.update_from_owner( h.user, c );
+}
+
+// Slot 7 0x5F5520 / the plug "Detach" 0x5F5690.
+template < typename entity_t_, typename component_t_, typename motion_t_ >
+inline void attach_entity_detach( entity_t_* parent, entity_t_* child, const attach_entity_hooks_t< entity_t_, component_t_, motion_t_ >& h )
+{
+    component_t_* c = nullptr;
+    motion_t_* m = nullptr;
+    if ( attach_entity_resolve( parent, child, c, m, h ) )
+        h.detach( h.user, c, m );
+}
+
+// 0x5F57E0 / 0x5F5810: the first component of the entity's list (+0x48, next +0xC) whose type chain (vt+0: the descriptor, +4 the
+// base descriptor, 0 the end) holds `wanted`: its index, -1 for none.
+inline int attach_find_component( const std::vector< std::vector< std::uint32_t > >& chains, std::uint32_t wanted )
+{
+    for ( std::size_t i = 0; i < chains.size( ); ++i )
+        for ( std::uint32_t d : chains[ i ] )
+            if ( d == wanted )
+                return static_cast< int >( i );
+    return -1;
 }

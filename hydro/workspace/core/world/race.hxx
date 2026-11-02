@@ -630,6 +630,9 @@ struct race_boat_init_hooks_t
     std::function< void( ) > pfx_create;
     // 0x410610 on the animation +0x230 (world/rig.hxx boat_rig_create); null: the row only.
     std::function< void( ) > anim_create;
+    // gameRelease 0x41D470's: slot 18 0x421940 (out of the dynamics world) and 0x4108C0 on the animation; null: the row only.
+    std::function< void( ) > slot18;
+    std::function< void( ) > anim_release;
 };
 
 inline void race_boat_game_initialize( const void* boat, tick_manager_t& tm, const tick_handler_t& decision, const tick_handler_t& build,
@@ -687,10 +690,14 @@ inline void race_boat_game_release( const void* boat, tick_manager_t& tm, std::u
         draw_added = 0;
     }
     call( "slot18 boat" );
+    if ( hooks.slot18 )
+        hooks.slot18( );
     call( "driver slot7 driver" );
     call( "0x419260 hull" );
     call( "0x415330 engine" );
     call( "0x4108C0 anim" );
+    if ( hooks.anim_release )
+        hooks.anim_release( );
     call( "0x411950 damage" );
 }
 

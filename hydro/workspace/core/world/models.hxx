@@ -324,17 +324,6 @@ inline void c_world::place_model( const std::string& asset, const float* world, 
         math_multiply( placed_node, world, part.node );
         const int handle = c_engine::place( geometry_override >= 0 ? geometry_override : part.geometry,
             texture, part.index_start, part.index_count, placed_node, color, alpha, nullptr, part.detail );
-        // While the entity tree's props are placed, every placement is
-        // collected with its owner so a rotator can drive the ones it owns
-        // each frame (adopt_rotators).
-        if ( m_collect != nullptr && handle >= 0 )
-        {
-            collected_t taken{};
-            taken.handle = handle;
-            taken.owner = m_place_owner;
-            std::memcpy( taken.world.data( ), placed_node, sizeof( placed_node ) );
-            m_collect->push_back( std::move( taken ) );
-        }
         // --no-reflect is the A/B switch for the cube term. DiffuseColor
         // tints every lit material, so a part whose diffuse is not white
         // needs its constants even with no cube and no specular.
