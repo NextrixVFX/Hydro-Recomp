@@ -42,6 +42,7 @@
 #include <workspace/core/world/dynprop.hxx>
 #include <workspace/core/boat/effects.hxx>
 #include <workspace/core/world/debris.hxx>
+#include <workspace/core/world/pieces.hxx>
 #include <workspace/core/world/race.hxx>
 #include <workspace/core/world/rules.hxx>
 #include <workspace/core/world/start.hxx>
@@ -126,6 +127,7 @@ struct race_session_boat_t
     std::string stop;         // where it stopped (UNKNOWN), when it did
     std::string name, boat, skin;
     boat_mesh_library_t meshes;   // the collision / fluids meshes the sections load created
+    race_boat_debris_t debris;    // what the debris image's +0x9C / +0x70 words stand for (world/pieces.hxx)
     // The user of io.hooks: the BOAT's, not one static. The hooks outlive the sections load (0x419FF0's 0x5243A0 runs them at
     // gameInitialize); on a shared context every boat's fluids asset landed in the last loaded boat's library, so its handle
     // answered nothing in its own: a null solver mesh in the hull spray 0x4CE760 (the 11-01 crash, +0x50 = mesh->triangles).
@@ -765,6 +767,14 @@ inline void race_session_bind_pfx_fill( race_session_boat_t& b )
     b.pfx.boat = 0xB0A70000u + 0x1000u * static_cast< std::uint32_t >( b.index );
     b.pfx.fluids = 0xF1D00000u + 0x1000u * static_cast< std::uint32_t >( b.index );
     b.io.pfx_user = &b;
+    b.io.damage_read = []( void* u, const value_t& section ) {
+        race_session_boat_t& rb = *static_cast< race_session_boat_t* >( u );
+        std::string why;
+        const bool ok = race_boat_damage_read( rb.debris, section, rb.io, rb.meshes, body_byte( rb.body, 0x2C8 ), why );
+        if ( !ok )
+            rb.stop = why;
+        return ok;
+    };
     b.io.pfx_fill = []( void* u, const value_t& fallback, const value_t& own, const boat_driver_t& driver, bool create ) {
         race_session_boat_t& rb = *static_cast< race_session_boat_t* >( u );
         const boat_pfx_fill_hooks_t h = race_session_pfx_hooks( rb );
@@ -1753,6 +1763,9 @@ inline void race_session_debris_draw( race_session_t& s, gfx_sort_t& sort, const
         b->debris.draw( sort, p );
     for ( const auto& d : s.dyn_props )
         d->debris.draw( sort, p );
+    for ( const auto& b : s.boats )   // 0x41EAE0's first call on every view: 0x4121C0
+        if ( b->io.damage )
+            race_boat_debris_draw( b->debris, b->io.damage, sort, p );
 }
 
 // One dynamic game prop's gameInitialize (world/dynprop.hxx, verified by the cases dynamic_prop_bodies /
