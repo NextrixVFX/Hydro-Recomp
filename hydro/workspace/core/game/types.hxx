@@ -1474,7 +1474,7 @@ struct prop_entity_state_t
 
 inline std::shared_ptr< void > entity_state_for( const std::string& cls )
 {
-    if ( cls == "VuPropEntity" || cls == "VuRampEntity" )    // VuRampEntity (create 0x43E340): VuPropEntity's ctor 0x5464C0, its properties
+    if ( cls == "VuPropEntity" || cls == "VuRampEntity" || cls == "VuAnimatedPropEntity" )    // VuRampEntity (create 0x43E340): VuPropEntity's ctor 0x5464C0, its properties
         return std::make_shared< prop_entity_state_t >( );
     if ( const action_kind_t* k = entity_action_kind( cls ) )
         return k->m_make( );
@@ -1551,7 +1551,7 @@ inline void entity_load_properties( entity_t& entity, const value_t& properties 
             k->m_load( entity.m_state.get( ), properties );
         return;
     }
-    if ( entity.m_type == "VuPropEntity" && entity.m_state )
+    if ( ( entity.m_type == "VuPropEntity" || entity.m_type == "VuAnimatedPropEntity" ) && entity.m_state )
     {
         prop_entity_state_t* s = static_cast< prop_entity_state_t* >( entity.m_state.get( ) );
         property_bool( properties, "Initially Visible", s->visible, s->visible_default );
@@ -1626,7 +1626,7 @@ inline void entity_mark_properties( entity_t& entity )
             k->m_mark( entity.m_state.get( ) );
         return;
     }
-    if ( entity.m_type == "VuPropEntity" && entity.m_state )
+    if ( ( entity.m_type == "VuPropEntity" || entity.m_type == "VuAnimatedPropEntity" ) && entity.m_state )
     {
         prop_entity_state_t* s = static_cast< prop_entity_state_t* >( entity.m_state.get( ) );
         s->visible_default = s->visible;

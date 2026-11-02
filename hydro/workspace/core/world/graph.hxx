@@ -381,10 +381,18 @@ inline c_world::retval_t c_world::dispatch( const std::string& entity, const std
     // control the blend normalises by the control's own weight, so it
     // only shows as the bind pose until the first tick - but the case of
     // a prop with a previous clip still fading has not been read.
+    // CAUSE of the TNT that never dropped: this walk took ANY plug: "Dynamite1Show" -> TNT . Show restarted the clip at t = 1 s, for ever. Show 0x5ECF90 / Hide 0x5ECFE0 only toggle the draw.
     bool started = false;
+    if ( plug == "Show" || plug == "Hide" )
+        for ( animated_t& item : m_animated )
+            if ( item.path == entity )
+            {
+                item.visible = plug == "Show";
+                return retval_t{};
+            }
     for ( animated_t& item : m_animated )
     {
-        if ( item.path != entity )
+        if ( item.path != entity || plug != "PlayAnimation" )
             continue;
         item.playing = true;
         // control.end / control.loop are the clip's own members, so they
@@ -743,6 +751,7 @@ inline c_world::retval_t c_world::set_boolean( const std::string& entity, bool v
 // FLAGGED: the subscribers' order is ours (the path map), retail's is the VuEventManager's.
 inline void c_world::generic_event( const std::string& name, int depth )
 {
+    LOG_INFO( "generic event %s (frame %d)", name.c_str( ), m_race.frames );   // ours, a log line
     const ui_params_t p = generic_broadcast_params( name );
     for ( const auto& pair : m_events )
         if ( generic_receive( pair.second, p.m_bytes, p.m_size ) )
@@ -874,6 +883,9 @@ inline void c_world::on_animation_event( const std::string& owner, const std::st
         for ( static_draw_item_t& item : m_static_draws )
             if ( item.owner == e->second )
                 item.off = name == "Hide";
+        for ( animated_t& item : m_animated )
+            if ( item.path == owner )
+                item.visible = name == "Show";
         return;
     }
     // UNBUILT, named rather than guessed: PlayAudioEvent (FMOD event at

@@ -386,6 +386,8 @@ inline void c_world::load_entity_tree( const char* asset, const value_t& project
             std::memcpy( item.tint, tint, sizeof( item.tint ) );
             item.distance = m.draw_distance;
             item.draw = m;
+            if ( e.m_type == "VuAnimatedPropEntity" && e.m_state )
+                item.visible = static_cast< const prop_entity_state_t* >( e.m_state.get( ) )->visible != 0;
             {
                 const auto box = m_scene_aabbs.find( m.model_asset );
                 scene_component_aabb( item.aabb, box != m_scene_aabbs.end( ) ? box->second.data( ) : scene_zero_aabb( ), matrix, false );

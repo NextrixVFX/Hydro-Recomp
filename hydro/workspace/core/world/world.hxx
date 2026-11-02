@@ -1603,6 +1603,8 @@ public:
                     f.draw( p.m_eye, p.m_eye );
             for ( animated_t& item : m_animated )
             {
+                if ( !item.visible )
+                    continue;
                 const animated_draw_t s = animated_model_select( item.draw, item.aabb, item.aabb + 4, p.m_eye, p.m_skip_models != 0u );
                 if ( !s.drawn || !item.retail || ( p.m_reflecting & item.draw.reflect ) != p.m_reflecting )
                     continue;
@@ -2129,6 +2131,8 @@ private:
         // onTriggerPlug @0x5f5e80 packs. One Shot is not among them.
         bool looping = true;
         float factor = 1.0f;
+        // "Initially Visible" +0x7C (slot 6 0x5ECA60), then Show 0x5ECF90 / Hide 0x5ECFE0: the draw component on / off the draw manager.
+        bool visible = true;
     };
 
     // A resolved VuPlayAnimationEntity, keyed by the path of the prop it

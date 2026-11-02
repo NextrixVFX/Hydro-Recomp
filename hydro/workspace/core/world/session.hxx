@@ -1187,6 +1187,7 @@ inline void race_session_mine_hide( race_session_t::dyn_prop_t& d )
 inline void race_session_explode( race_session_t& s, const float* m, const float* explosion9, const std::string& pfx, const std::string& audio,
                                   const char* who )
 {
+    LOG_INFO( "race: %s explodes at %.1f %.1f %.1f, pfx '%s' (frame %d)", who, m[ 12 ], m[ 13 ], m[ 14 ], pfx.c_str( ), s.frames );   // ours, a log line
     std::uint8_t params[ 0x38 ] = { };
     std::memcpy( params, m + 12, 16 );
     std::memcpy( params + 0x10, explosion9, 36 );
