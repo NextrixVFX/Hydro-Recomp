@@ -9,16 +9,12 @@ public:
     void tick( ) override;
 
 private:
-    static void submit_main( void* self );
     void size_targets( );
     void sky( );
     void main_pass( );
-    void reflect( );
     void blit( );
     void blit_screen( );
     void letterbox( );
-
-    bool m_reflect = false;
 };
 
 #include <workspace/core/render/device.hxx>
@@ -28,7 +24,6 @@ private:
 #include <workspace/core/scene/viewport.hxx>
 #include <workspace/core/scene/scene.hxx>
 #include <workspace/core/render/mesh.hxx>
-#include <workspace/core/scene/sort.hxx>
 #include <workspace/core/scene/screen.hxx>
 
 #if HYDRO_HOST_WINDOWS
@@ -68,21 +63,13 @@ void c_composer::tick( )
 {
     size_targets( );
     g_viewport( ).build( g_swap( ).width( ), g_swap( ).height( ) );
-    g_sort( ).add( &c_composer::submit_main, this );
-    if ( g_target( ).reflection_enabled )
-        reflect( );
-    g_sort( ).flush( );
+    main_pass( );
     blit( );
 
     if ( g_screen( ).pixels != nullptr && g_screen( ).width > 0 && g_screen( ).height > 0 )
         blit_screen( );
     else
         letterbox( );
-}
-
-void c_composer::submit_main( void* self )
-{
-    static_cast< c_composer* >( self )->main_pass( );
 }
 
 void c_composer::size_targets( )
@@ -103,34 +90,7 @@ void c_composer::main_pass( )
 {
     g_target( ).bind( );
     sky( );
-    g_scene( ).draw( );
-    g_geometry( ).draw( );
-}
-
-void c_composer::reflect( )
-{
-    const float* eye = g_viewport( ).eye( );
-    const float* at = g_viewport( ).target( );
-    const float saved_eye[ 3 ] = { eye[ 0 ], eye[ 1 ], eye[ 2 ] };
-    const float saved_at[ 3 ] = { at[ 0 ], at[ 1 ], at[ 2 ] };
-    const float far_plane = g_viewport( ).plane( );
-    const float plane = g_target( ).reflection_plane;
-    const float mirror_eye[ 3 ] = { saved_eye[ 0 ], saved_eye[ 1 ], plane - ( saved_eye[ 2 ] - plane ) };
-    const float mirror_at[ 3 ] = { saved_at[ 0 ], saved_at[ 1 ], plane - ( saved_at[ 2 ] - plane ) };
-    // 0x558C00's mirrored view: 0x50BDA0 with the camera's eye and target mirrored in the plane and the up (-x, -y, z) of the camera's: for our up (0, 0, 1) the same up. The plane is the viewport's
-    // +0x268, 0x530F10's height of the nearest reflecting surface. The shader's uv is 0.5 + 0.5 * ndc in both axes: x as drawn, y flipped, which this camera gives. Winding is untouched: it is a camera, not a mirror matrix.
-    // NOT RECREATED: the clip plane 0x5BC410 (gClipPlane; our shaders do not take it), the draw params' reflection mask.
-    g_viewport( ).aim( mirror_eye, mirror_at, far_plane );
-    g_viewport( ).build( g_swap( ).width( ), g_swap( ).height( ) );
-    g_target( ).bind_mirror( );
-    const float* c = g_target( ).clear_colour;
-    g_target( ).clear_mirror( c[ 0 ], c[ 1 ], c[ 2 ], c[ 3 ] );   // 0x5BC330: the sky box only enters the target when its Reflect is on
-    g_scene( ).draw( );
-    g_geometry( ).reflecting( true );
-    g_geometry( ).draw( );
-    g_geometry( ).reflecting( false );
-    g_viewport( ).aim( saved_eye, saved_at, far_plane );
-    g_viewport( ).build( g_swap( ).width( ), g_swap( ).height( ) );
+    g_geometry( ).draw( g_swap( ).width( ), g_swap( ).height( ), g_target( ).reflection_enabled );   // hydro world/stage.hxx: gfx_composer_t's whole frame
 }
 
 void c_composer::blit( )
@@ -139,13 +99,9 @@ void c_composer::blit( )
     ID3D11ShaderResourceView* unbound = nullptr;
     g_swap( ).bind( g_device( ) );
     g_device( ).context( )->RSSetState( nullptr );
-    // 0x5588B0's radial step, when the game has an amount; its program is the pack's, world/stage.hxx.
-    if ( !g_geometry( ).post_now( g_target( ).colour_view( ), g_swap( ).width( ), g_swap( ).height( ) ) )
-    {
-        g_shader( ).bind_blit( );   // retail's copy 0x5BC6F0: VuPostProcess 0x57BF10 holds Copy, GaussBlur5x5, RadialBlur, Effect; no FXAA in the image
-        g_target( ).bind_color( );
-        g_device( ).context( )->Draw( 3, 0 );
-    }
+    g_shader( ).bind_blit( );
+    g_target( ).bind_color( );
+    g_device( ).context( )->Draw( 3, 0 );
     g_device( ).context( )->PSSetShaderResources( 0, 1, &unbound );
 #endif
 }

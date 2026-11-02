@@ -1661,8 +1661,8 @@ public:
             c.material = material;
             m_retail_coronas.push_back( c );
         };
-        c_engine::stage_pass( &gfx_retail_t::engine_pass, m_retail.get( ) );
-        c_engine::post_pass( &gfx_retail_t::engine_post, m_retail.get( ) );
+        c_engine::stage_pass( &gfx_retail_t::engine_stage, m_retail.get( ) );
+        m_retail->m_water_mirror = &m_stage.m_mirror;
     }
     const track_manager_t* track( ) const
     {

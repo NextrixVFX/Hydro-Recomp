@@ -3,10 +3,12 @@
 // The running game's scene on retail's device path (water batch 38): the shaders, buffers and materials a VuGfxStaticScene's load makes (0x5929B0, 0x593C00, 0x618160), retail's own sort (world/gfxsort.hxx)
 // over gfx_backend_t, and the model callbacks (world/drawing.hxx). The programs are the DXBC embedded in each model.
 //
-// SUBSTITUTIONS, each until the composer frame owns the view (world/composer.hxx):
-// - The engine still owns the frame: engine_pass runs inside c_geometry::draw's opaque stage, one flip per engine pass (main, mirror); retail has one flip a frame with the passes in the key's screen field.
-// - The reflection's camera and clip plane take the viewport's plane (0x530F10, surface.hxx water_reflection_plane_tick).
-// - The six planes come from the engine's view-projection, normalised, not from the camera's 0x57CBA0: inward and unit length as retail's, order near / far / sides differs (only a sign OR reads them).
+// THE FRAME IS gfx_composer_t's (world/composer.hxx, 0x5588B0): one sort frame, one flip: the reflection and the scene are key groups, each opened by its camera command 0x53A9C0 / 0x53AA90.
+// SUBSTITUTIONS:
+// - The camera image is built from the engine's viewport, not the VuCamera's: its projection is the engine's with the third column negated (the engine's view looks along +z, retail's along -z).
+// - 0x52F690 (the settings record at the camera's eye) already ran in c_world::water_stage_frame, at the tick.
+// - The lens water g 0x759048 answers not active: its slots are hooks, the manager is not recreated.
+// - The six planes come from the camera's view-projection, normalised, not from 0x57CBA0: inward and unit length as retail's, order near / far / sides differs (only a sign OR reads them).
 // - m_depth_material and m_shadow_material hold the colour material: VuGfxUtil's depth program (g 0x75902C +8) is not made and nothing submits a depth pre-pass.
 // NO SHADOW PASS, AS RETAIL (water batch 41, tools tmp/b41 vc.py ds.py gm.py dx.py): the draw manager's slot 7 0x5A7730 has no caller, the binder 0x53B0F0 never reads the shadow handles +0x738 .. +0x74C (only 0x541680 writes them), and 0 of the pack's 8,812 programs
 // name gShadow*, gSplitPlanes, gDynamicLight* or gSSAO* (controls: gDirLightWorld in 4,246, gFogColor in 4,013): nothing could receive a shadow map or a dynamic light. The BlobShadow asset is not in the pack (0x57BCC0 skips it); its object has no reader. Shadow/* load and stay unused.
@@ -20,6 +22,7 @@
 #include <workspace/core/render/program.hxx>
 #include <workspace/core/render/resource.hxx>
 #include <workspace/core/world/backend.hxx>
+#include <workspace/core/world/composer.hxx>
 #include <workspace/core/world/corona.hxx>
 #include <workspace/core/world/drawing.hxx>
 #include <workspace/core/world/foliage.hxx>
@@ -43,6 +46,9 @@
 
 #if HYDRO_HOST_WINDOWS
 constexpr std::uint32_t k_gfx_cb_water = 0x594D70u;
+constexpr std::uint32_t k_gfx_cb_camera = 0x53AA90u;      // 0x53A9C0's record: 0x240 bytes into the statics 0x7594A0
+constexpr std::uint32_t k_gfx_cb_settings = 0x53ABA0u;    // 0x53AAB0's record: 0x58 bytes into the statics 0x7596E0
+constexpr std::uint32_t k_gfx_cb_copy = 0x5BC6F0u, k_gfx_cb_radial = 0x5BC7D0u;
 
 struct gfx_retail_model_t
 {
@@ -68,10 +74,12 @@ struct gfx_retail_boat_t
     gfx_retail_map_t m_maps[ 3 ];
 };
 
-struct gfx_retail_t
+struct gfx_retail_t final : gfx_composer_hooks_t
 {
-    gfx_retail_t( void* device, void* context ) : m_device( m_api ), m_programs( m_api ), m_declarations( m_api, m_programs ), m_backend( m_device ), m_sort( m_backend )
+    gfx_retail_t( void* device, void* context ) : m_device( m_api ), m_programs( m_api ), m_declarations( m_api, m_programs ), m_backend( m_device ), m_sort( m_backend ), m_composer( m_sort, *this )
     {
+        m_composer.m_radial = 1u;       // the ctor 0x5585F0
+        m_composer.m_extra = reinterpret_cast< const std::uint8_t* >( m_record );
         m_api.m_device = static_cast< ID3D11Device* >( device );
         m_api.m_context = static_cast< ID3D11DeviceContext* >( context );
         m_device.create_dynamic( );
@@ -100,7 +108,41 @@ struct gfx_retail_t
         };
         m_backend.m_callbacks[ k_gfx_cb_foliage ] = [ this ]( std::uint8_t* r ) { foliage_record( r ); };
         // 0x595520's layer: VuWater draws here. One command (retail one per surface, depth keyed); material 0 makes the walk bind the next material whole.
-        m_backend.m_callbacks[ k_gfx_cb_water ] = [ this ]( std::uint8_t* ) { c_engine::water_now( ); m_device.invalidate( ); };
+        m_backend.m_callbacks[ k_gfx_cb_water ] = [ this ]( std::uint8_t* )
+        {
+            if ( m_water_mirror != nullptr )
+                *m_water_mirror = m_composer.m_reflection ? m_targets[ m_composer.m_reflection - 1u ]->m_colour->m_view : 0;
+            c_engine::water_now( );
+            m_device.invalidate( );
+        };
+        m_backend.m_callbacks[ k_gfx_cb_camera ] = [ this ]( std::uint8_t* r ) { camera_record( r ); };
+        m_backend.m_callbacks[ k_gfx_cb_settings ] = [ this ]( std::uint8_t* r ) { settings_record( r ); };
+        for ( const std::uint32_t callback : { 0x5BC330u, 0x5BC1A0u, 0x5BC210u, 0x5BC230u, 0x5BC260u, 0x5BC400u, 0x5BC5F0u, 0x5BC610u } )
+            m_backend.m_callbacks[ callback ] = [ this, callback ]( std::uint8_t* r )
+            {
+                std::uint32_t target;
+                std::memcpy( &target, r, 4 );
+                gfx_composer_callback( m_device, callback, r, m_clear, callback == 0x5BC330u || callback == 0x5BC1A0u ? target_of( target ) : nullptr );
+            };
+        m_backend.m_callbacks[ k_gfx_cb_copy ] = [ this ]( std::uint8_t* r )
+        {
+            std::uint32_t texture;
+            std::memcpy( &texture, r, 4 );
+            if ( post_ready( ) )
+                m_post.copy_to( m_device, *texture_object( texture ), nullptr );
+            m_device.invalidate( );
+        };
+        m_backend.m_callbacks[ k_gfx_cb_radial ] = [ this ]( std::uint8_t* r )
+        {
+            std::uint32_t texture, target;
+            float amount;
+            std::memcpy( &texture, r, 4 );
+            std::memcpy( &target, r + 4, 4 );
+            std::memcpy( &amount, r + 8, 4 );
+            if ( post_ready( ) )
+                m_post.radial_to( m_device, *texture_object( texture ), target_of( target ), amount );
+            m_device.invalidate( );
+        };
         m_backend.m_callbacks[ k_gfx_cb_sun ] = [ this ]( std::uint8_t* r ) { corona_record( r ); };
         m_backend.m_callbacks[ k_gfx_cb_pfx_quad ] = [ this ]( std::uint8_t* r ) { pfx_quad_record( r ); };
         m_backend.m_callbacks[ k_gfx_cb_pfx_trail ] = [ this ]( std::uint8_t* r ) { pfx_trail_record( r ); };
@@ -112,6 +154,14 @@ struct gfx_retail_t
     gfx_declarations_t m_declarations;
     gfx_backend_t m_backend;
     gfx_sort_t m_sort;
+    gfx_composer_t m_composer;
+    std::vector< gfx_target_object_t* > m_targets;        // a target's id - 1
+    std::vector< std::uint32_t > m_target_textures;       // its colour's texture id
+    std::int32_t m_display_w = 0, m_display_h = 0;
+    std::uint32_t m_record[ 22 ] = { };                   // the settings record, 0x53AAB0's argument
+    std::uint8_t m_clear[ 4 ] = { };                      // 0x7596E4
+    std::uint8_t m_image[ 0x240 ] = { };                  // the frame's camera, the viewport's +0x28
+    gfx_handle_t* m_water_mirror = nullptr;               // water_stage_t's reflection texture
     std::function< bool( const std::string& entry, std::vector< std::uint8_t >& out ) > m_read;
     std::function< void( gfx_sort_t& sort, const gfx_draw_params_t& params ) > m_draw;   // the frame's walk: the draw manager's 0x5A75E0 until it owns the list
     std::map< std::string, std::unique_ptr< gfx_retail_model_t > > m_models;
@@ -636,9 +686,7 @@ struct gfx_retail_t
     // The settings record's fields the walk reads (0x7596E0: +8 / +0xC the fog range, +0x10 the colour), the far plane, the frame time: once a game frame.
     void frame( float dt, const std::uint32_t* record, float far_plane, const light_manager_t& lights )
     {
-        std::memcpy( &m_backend.m_fog_start, &record[ 2 ], 4 );
-        std::memcpy( &m_backend.m_fog_end, &record[ 3 ], 4 );
-        std::memcpy( m_fog_colour, &record[ 4 ], 4 );
+        std::memcpy( m_record, record, sizeof( m_record ) );
         m_backend.m_far_plane = far_plane;
         m_lights = lights;
         m_sort.tick( dt );
@@ -657,22 +705,82 @@ struct gfx_retail_t
             }
     }
 
-    // One engine pass: the view's statics, the planes, the frame's walk, the sort's frame. `reflecting`: the mirror pass, retail's 0x558C00 params: lod 0.05, the plane z = 0, the clip plane in clip space.
-    void pass( bool reflecting )
+    // gfx_composer_hooks_t.
+    void display( std::int32_t& width, std::int32_t& height ) override
+    {
+        width = m_display_w;
+        height = m_display_h;
+    }
+    std::uint32_t target_create( std::int32_t width, std::int32_t height, std::uint32_t format ) override
+    {
+        gfx_target_object_t* t = gfx_target_create( m_api, width, height, format );
+        m_targets.push_back( t );
+        m_target_textures.push_back( m_backend.add_texture( t->m_colour ) );
+        return static_cast< std::uint32_t >( m_targets.size( ) );
+    }
+    void target_release( std::uint32_t target ) override
+    {
+        gfx_target_object_t* t = m_targets[ target - 1u ];
+        m_backend.m_texture_table[ m_target_textures[ target - 1u ] - 1u ] = nullptr;
+        m_api.release( t->m_view );
+        m_api.release( t->m_depth );
+        gfx_texture_release( m_api, t->m_colour );
+        gfx_texture_release( m_api, t->m_depth_texture );
+        delete t;
+        m_targets[ target - 1u ] = nullptr;
+    }
+    std::uint32_t target_texture( std::uint32_t target ) override { return m_target_textures[ target - 1u ]; }
+    bool lens_active( ) override { return false; }
+    bool lens_on( ) override { return false; }
+    void lens_size( std::int32_t, std::int32_t ) override { }
+    void lens_draw( std::uint32_t, std::uint32_t ) override { }
+    void camera_static( const std::uint8_t*, const std::uint8_t* ) override { }
+    void trail( ) override { }                                      // the frame's walk (m_draw) flushes the foliage at its end
+    void depth_extra( const std::uint8_t* ) override { }            // only with +0x1D, 0 in the shipped game: VuDevConfig answers null (0x4FDB70)
+    void overlay( std::uint32_t, const float* ) override { }
+
+    // 0x53AAB0: the record in the group with bit 23 clear, at screen 0: first of the frame.
+    void sort_view( const std::uint8_t* extra ) override
+    {
+        std::memcpy( m_sort.allocate( 0x58 ), extra, 0x58 );
+        m_sort.command( m_sort.m_key_lo, m_sort.m_key_hi & 0xFF7FFFFFu & 0xFFC3FFFFu, k_gfx_cb_settings, 0u, 0u, 0u );
+    }
+    // 0x53A9C0: the camera at screen 0 of the current group, before everything drawn under it.
+    void sort_camera( const std::uint8_t* camera ) override
+    {
+        std::memcpy( m_sort.allocate( 0x240 ), camera, 0x240 );
+        m_sort.command( m_sort.m_key_lo, m_sort.m_key_hi & 0xFFC3FFFFu, k_gfx_cb_camera, 0u, 0u, 0u );
+    }
+    // 0x53ABA0, the fields the walk reads: +4 the clear colour, +8 / +0xC the fog range, +0x10 its colour.
+    void settings_record( const std::uint8_t* r )
+    {
+        std::memcpy( m_clear, r + 4, 4 );
+        std::memcpy( &m_backend.m_fog_start, r + 8, 4 );
+        std::memcpy( &m_backend.m_fog_end, r + 0xC, 4 );
+        std::memcpy( m_fog_colour, r + 0x10, 4 );
+    }
+    // 0x53AA90, the fields the walk reads: the statics 0x7594A0.
+    void camera_record( const std::uint8_t* r )
+    {
+        std::memcpy( m_eye, r, 16 );
+        std::memcpy( m_projection, r + 0x30, 64 );
+        std::memcpy( m_view, r + 0x70, 64 );
+        std::memcpy( m_view_proj, r + 0xB0, 64 );
+        std::memcpy( m_right, r + 0x130, 12 );
+        std::memcpy( m_camera.m_direction, r + 0x140, 12 );
+        std::memcpy( m_up, r + 0x150, 12 );
+    }
+    const gfx_target_t* target_of( std::uint32_t id ) const { return id ? m_targets[ id - 1u ] : nullptr; }
+    const gfx_texture_object_t* texture_object( std::uint32_t id ) const { return static_cast< const gfx_texture_object_t* >( m_backend.m_texture_table[ id - 1u ] ); }
+
+    // g 0x7590B8 vt+0x18 under the composer: the frustum of the image, the view's lights, the sky, the frame's walk, the water's command. `image` is the mirrored copy in 0x558C00.
+    void draw( const gfx_draw_params_t& params, const std::uint8_t* image ) override
     {
         if ( !m_draw )
             return;
-        float* projection = m_projection;
-        c_engine::matrices( m_view, projection, m_eye );
-        for ( int r = 0; r < 4; ++r )
-            for ( int c = 0; c < 4; ++c )
-            {
-                float v = 0.0f;
-                for ( int k = 0; k < 4; ++k )
-                    v += m_view[ r * 4 + k ] * projection[ k * 4 + c ];
-                m_view_proj[ r * 4 + c ] = v;
-            }
-        const float* m = m_view_proj;
+        gfx_draw_params_t p = params;
+        float m[ 16 ];
+        std::memcpy( m, image + 0xB0, 64 );
         const float rows[ 6 ][ 4 ] = { { m[ 2 ], m[ 6 ], m[ 10 ], m[ 14 ] }, { m[ 3 ] - m[ 2 ], m[ 7 ] - m[ 6 ], m[ 11 ] - m[ 10 ], m[ 15 ] - m[ 14 ] },
                                        { m[ 3 ] + m[ 0 ], m[ 7 ] + m[ 4 ], m[ 11 ] + m[ 8 ], m[ 15 ] + m[ 12 ] }, { m[ 3 ] - m[ 0 ], m[ 7 ] - m[ 4 ], m[ 11 ] - m[ 8 ], m[ 15 ] - m[ 12 ] },
                                        { m[ 3 ] + m[ 1 ], m[ 7 ] + m[ 5 ], m[ 11 ] + m[ 9 ], m[ 15 ] + m[ 13 ] }, { m[ 3 ] - m[ 1 ], m[ 7 ] - m[ 5 ], m[ 11 ] - m[ 9 ], m[ 15 ] - m[ 13 ] } };
@@ -682,45 +790,42 @@ struct gfx_retail_t
             for ( int k = 0; k < 4; ++k )
                 m_camera.m_planes[ i * 4 + k ] = rows[ i ][ k ] / n;
         }
-        std::memcpy( m_camera.m_eye, m_eye, 12 );
-        // The statics 0x7595D0 (right, direction, up): the view's rows in the engine's math_look.
-        for ( int i = 0; i < 3; ++i )
-        {
-            m_right[ i ] = m_view[ i * 4 ];
-            m_up[ i ] = m_view[ i * 4 + 1 ];
-            m_camera.m_direction[ i ] = m_view[ i * 4 + 2 ];
-        }
+        std::memcpy( m_camera.m_eye, image, 12 );
+        std::memcpy( m_camera.m_direction, image + 0x140, 12 );
         m_camera.m_far = m_backend.m_far_plane;
-        gfx_draw_params_t p;
-        std::memcpy( p.m_eye, m_eye, 12 );
         p.m_camera = &m_camera;
-        float clip[ 4 ] = { };
-        if ( reflecting )
-        {
-            p.m_lod = 0.05f;
-            p.m_reflecting = 1u;
-            p.m_clip[ 2 ] = 1.0f;
-            p.m_clip[ 3 ] = -m_plane;
-            float inverse[ 16 ];
-            std::memcpy( inverse, m_view_proj, 64 );
-            hull_invert( inverse );
-            for ( int r = 0; r < 4; ++r )
-                clip[ r ] = ( ( inverse[ r * 4 + 1 ] + inverse[ r * 4 ] ) * 0.0f + inverse[ r * 4 + 2 ] ) + inverse[ r * 4 + 3 ] * -m_plane;   // 0x558C00's row
-        }
-        m_device.clip_plane( clip );
         // 0x562B10 for this view: the seventh plane is the reflection's.
         float planes[ 28 ];
         std::memcpy( planes, m_camera.m_planes, 96 );
         std::memcpy( planes + 24, p.m_clip, 16 );
-        m_sort.set_layer( 1u );
-        m_sort.set_screen( 8u );
-        m_dynamic.submit( m_eye, planes, p.m_reflecting, m_sort.m_key_hi );
-        m_palettes.clear( );
-        if ( m_sky != nullptr && ( !reflecting || m_sky_reflect ) )
-            gfx_sky_draw( m_sort, m_eye, m_sky );
+        m_dynamic.submit( p.m_eye, planes, p.m_reflecting, m_sort.m_key_hi );
+        if ( m_sky != nullptr && ( !p.m_reflecting || m_sky_reflect ) )
+            gfx_sky_draw( m_sort, p.m_eye, m_sky );
         m_draw( m_sort, p );
-        if ( !reflecting )
+        if ( !p.m_reflecting )
             m_sort.command( m_sort.m_key_lo, ( 0xAu << 14 ) | m_sort.m_key_hi | 0x2000u, k_gfx_cb_water, 0u, 0u, 0xAu );
+    }
+
+    // The frame: the camera image, 0x5588B0, the flip. `width` x `height` the display.
+    void engine_frame( int width, int height, bool reflection )
+    {
+        void* view = nullptr;
+        void* depth = nullptr;
+        c_engine::chain( view, depth, m_device.m_chain_width, m_device.m_chain_height );
+        m_device.m_chain_view = reinterpret_cast< gfx_handle_t >( view );
+        m_device.m_chain_depth = reinterpret_cast< gfx_handle_t >( depth );
+        m_display_w = width;
+        m_display_h = height;
+        float look[ 16 ], projection[ 16 ], eye[ 4 ] = { }, target[ 4 ] = { };
+        const float up[ 4 ] = { 0.0f, 0.0f, 1.0f, 0.0f };
+        c_engine::matrices( look, projection, eye );
+        c_engine::look_target( target );
+        projection[ 10 ] = -projection[ 10 ];
+        projection[ 11 ] = -projection[ 11 ];
+        std::memcpy( m_image + 0x30, projection, 64 );
+        camera_view( m_image, eye, target, up );
+        m_palettes.clear( );
+        m_composer.frame( m_image, m_plane, m_blur, reflection );
         m_sort.flip( );
         if ( ++m_passes == 300 )
         {
@@ -732,53 +837,31 @@ struct gfx_retail_t
                 m_sort.m_stats[ 0 ], m_sort.m_stats[ 1 ] );
         }
     }
+    static void engine_stage( void* self, int width, int height, bool reflection ) { static_cast< gfx_retail_t* >( self )->engine_frame( width, height, reflection ); }
 
-    static void engine_pass( void* self, bool reflecting ) { static_cast< gfx_retail_t* >( self )->pass( reflecting ); }
-
-    // 0x5588B0's radial step: +0xD ("GfxComposer/Enable Radial Blur", 1 from the ctor 0x5585F0) and the viewport's +0x278 above 0 (0x6F7570 holds 0): 0x5BC730's record -> 0x57C2D0 on the scene's texture. Target and viewport: the chain the engine bound.
-    // SUBSTITUTION until the composer owns the frame: the scene's texture is the engine's target, sampled with 0x57F7D0's options (clamp, linear).
     float m_blur = 0.0f;                  // viewport +0x278
-    static bool engine_post( void* self, void* view, int width, int height ) { return static_cast< gfx_retail_t* >( self )->post( view, width, height ); }
-    bool post( void* view, int width, int height )
+    // VuPostProcess, made at the first use.
+    bool post_ready( )
     {
-        if ( !( m_blur > 0.0f ) )
-            return false;
-        if ( !m_post_tried )
+        if ( m_post_tried )
+            return m_post_ready;
+        m_post_tried = true;
+        bool found = true;
+        m_post.create( m_declarations, [ & ]( const std::string& name ) -> const gfx_program_t*
         {
-            m_post_tried = true;
-            bool found = true;
-            m_post.create( m_declarations, [ & ]( const std::string& name ) -> const gfx_program_t*
+            std::vector< std::uint8_t > blob;
+            if ( !m_read( "VuCompiledShaderAsset/" + name, blob ) )
             {
-                std::vector< std::uint8_t > blob;
-                if ( !m_read( "VuCompiledShaderAsset/" + name, blob ) )
-                {
-                    found = false;
-                    LOG_ERROR( "post: %s did not load", name.c_str( ) );
-                    return nullptr;
-                }
-                return m_programs.load( blob.data( ) );
-            } );
-            gfx_texture_options_t o;
-            o.m_address_u = o.m_address_v = 1u;
-            o.m_min = o.m_mag = 2;
-            gfx_texture_sampler( m_api, m_post_scene, o );
-            m_post_ready = found;
-        }
-        if ( !m_post_ready )
-            return false;
-        m_post_scene.m_view = reinterpret_cast< gfx_handle_t >( view );
-        m_post_scene.m_width = width;
-        m_post_scene.m_height = height;
-        // The command's type is 0 (0x5BC730's 0x429010): the walk would apply k_gfx_layers[ 0 ] here; this step runs outside the walk, and the last pfx's additive state is still set.
-        m_device.blend_enable( k_gfx_layers[ 0 ].blend );
-        m_device.blend_func( k_gfx_layers[ 0 ].src, k_gfx_layers[ 0 ].dst );
-        m_device.invalidate( );
-        m_post.radial( m_device, m_post_scene, m_blur );
-        m_device.invalidate( );
-        return true;
+                found = false;
+                LOG_ERROR( "post: %s did not load", name.c_str( ) );
+                return nullptr;
+            }
+            return m_programs.load( blob.data( ) );
+        } );
+        m_post_ready = found;
+        return found;
     }
     gfx_post_t m_post;
-    gfx_texture_object_t m_post_scene;
     bool m_post_tried = false, m_post_ready = false;
 };
 #endif

@@ -31,22 +31,17 @@ public:
     void revise( int texture, const unsigned char* rgba, int width, int height );
     void clock( float seconds );
     void fog( float start, float end, float red, float green, float blue );
-    void reflecting( bool enabled );
     // The water surfaces' pass (hydro world/waterpass.hxx): runs inside draw( ), the scene bound, the transparent pass's blend and depth set up.
     void water_pass( void ( *pass )( void* ), void* user ) { m_water_pass = pass; m_water_user = user; }
     // The sort's layer 0xA reached: the water now (retail's order: below-water pfx, water, above-water pfx and alpha), not after the stage.
     void water_now( )
     {
-        if ( m_water_pass == nullptr || m_reflecting )
-            return;
-        m_water_pass( m_water_user );
-        m_water_done = true;
+        if ( m_water_pass != nullptr )
+            m_water_pass( m_water_user );
     }
-    void stage_pass( void ( *pass )( void*, bool ), void* user ) { m_stage_pass = pass; m_stage_user = user; }
-    void post_pass( bool ( *pass )( void*, void*, int, int ), void* user ) { m_post_pass = pass; m_post_user = user; }
-    bool post_now( void* view, int width, int height ) { return m_post_pass != nullptr && m_post_pass( m_post_user, view, width, height ); }
+    void stage_pass( void ( *pass )( void*, int, int, bool ), void* user ) { m_stage_pass = pass; m_stage_user = user; }
     void* view_of( int texture ) const;
-    void draw( );
+    void draw( int width, int height, bool reflection );
     void release( );
 
 private:
@@ -154,14 +149,10 @@ private:
     float m_fog_start = 0.0f;
     float m_fog_end = 900.0f;
     float m_fog_color[ 3 ] = { 156.0f / 255.0f, 196.0f / 255.0f, 215.0f / 255.0f };
-    bool m_reflecting = false;
     void ( *m_water_pass )( void* ) = nullptr;
-    bool m_water_done = false;
     void* m_water_user = nullptr;
-    void ( *m_stage_pass )( void*, bool ) = nullptr;
+    void ( *m_stage_pass )( void*, int, int, bool ) = nullptr;
     void* m_stage_user = nullptr;
-    bool ( *m_post_pass )( void*, void*, int, int ) = nullptr;
-    void* m_post_user = nullptr;
     bool m_ready = false;
     void ( *m_sorted )( void*, const sorted_pass_t& ) = nullptr;
     void* m_sorted_user = nullptr;
@@ -691,12 +682,7 @@ void* c_geometry::view_of( int texture ) const
     return nullptr;
 }
 
-void c_geometry::reflecting( bool enabled )
-{
-    m_reflecting = enabled;
-}
-
-void c_geometry::draw( )
+void c_geometry::draw( int width, int height, bool reflection )
 {
     const double ensure_start = trace::now( );
     if ( ( m_placements.empty( ) && m_stage_pass == nullptr ) || !ensure( ) )   // the retail stage draws with no engine placement at all
@@ -735,7 +721,7 @@ void c_geometry::draw( )
     // The retail stage (world/stage.hxx) draws everything: nothing is hand-placed any more (water batch 43).
     if ( m_stage_pass != nullptr )
     {
-        m_stage_pass( m_stage_user, m_reflecting );
+        m_stage_pass( m_stage_user, width, height, reflection );
         const FLOAT factor[ 4 ] = { 1, 1, 1, 1 };
         context->OMSetBlendState( nullptr, factor, 0xFFFFFFFF );
         context->RSSetState( nullptr );
@@ -837,14 +823,25 @@ bool c_engine::layer( int placement, int type, int shading, float diffuse_alpha,
     return g_geometry( ).layer( placement, type, shading, diffuse_alpha, box );
 }
 
-void c_engine::stage_pass( void ( *pass )( void*, bool ), void* user )
+void c_engine::stage_pass( void ( *pass )( void*, int, int, bool ), void* user )
 {
     g_geometry( ).stage_pass( pass, user );
 }
 
-void c_engine::post_pass( bool ( *pass )( void*, void*, int, int ), void* user )
+// What 0x5409F0's null means here: the engine's colour and depth, its blit the only way to the swap chain.
+void c_engine::chain( void*& view, void*& depth, int& width, int& height )
 {
-    g_geometry( ).post_pass( pass, user );
+#if HYDRO_HOST_WINDOWS
+    view = g_target( ).colour_target( );
+    depth = g_target( ).depth_target( );
+    width = g_target( ).width( );
+    height = g_target( ).height( );
+#endif
+}
+
+void c_engine::look_target( float* target )
+{
+    std::memcpy( target, g_viewport( ).target( ), 12 );
 }
 
 void c_engine::water_pass( void ( *pass )( void* ), void* user )

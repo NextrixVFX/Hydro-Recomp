@@ -290,7 +290,7 @@ struct water_stage_t
     gfx_direct_t m_api;
     std::unique_ptr< water_pass_t > m_pass;
     std::vector< int > m_surface_shader;   // per surface index (the entity's +0x12C)
-    gfx_handle_t m_mirror = 0;
+    gfx_handle_t m_mirror = 0;             // the composer's reflection target's texture (0x558870 -> vt+0xC)
     const water_grid_frame_t* m_frame = nullptr;
     water_pass_view_t m_view;
 
@@ -352,11 +352,7 @@ struct water_stage_t
                     v += view[ r * 4 + k ] * projection[ k * 4 + c ];
                 s.m_view.m_view_proj[ r * 4 + c ] = v;
             }
-        void* device = nullptr;
-        void* context = nullptr;
-        void* mirror = nullptr;
-        c_engine::device( device, context, mirror );
-        s.m_pass->draw( *s.m_frame, s.m_view, reinterpret_cast< gfx_handle_t >( mirror ), [ &s ]( int surface )
+        s.m_pass->draw( *s.m_frame, s.m_view, s.m_mirror, [ &s ]( int surface )
         {
             return surface >= 0 && surface < static_cast< int >( s.m_surface_shader.size( ) ) ? s.m_surface_shader[ static_cast< std::size_t >( surface ) ] : -1;
         } );
