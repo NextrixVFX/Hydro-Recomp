@@ -192,6 +192,8 @@ inline ui_ret_t c_world::screen_external( screen_state_t& state, c_ui_binding& b
         ui_play( ui_json_text( member( member( ui_db_entry( &m_boat_db, boat ), "Audio" ), "Announcer" ) ).c_str( ) );
         return out;
     }
+    if ( boxes_entity( state, binding, e, plug ) )
+        return out;
     if ( logic_entity_t* l = screen_logic( state, e ) )
     {
         screen_logic_context_t ctx{ &binding, &e, { } };
@@ -242,6 +244,79 @@ inline void c_world::award_busy( const ui_params_t& p )
             self( self, *child );
     };
     walk( walk, *award->m_root );
+}
+
+// The award screen's events ( 0x47F350 .. 0x47FE90 ): the listeners of its leaves' ctors, then the project's graph. VuBarracudaUICreditTextEntity "OnCreditsChanged" 0x443930: the two ints' difference,
+// "%d", "%d%s%03d" from 1000, "%d%s%03d%s%03d" from 1000000 with "Common_Numeric_Separator". The text leaves' "OnSet*StringID" keep the id, slot 12 0x446DE0 looks it up; the image leaves' "*ImageChange" the asset.
+inline void c_world::award_event( const char* name, const ui_params_t& p )
+{
+    award_view_t& v = m_award_view;
+    ui_params_reader_t r( p );
+    // 0x446E00, 0x440Dxx: each leaf's listener also sets its visible byte (+0x64, +0x6C): the base's Show.
+    const auto show = [ this ]( const char* type ) {
+        ui_game_award_t* award = m_race.screens.m_award.get( );
+        if ( !award || !award->m_root || !award->m_binding )
+            return;
+        const auto walk = [ & ]( const auto& self, entity_t& e ) -> void {
+            if ( e.m_type == type )
+                award->m_binding->input( e, "Show", ui_params_t( ) );
+            for ( auto& child : e.m_children )
+                self( self, *child );
+        };
+        walk( walk, *award->m_root );
+    };
+    if ( std::strcmp( name, "OnCreditsChanged" ) == 0 && p.m_size >= 16 )
+    {
+        std::int32_t a = 0, b = 0;
+        std::memcpy( &a, p.m_bytes + 4, 4 );
+        std::memcpy( &b, p.m_bytes + 12, 4 );
+        const std::int32_t left = a - b;
+        const std::string& s = string_db_get( m_string_db, "Common_Numeric_Separator" );
+        const std::int32_t millions = left / 1000000, thousands = ( left - millions * 1000000 ) / 1000, ones = left % 1000, high = left / 1000;
+        char text[ 256 ];
+        if ( left < 1000 )
+            sprintf_s( text, "%d", ones );
+        else if ( left < 1000000 )
+            sprintf_s( text, "%d%s%03d", high, s.c_str( ), ones );
+        else
+            sprintf_s( text, "%d%s%03d%s%03d", millions, s.c_str( ), thousands, s.c_str( ), ones );
+        v.credits = text;
+    }
+    else if ( std::strcmp( name, "OnSetTrophyStringID" ) == 0 )
+        v.trophy_id = r.read_string( );
+    else if ( std::strcmp( name, "OnTrophyImageChange" ) == 0 )
+        v.trophy_image = r.read_string( );
+    else if ( std::strcmp( name, "OnAwardImageChange" ) == 0 )
+    {
+        v.award_image = r.read_string( );
+        show( "VuBarracudaUIAwardImageEntity" );
+    }
+    else if ( std::strcmp( name, "OnSetUnlockCatStringID" ) == 0 )
+    {
+        v.cat_id = r.read_string( );
+        show( "VuBarracudaUIUnlockCatTextEntity" );
+    }
+    else if ( std::strcmp( name, "OnSetUnlockInfoStringID" ) == 0 )
+    {
+        v.info_id = r.read_string( );
+        show( "VuBarracudaUIUnlockInfoTextEntity" );
+    }
+    else if ( std::strcmp( name, "OnGenericEvent" ) == 0 )   // VuGenericEventEntity: the name matches "Event Name": its OnReceived
+    {
+        ui_game_award_t* award = m_race.screens.m_award.get( );
+        const std::string wanted = r.read_string( );
+        if ( !award || !award->m_root || !award->m_binding )
+            return;
+        const auto walk = [ & ]( const auto& self, entity_t& e ) -> void {
+            if ( e.m_type == "VuGenericEventEntity" )
+                if ( const ui_slot_t* s = ui_bind_slot( e, "Event Name" ) )
+                    if ( s->m_text == wanted )
+                        award->m_binding->fire_plug( e, "OnReceived", ui_params_t( ) );
+            for ( auto& child : e.m_children )
+                self( self, *child );
+        };
+        walk( walk, *award->m_root );
+    }
 }
 
 // VuPosterEntity's two listeners (ctor 0x43A8F0: 0x43AC50, 0x43ADA0) on gameutil +0x50: the document half. Its model reload 0x43AF50 and draw are the background

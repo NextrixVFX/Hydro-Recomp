@@ -39,7 +39,7 @@ inline void c_world::saves_start( )
     }
     m_saves_on = true;
     m_profile.load( );
-    m_cloud.hooks.corrupt_box = [ ] { LOG_WARNING( "saves: the game save is corrupt (SaveGame_Corrupt_Heading's box: the UI's, not shown)" ); };
+    m_cloud.hooks.corrupt_box = [ this ] { boxes_show( k_ui_save_corrupt_box[ 0 ], k_ui_save_corrupt_box[ 1 ], k_ui_save_corrupt_box[ 2 ] ); };   // 0x4AC57B
     m_cloud.hooks.broadcast = [ this ]( const char* name ) {
         if ( std::strcmp( name, "OnCloudSavePreSave" ) == 0 )                // 0x4B6A90
             m_unlock.save( json_member( m_cloud.data, "Unlock" ) );
@@ -166,6 +166,7 @@ inline void c_world::unlock_bind( )
         race_broadcast( "OnAwardScreenBusy", &p );
         award_busy( p );
     };
+    a.m_event = [ this ]( const char* name, const ui_params_t& p ) { award_event( name, p ); };
     a.m_input = [ this ]( const char* name ) { return m_race.input && m_race.input->manager.pressed( 0, name ); };
     a.m_touches = [ ] { return 0x7FFF; };   // g 0x759070 +0x1C: no finger down
     a.m_play = [ this ]( const char* event ) {

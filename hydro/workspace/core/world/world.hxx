@@ -11,6 +11,7 @@
 #include <workspace/core/trigger/set.hxx>
 #include <workspace/core/assets/reader.hxx>
 #include <workspace/core/assets/tree.hxx>
+#include <workspace/core/game/boxes.hxx>
 #include <workspace/core/game/input.hxx>
 #include <workspace/core/game/identity.hxx>
 #include <workspace/core/world/control.hxx>
@@ -629,9 +630,32 @@ private:
     {
         std::map< const entity_t*, sound_event_t > sounds;     // VuAudioEventEntity +0x78
         std::map< const entity_t*, logic_entity_t > logic;
+        std::map< const entity_t*, msgbox_entity_t > boxes;    // VuMessageBoxEntity (world/msgbox.hxx)
     };
     screen_state_t m_game_screen_state;                 // the Results and Award projects
     c_ui_binding* m_logic_binding = nullptr;            // the screen a logic handler runs on
+    // The message boxes, world/msgbox.hxx: g 0x758FD4 and its project.
+    c_msgbox_manager m_boxes;
+    msgbox_screen_t m_box_screen;
+    ui_message_box_t m_box_view;
+    std::unique_ptr< entity_t > m_box_root;
+    std::unique_ptr< c_ui_binding > m_box_binding;
+    screen_state_t m_box_state;
+    std::uint32_t m_box_image = 0u;
+    bool m_boxes_tried = false;
+    bool m_boxes_ready = false;
+    platform_input_t* boxes_input( );
+    bool m_pad_box = false;                             // g 0x758FC0 +0x1C
+    void boxes_pad( bool connected, int pad );
+    void boxes_start( );
+    void boxes_tick( float dt );
+    void boxes_draw( );
+    void fade_draw( );
+    void ghost_labels( );
+    msgbox_ref_t boxes_show( const std::string& heading, const std::string& body, const std::string& text_a, const std::string& text_b = std::string( ) );
+    void boxes_release( screen_state_t& state );
+    bool boxes_entity( screen_state_t& state, c_ui_binding& binding, entity_t& e, const char* plug );
+    std::unique_ptr< entity_t > menu_load_root( const std::string& name );
     struct menu_project_t
     {
         std::unique_ptr< entity_t > root;
@@ -645,6 +669,12 @@ private:
     logic_entity_t* screen_logic( screen_state_t& state, entity_t& e );
     ui_ret_t screen_external( screen_state_t& state, c_ui_binding& binding, entity_t& e, const char* plug, const ui_params_t& p );
     void award_busy( const ui_params_t& p );
+    struct award_view_t   // the Screens/Award leaves' runtime (world/external.hxx award_event)
+    {
+        std::string credits, trophy_id, trophy_image, award_image, cat_id, info_id;
+    };
+    award_view_t m_award_view;
+    void award_event( const char* name, const ui_params_t& p );
     bool menu_poster( std::uint32_t hash, const ui_params_t& p );
     void ui_play( const char* name )
     {
@@ -1070,12 +1100,15 @@ public:
             path = path.empty( ) ? e->m_name : e->m_name + "/" + path;
         return path;
     }
+    int m_loading_project = 0;                          // VuActionGameMode +0x38: the id in m_menu_projects
+    std::string loading_screen_name( ) const;
     void action_start( value_t& game_data, const race_session_dbs_t& dbs, const std::function< void( ) >& level );
 
     void load_scene( const char* track, const char* mode, const char* course = nullptr )
     {
         if ( !m_opened )
             load( );
+        boxes_start( );
         saves_start( );
         if ( !m_sorted )
         {
@@ -1123,7 +1156,8 @@ public:
         const auto text = []( const char* v ) { return std::string( v ? v : "" ); };
         const bool defaults = c_engine::option( "front-end-defaults" ) != nullptr;
         const bool race = m_has_chosen || defaults || c_engine::option( "boat" ) != nullptr || c_engine::option( "skin" ) != nullptr;
-        value_t util;
+        const std::shared_ptr< value_t > keep = std::make_shared< value_t >( );   // `level` may run frames later (action_start)
+        value_t& util = *keep;
         value_t& game_data = ui_json_child( util, "GameData" );
         bool front_end = false;
         if ( m_has_chosen )   // the mode change's: 0x4BF9B0 built it
@@ -1149,8 +1183,10 @@ public:
         }
         // VuActionGameMode 0x4BA060 (LoadLevel's enter): the body below. A front-end race runs it through the action mode
         // (world/action.hxx); every other path (the scaffold, --front-end-defaults to a non-race) calls it directly.
-        const auto level = [ & ]( )
+        const auto level = [ this, keep, dbs, race, front_end ]( )
         {
+        value_t& util = *keep;
+        value_t& game_data = ui_json_child( util, "GameData" );
         const std::string name = race_project_name( util, nullptr, [ this ]( const std::string& type, const std::string& n ) {
             for ( const std::string& rest : m_archive.names( type + "/" + n ) )   // names() strips the prefix: exact = ""
                 if ( rest.empty( ) )
@@ -1634,6 +1670,18 @@ public:
     }
     void scene_frame( float dt )
     {
+        boxes_tick( dt );
+        // A race from the menus: VuActionGameMode's LoadingScreen before LoadLevel (front.hxx action_start). Slot 4 alone: the level is not there yet.
+        if ( m_action && m_action_level )
+        {
+            m_action->tick( dt );
+            if ( std::string( m_action->state( ) ) == "LoadLevel" )
+            {
+                m_action_level = nullptr;
+                LOG_INFO( "action mode: LoadLevel done" );
+            }
+            return;
+        }
         if ( m_title )   // the title sequence runs no scene: the mode manager's tick alone
         {
             m_modes.tick( dt );
@@ -1661,6 +1709,7 @@ public:
         };
         m_race.world.fire = [ this ]( const entity_t& owner, const char* plug ) { fire( entity_path( owner ), plug ); };
         m_race.world.sound = &m_sound;
+        m_race.world.message_box = [ this ]( const std::string& heading, const std::string& body, const std::string& text_a ) { return boxes_show( heading, body, text_a ); };
         m_race.world.vo = m_vo_ready ? &m_vo : nullptr;
         m_race.world.vo_hooks = m_vo_ready ? &m_vo_hooks : nullptr;
         m_race.world.prop_moved = [ this ]( const entity_t& owner ) { prop_moved( owner ); };
@@ -2311,6 +2360,7 @@ private:
 #include <workspace/core/world/graph.hxx>
 #include <workspace/core/world/menu.hxx>
 #include <workspace/core/world/external.hxx>
+#include <workspace/core/world/msgbox.hxx>
 #include <workspace/core/world/saves.hxx>
 #include <workspace/core/world/motion.hxx>
 #include <workspace/core/world/animate.hxx>

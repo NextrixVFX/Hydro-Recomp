@@ -480,11 +480,8 @@ inline bool race_session_start( race_session_t& s, const std::string& mode, cons
                 race_unwired( s, "0x48F560: the boat manager's +0x18 / +0x24 list has no first boat (retail reads [0] of an empty list: UNKNOWN) - not run" );
                 return;
             }
-            if ( in.championship )
-            {
-                race_unwired( s, "0x48F560 in a championship: the progress manager's vt+0x6C (the profile's round, a saves-side hook) - not run (UNKNOWN)" );
-                return;
-            }
+            if ( in.championship && s.world.save_doc )
+                in.current = [ &s ]( ) -> const value_t* { return &ui_progress_champ_state( *s.world.save_doc ); };   // vt+0x6C 0x4B3DC0
             if ( !timetrial_write_results( s.util, s.timetrial_written, in ) )
                 race_unwired( s, "0x48F560: a path not recreated (no VuStringDB / VuRandom bound, a negative place) - logged UNKNOWN" );
         }

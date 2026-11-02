@@ -639,7 +639,9 @@ private:
 
     static bool shown_vtable( std::uint32_t vt )
     {
-        return vt == k_ui_hud_element_vtable || vt == k_ui_text_vtable || vt == k_ui_hud_toast_vtable || vt == k_ui_image_vtable;
+        // 0x73B5DC .. 0x73C32C: Screens/Award's image and text leaves, whose Show / Hide / SetAlpha are their bases' (ctors 0x6284E0, 0x627070).
+        return vt == k_ui_hud_element_vtable || vt == k_ui_text_vtable || vt == k_ui_hud_toast_vtable || vt == k_ui_image_vtable || vt == 0x73B5DCu || vt == 0x73C0BCu ||
+               vt == 0x73B86Cu || vt == 0x73C18Cu || vt == 0x73C25Cu || vt == 0x73C32Cu;
     }
 
     static void make_shown( ui_bound_t& b )
@@ -2068,6 +2070,15 @@ public:
         std::memcpy( &bits, &dt, 4 );
         ui_params_add( p, 2, bits );
         const std::uint32_t h = fsm_hash( "OnUITick" );
+        for ( auto& child : m_bound.front( )->m_entity->m_children )
+            m_bound[ static_cast< std::size_t >( m_index[ child.get( ) ] ) ]->m_map.handle( h, p );
+    }
+    // 0x5011A0 "OnUIEvent" [ name, int 0 ] to the DIRECT children (the message box's 0x466C60 / 0x466D80).
+    void hud_event( const char* name )
+    {
+        ui_params_t p;
+        p.add_string( name );
+        const std::uint32_t h = fsm_hash( "OnUIEvent" );
         for ( auto& child : m_bound.front( )->m_entity->m_children )
             m_bound[ static_cast< std::size_t >( m_index[ child.get( ) ] ) ]->m_map.handle( h, p );
     }
