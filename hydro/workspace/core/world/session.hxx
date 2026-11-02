@@ -3,7 +3,9 @@
 #include <workspace/core/save/cloud.hxx>
 #include <workspace/core/save/profile.hxx>
 #include <workspace/core/ui/progress.hxx>
+#include <workspace/core/save/ghost.hxx>
 #include <workspace/core/world/ghost.hxx>
+#include <workspace/core/world/ghostgame.hxx>
 #include <workspace/core/world/records.hxx>
 #include <workspace/core/world/tiretrack.hxx>
 #include <workspace/core/world/pause.hxx>
@@ -232,7 +234,8 @@ struct race_session_t
     pause_menu_t pause;                 // the pause menu VuActionGameMode +0x60: its gate only (world/pause.hxx)
     ui_game_screens_t screens;          // VuGame +0x84 the Results VuCommonScreen 0x73F588 (ui/common.hxx; bound by c_world::bind_game_screens)
     tire_track_manager_t tire_tracks;   // VuTireTrackManager g 0x7590F4 (world/tiretrack.hxx; its lists stay empty in retail)
-    std::string ghost_error;            // VuGhostGame +0x740 (a string key, ShowError's message)
+    ghost_loads_t ghost_loads;          // VuGhostGame +0x75C .. and +0x740 (ShowError's message)
+    ghost_game_t ghost_game;            // the handlers' view of the game (world/ghostplay.hxx)
     std::vector< pfx_frame_boat_t > pfx_boats;
     std::vector< pfx_frame_fluids_t > pfx_fluids;
     std::vector< race_start_boat_t > start_boats;
@@ -2711,4 +2714,5 @@ inline void race_session_boat_events( race_session_t& s )
     }
 }
 
+#include <workspace/core/world/ghostplay.hxx>
 #include <workspace/core/world/opening.hxx>
