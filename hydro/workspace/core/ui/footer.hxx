@@ -35,13 +35,9 @@ inline std::string ui_gamertag_text( const ui_signin_t& s, const std::function< 
     return s.m_signed_in ? s.m_name : std::string( );
 }
 
-// 0x445F00: no unlock manager: 1234567 (0x12D687); else the credits capped at 9999999 (0x98967F, the cmovl). Grouped with VuStringDB slot 6
-// "Common_Numeric_Separator" by the three formats 0x692138 / 0x69213C / 0x692148, then slot 6 "CreditsSuffix" (strcat_s into the 0x100 buffer).
-// A negative count takes the first format on its remainder, as retail's unsigned-free comparisons do.
-// SUBSTITUTION, flagged: snprintf for the CRT's sprintf_s; a text past 0x100 bytes is truncated, retail's sprintf_s / strcat_s would abort.
-inline std::string ui_credits_text( bool present, std::int32_t credits, const std::function< std::string( const char* ) >& string6 )
+// The grouping 0x445F00 and 0x443930 share (three formats, the same quotients). A negative count takes the first format on its remainder.
+inline std::string ui_credits_grouped( std::int32_t v, const std::function< std::string( const char* ) >& string6 )
 {
-    const std::int32_t v = !present ? 0x12D687 : credits < 0x98967F ? credits : 0x98967F;
     const std::int32_t millions = v / 1000000;
     const std::int32_t thousands = ( v - millions * 1000000 ) / 1000;
     const std::int32_t units = v - ( v / 1000 ) * 1000;
@@ -53,7 +49,39 @@ inline std::string ui_credits_text( bool present, std::int32_t credits, const st
         std::snprintf( buffer, sizeof( buffer ), "%d%s%03d", thousands, sep.c_str( ), units );
     else
         std::snprintf( buffer, sizeof( buffer ), "%d%s%03d%s%03d", millions, sep.c_str( ), thousands, sep.c_str( ), units );
-    return std::string( buffer ) + string6( "CreditsSuffix" );
+    return buffer;
+}
+
+// 0x446E00 "OnSetTrophyStringID" / "OnSetUnlockCatStringID": a non-empty string -> +0x10C and +0x64 = 1, else nothing.
+inline void ui_award_string_id( std::string& text, bool& visible, const char* id )
+{
+    if ( !id || !*id )
+        return;
+    text = id;
+    visible = true;
+}
+
+// 0x447110 "OnSetUnlockInfoStringID": the same, and +0x64 says whether it took one.
+inline void ui_award_info_id( std::string& text, bool& visible, const char* id )
+{
+    visible = false;
+    ui_award_string_id( text, visible, id );
+}
+
+// 0x445F00: no unlock manager: 1234567 (0x12D687); else the credits capped at 9999999 (0x98967F, the cmovl). Grouped with VuStringDB slot 6
+// "Common_Numeric_Separator" by the three formats 0x692138 / 0x69213C / 0x692148, then slot 6 "CreditsSuffix" (strcat_s into the 0x100 buffer).
+// A negative count takes the first format on its remainder, as retail's unsigned-free comparisons do.
+// SUBSTITUTION, flagged: snprintf for the CRT's sprintf_s; a text past 0x100 bytes is truncated, retail's sprintf_s / strcat_s would abort.
+inline std::string ui_credits_text( bool present, std::int32_t credits, const std::function< std::string( const char* ) >& string6 )
+{
+    const std::int32_t v = !present ? 0x12D687 : credits < 0x98967F ? credits : 0x98967F;
+    return ui_credits_grouped( v, string6 ) + string6( "CreditsSuffix" );
+}
+
+// 0x443930 VuBarracudaUICreditTextEntity "OnCreditsChanged" (Screens/Award's counter): params ( value, earned ), +0x10C = value - earned grouped, no cap, no suffix.
+inline std::string ui_award_credit_text( std::int32_t value, std::int32_t earned, const std::function< std::string( const char* ) >& string6 )
+{
+    return ui_credits_grouped( static_cast< std::int32_t >( static_cast< std::uint32_t >( value ) - static_cast< std::uint32_t >( earned ) ), string6 );
 }
 
 // 0x42DE10 IsTrialVersion: the license manager's vt+0x18. 0x42DE40 IsFullVersion: its inverse. Both a bool VuRetVal.

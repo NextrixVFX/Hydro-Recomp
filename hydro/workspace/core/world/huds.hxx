@@ -317,6 +317,14 @@ inline void c_world::bind_game_screens( )
     // g 0x759038 slot 9( pad, name ): the manager's "pressed" (Results' Select).
     hooks.m_input = [ this ]( int pad, const char* name ) { return m_race.input && m_race.input->manager.pressed( pad, name ); };
     hooks.m_touch_device = &m_touch;
+    hooks.m_texture_exists = [ this ]( const char* name ) { return !m_archive.names( std::string( "VuTextureAsset/" ) + name ).empty( ); };
+#if HYDRO_UI_PASS
+    if ( m_ui_pass )
+    {
+        hooks.m_crop = &m_ui_pass->m_impl.m_crop;
+        hooks.m_inverse = m_ui_pass->m_impl.m_inverse;
+    }
+#endif
     g.m_hooks = hooks;
     m_race.rules.screen_hooks.results_open = [ this ]( const char* project ) { return m_race.screens.results_open( project ); };
     m_race.rules.screen_hooks.screen = [ this ]( int screen, int verb, float dt ) {
