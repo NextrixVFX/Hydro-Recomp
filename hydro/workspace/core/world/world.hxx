@@ -1480,6 +1480,7 @@ public:
         {
             water_pass_source_t source;
             source.m_read = [ this ]( const std::string& entry, std::vector< std::uint8_t >& out ) { return m_archive.read( entry.c_str( ), out ); };
+            source.m_cube = [ this ]( const std::string& name ) -> const gfx_texture_t* { return m_retail ? m_retail->cube_named( name ) : nullptr; };
             m_stage.attach( source );
             m_stage_attached = true;
         }
@@ -1487,7 +1488,7 @@ public:
         {
             for ( const water_built_t::entity_ref_t& ref : m_water.entities )
                 if ( ref.surface >= 0 )
-                    m_stage.surface( ref.surface, static_cast< const water_entity_state_t* >( static_cast< const entity_t* >( ref.entity )->m_state.get( ) )->shader_loads );
+                    m_stage.surface( ref.surface, static_cast< const water_entity_state_t* >( static_cast< const entity_t* >( ref.entity )->m_state.get( ) )->shader_loads, m_water.render_flags );
             m_stage_bound = true;
             LOG_INFO( "water: %d surfaces on %d retail shaders", static_cast< int >( m_stage.m_surface_shader.size( ) ), static_cast< int >( m_stage.m_pass->m_shaders.size( ) ) );
         }
@@ -1512,7 +1513,7 @@ public:
         std::memcpy( &view.m_statics.m_foam_size, &record[ 14 ], 4 );
         std::memcpy( view.m_statics.m_decal_ambient, &record[ 15 ], 4 );
         std::memcpy( view.m_statics.m_decal_diffuse, &record[ 16 ], 4 );
-        m_stage.frame( dt, m_grid_frame, view );
+        m_stage.frame( dt, m_grid_frame, view, m_water.render_flags[ 2 ] != 0u );
         c_engine::clear_colour( &record[ 1 ] );
         water_reflection_plane_tick( m_reflection_plane, &m_water, m_eye );
         c_engine::reflection_plane( m_reflection_plane.m_plane );

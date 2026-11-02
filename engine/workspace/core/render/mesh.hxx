@@ -1122,6 +1122,11 @@ void c_engine::device( void*& device, void*& context, void*& mirror )
 #endif
 }
 
+void c_engine::reflection_enabled( bool on )
+{
+    g_target( ).reflection_enabled = on;
+}
+
 void c_engine::reflection_plane( float z )
 {
     g_target( ).reflection_plane = z;

@@ -69,7 +69,8 @@ void c_composer::tick( )
     size_targets( );
     g_viewport( ).build( g_swap( ).width( ), g_swap( ).height( ) );
     g_sort( ).add( &c_composer::submit_main, this );
-    reflect( );
+    if ( g_target( ).reflection_enabled )
+        reflect( );
     g_sort( ).flush( );
     blit( );
 

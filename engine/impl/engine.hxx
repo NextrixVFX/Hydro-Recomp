@@ -92,6 +92,7 @@ public:
     static void device( void*& device, void*& context, void*& mirror );
     static void clear_colour( const void* rgba );
     static void reflection_plane( float z );
+    static void reflection_enabled( bool on );
     static void lens( float tan_half, float near_plane );
     static void flip_interval( int interval );   // g 0x75907C vt+0x28: the Present's sync interval
     static void matrices( float* view, float* projection, float* eye );

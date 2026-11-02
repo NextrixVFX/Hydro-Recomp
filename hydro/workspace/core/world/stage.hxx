@@ -171,6 +171,12 @@ struct gfx_retail_t
         return gfx_cube_load( m_api, bytes.data( ) );
     }
 
+    // A cube by name through the one cached object a substitution swaps; null when the pack has none.
+    const gfx_texture_t* cube_named( const std::string& name )
+    {
+        return texture( 1u, name ) != 0u ? m_cube_objects.at( name ).m_object : nullptr;
+    }
+
     // 0x4269D0 + 0x426A90 by asset kind (0 VuTextureAsset, 1 VuCubeTextureAsset).
     std::uint32_t texture( std::uint32_t kind, const std::string& name )
     {
