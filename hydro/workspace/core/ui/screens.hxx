@@ -34,6 +34,8 @@ struct ui_screen_env_t
     std::function< std::string( const std::string& id ) > m_string6;               // VuStringDB slot 6 (world/strings.hxx)
     std::function< std::string( const std::string& id ) > m_string7;               // VuStringDB slot 7
     std::function< std::string( const entity_t& ) > m_text;                        // a text leaf's slot 12 (per type)
+    ui_signin_t m_signin;                                                          // the gamer tag's 0x445DE0 (footer.hxx)
+    std::function< std::int32_t( ) > m_credits;                                    // g 0x758FE8 vt+0x38; null: no manager (0x445F00's 1234567)
     std::function< ui_text_font_t( const entity_t& ) > m_font;                     // 0x626B80
     std::function< const ui_texture_t*( const entity_t&, int which ) > m_texture;  // an image's slot 14, a button's three
     std::function< std::uint32_t( const std::string& asset ) > m_font_asset;       // FontDB's "FontAsset" -> the asset's +88, 0 none
@@ -170,8 +172,23 @@ inline ui_frame_inputs_t ui_screen_inputs( c_ui_binding& binding, ui_screen_env_
     // Slot 12 of VuInfoUITextEntity 0x446860: the ticker's text +0x140, not a String ID.
     in.m_text = [ b, env ]( const entity_t& e )
     {
-        const ui_info_ticker_t* t = b->ticker( e );
-        return t ? t->m_text : env.m_text ? env.m_text( e ) : std::string( );
+        if ( const ui_info_ticker_t* t = b->ticker( e ) )
+        {
+            ui_info_hooks_t hooks;
+            hooks.m_string = env.m_string7;
+            return ui_info_text( const_cast< ui_info_ticker_t& >( *t ), hooks );
+        }
+        if ( const ui_completion_t* c = b->completion( e ) )
+            return c->m_text;
+        const std::string* id = env.m_string7 ? b->runtime_string( e ) : nullptr;
+        if ( id )
+            return env.m_string7( *id );
+        const std::uint32_t vt = e.m_ctor ? e.m_ctor->m_vtable : 0u;
+        if ( vt == k_ui_gamertag_vtable )
+            return ui_gamertag_text( env.m_signin, [ & ]( const char* s ) { return env.m_string6 ? env.m_string6( s ) : std::string( ); } );
+        if ( vt == k_ui_credits_vtable )
+            return ui_credits_text( env.m_credits != nullptr, env.m_credits ? env.m_credits( ) : 0, [ & ]( const char* s ) { return env.m_string6 ? env.m_string6( s ) : std::string( ); } );
+        return env.m_text ? env.m_text( e ) : std::string( );
     };
     // The button's three (0x443280: Selected / Unselected / Pressed Texture), the boat stat's two (Tick Off / On Texture); else the image's.
     in.m_texture = [ env ]( const entity_t& e, int which ) -> const ui_texture_t*
@@ -219,6 +236,7 @@ inline ui_frame_inputs_t ui_screen_inputs( c_ui_binding& binding, ui_screen_env_
         return f;
     };
     in.m_button = [ b ]( const entity_t& e, std::uint8_t& focused, std::uint32_t& press ) { b->button_state( e, focused, press ); };
+    in.m_shown = [ b ]( const entity_t& e, std::uint8_t& visible, float& alpha ) { return b->shown( e, visible, alpha ); };
     in.m_page = [ b, env ]( const entity_t& e, ui_gfx_sort_t& sort, const ui_font_draw_env_t& draw, float alpha )
     {
         const ui_page_layout_t* page = b->page( e );

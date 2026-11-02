@@ -3021,6 +3021,109 @@ inline bool verify_ui_selector_frame( )
 
 // Batch 32: VuScreenFade* against retail (case screen_fade): the weight bits of slot 12 0x43EB50 / 0x43F060, then the tick 0x43E710's calls of
 // 0x507830: colour, rect, the key word left at each call, the depth.
+// footer_text: VuGamerTagUITextEntity 0x445DE0, VuCreditsUITextEntity 0x445F00, VuLicenseEntity's 0x42DE10 / 0x42DE40 run by retail: the text bytes,
+// the bool word. String ids asked of the DB are compared too (the ids the C++ asks must answer what retail's stub answered).
+inline bool verify_ui_footer_text( )
+{
+    int failed = 0;
+    for ( std::size_t k = 0; k < g_golden_ftx_rows_count; ++k )
+    {
+        const golden_ftx_row_t& g = g_golden_ftx_rows[ k ];
+        const auto db = [ &g ]( const char* id ) {
+            if ( std::strcmp( id, "SignIn_InProgress" ) == 0 ) return std::string( g.m_busy );
+            if ( std::strcmp( id, "Common_Numeric_Separator" ) == 0 ) return std::string( g.m_sep );
+            if ( std::strcmp( id, "CreditsSuffix" ) == 0 ) return std::string( g.m_suffix );
+            return std::string( "?" );
+        };
+        std::string got;
+        if ( g.m_kind == 0 )
+        {
+            ui_signin_t s;
+            s.m_present = ( g.m_a & 1 ) != 0;
+            s.m_signed_in = ( g.m_a & 2 ) != 0;
+            s.m_busy = ( g.m_a & 4 ) != 0;
+            s.m_name = g.m_name;
+            got = ui_gamertag_text( s, db );
+        }
+        else
+            got = ui_credits_text( g.m_a != 0, g.m_b, db );
+        if ( got != g.m_want )
+        {
+            ++failed;
+            if ( failed <= 3 )
+                LOG_ERROR( "footer text row %d: '%s', retail '%s'", static_cast< int >( k ), got.c_str( ), g.m_want );
+        }
+    }
+    for ( std::size_t k = 0; k < g_golden_ftx_license_count; ++k )
+    {
+        const golden_ftx_license_t& g = g_golden_ftx_license[ k ];
+        failed += g.m_type != 3u || ( ui_license_answer( g.m_trial != 0, g.m_full != 0 ) ? 1u : 0u ) != g.m_value ? 1 : 0;
+    }
+    if ( failed )
+    {
+        LOG_ERROR( "footer texts: %d rows differ", failed );
+        return false;
+    }
+    LOG_SUCCESS( "footer texts 0x445DE0 / 0x445F00 and the license plugs equal retail on %d + %d vectors", static_cast< int >( g_golden_ftx_rows_count ), static_cast< int >( g_golden_ftx_license_count ) );
+    return true;
+}
+
+// completion_text: retail's four slot 6s over a synthetic TrackDB / ChampDB (real reader, real VuJsonContainer) on the record, open and package answers each row
+// lists: the text, +0x124, +0x125, the package / record / open calls' count.
+inline bool verify_ui_completion_text( )
+{
+    int failed = 0;
+    value_t tracks, champs;
+    const auto rows_of = [ ]( value_t& db, const char* const* keys, std::size_t count ) {
+        value_t& rows = ui_json_child( db, "VuDBAsset" );
+        for ( std::size_t k = 0; k < count; ++k )
+            ui_json_set_string( ui_json_child( ui_json_child( rows, keys[ k ] ), "AssetDB" ), keys[ k ] );
+    };
+    static const char* const track_keys[ 5 ] = { "T0", "T1", "T2", "T3", "T4" };
+    static const char* const champ_keys[ 3 ] = { "T0", "T1", "T2" };
+    rows_of( tracks, track_keys, 5 );
+    rows_of( champs, champ_keys, 3 );
+    const auto index = [ ]( const std::string& key, const std::string& course ) {
+        const int c = course == "CourseB" ? 1 : course == "CourseC" ? 2 : 0;
+        return ( key[ 1 ] - '0' ) * 3 + c;
+    };
+    for ( std::size_t k = 0; k < g_golden_cpl_rows_count; ++k )
+    {
+        const golden_cpl_row_t& g = g_golden_cpl_rows[ k ];
+        ui_completion_t c;
+        c.m_kind = static_cast< ui_completion_kind_t >( g.m_kind );
+        ui_completion_env_t env;
+        env.m_track_db = &tracks;
+        env.m_champ_db = &champs;
+        env.m_package = [ &g ]( const std::string& asset ) { return ( g.m_package >> ( asset[ 1 ] - '0' ) & 1u ) != 0u; };
+        int calls = 0;
+        env.m_record = [ & ]( ui_completion_kind_t, const std::string& track, const std::string& course, std::int32_t& place ) {
+            ++calls;
+            const int i = index( track, course );
+            if ( ( g.m_record >> i & 1u ) == 0u )
+                return false;
+            place = g.m_place[ i ];
+            return true;
+        };
+        env.m_open = [ & ]( ui_completion_kind_t, const std::string& track, const std::string& course ) { ++calls; return ( g.m_open >> index( track, course ) & 1u ) != 0u; };
+        env.m_string6 = [ ]( const char* id ) { return std::string( std::strcmp( id, "SinglePlayer_020" ) == 0 ? "Complete" : "?" ); };
+        ui_completion_initialize( c, env );
+        if ( c.m_text != g.m_text || c.m_unused != ( g.m_unused != 0 ) || c.m_locked != ( g.m_locked != 0 ) || calls != g.m_calls )
+        {
+            ++failed;
+            if ( failed <= 3 )
+                LOG_ERROR( "completion row %d: '%s' %d %d calls %d, retail '%s' %d %d calls %d", static_cast< int >( k ), c.m_text.c_str( ), c.m_unused, c.m_locked, calls, g.m_text, g.m_unused, g.m_locked, g.m_calls );
+        }
+    }
+    if ( failed )
+    {
+        LOG_ERROR( "completion texts: %d rows differ", failed );
+        return false;
+    }
+    LOG_SUCCESS( "completion texts 0x458500 / 0x458A40 / 0x459060 / 0x4595A0 equal retail on %d vectors", static_cast< int >( g_golden_cpl_rows_count ) );
+    return true;
+}
+
 inline bool verify_ui_screen_fade( )
 {
     int failed = 0, drawn = 0, ones = 0, zeros = 0, ramps = 0;
@@ -3125,6 +3228,8 @@ inline bool verify_ui_widgets_all( )
     ok = verify_ui_menu_actions( ) && ok;
     ok = verify_ui_selector_frame( ) && ok;
     ok = verify_ui_screen_fade( ) && ok;
+    ok = verify_ui_footer_text( ) && ok;
+    ok = verify_ui_completion_text( ) && ok;
     ok = verify_ui_screen_inputs( ) && ok;
     ok = verify_ui_slider_frame( ) && ok;
     ok = verify_ui_common_screen( ) && ok;
