@@ -1330,7 +1330,7 @@ address,size,ida_name,classes,vtable_slots,subsystem,status,cited_in,thunk,libra
 0x4582E0,25,sub_4582E0,,,HUD / UI / fonts (by address),cited,hydro/workspace/core/ui/bind.hxx; hydro/workspace/core/ui/completion.hxx,False,False,game
 0x458300,117,sub_458300,,,HUD / UI / fonts (by address),verified,hydro/workspace/core/game/types.hxx; hydro/workspace/core/ui/completion.hxx,False,False,game
 0x458380,373,sub_458380,,,HUD / UI / fonts (by address),callee,,False,False,game
-0x458500,808,?$VuMethod1@VVuChampionshipCompletionUITextEntity@@VVuRetVal@@ABVVuParams@@_load_VuDBAsset,VuRaceCompletionUITextEntity,VuRaceCompletionUITextEntity+6,HUD / UI / fonts,verified,hydro/workspace/core/ui/bind.hxx; hydro/workspace/core/ui/completion.hxx; hydro/workspace/utility/checks/widgets.hxx,False,False,game
+0x458500,808,?$VuMethod1@VVuChampionshipCompletionUITextEntity@@VVuRetVal@@ABVVuParams@@_load_VuDBAsset,VuRaceCompletionUITextEntity,VuRaceCompletionUITextEntity+6,HUD / UI / fonts,verified,hydro/workspace/core/ui/bind.hxx; hydro/workspace/core/ui/completion.hxx; hydro/workspace/utility/checks/session.hxx; hydro/workspace/utility/checks/widgets.hxx,False,False,game
 0x458830,6,sub_458830,VuSlalomCompletionUITextEntity,VuSlalomCompletionUITextEntity+1,HUD / UI / fonts,absent,,False,False,game
 0x458840,117,sub_458840,,,HUD / UI / fonts (by address),verified,hydro/workspace/core/game/types.hxx; hydro/workspace/core/ui/completion.hxx,False,False,game
 0x4588C0,373,sub_4588C0,,,HUD / UI / fonts (by address),callee,,False,False,game
@@ -3085,11 +3085,11 @@ address,size,ida_name,classes,vtable_slots,subsystem,status,cited_in,thunk,libra
 0x4B18D0,80,sub_4B18D0,,,engine core / math / containers (by address),absent,,False,False,game
 0x4B1920,11,sub_4B1920,VuProgressManagerImpl,VuProgressManagerImpl+4,engine core / math / containers,absent,,False,False,game
 0x4B1930,569,VuProgressManagerImpl_load_BestLap,VuProgressManagerImpl,VuProgressManagerImpl+5,engine core / math / containers,verified,hydro/workspace/core/ui/progress.hxx; hydro/workspace/utility/checks/results.hxx,False,False,game
-0x4B1B70,249,sub_4B1B70,VuProgressManagerImpl,VuProgressManagerImpl+6,engine core / math / containers,verified,hydro/workspace/core/ui/progress.hxx,False,False,game
+0x4B1B70,249,sub_4B1B70,VuProgressManagerImpl,VuProgressManagerImpl+6,engine core / math / containers,verified,hydro/workspace/core/ui/completion.hxx; hydro/workspace/core/ui/progress.hxx,False,False,game
 0x4B1C70,569,sub_4B1C70,VuProgressManagerImpl,VuProgressManagerImpl+7,engine core / math / containers,verified,hydro/workspace/core/ui/progress.hxx,False,False,game
-0x4B1EB0,249,sub_4B1EB0,VuProgressManagerImpl,VuProgressManagerImpl+8,engine core / math / containers,verified,hydro/workspace/core/ui/progress.hxx,False,False,game
+0x4B1EB0,249,sub_4B1EB0,VuProgressManagerImpl,VuProgressManagerImpl+8,engine core / math / containers,verified,hydro/workspace/core/ui/completion.hxx; hydro/workspace/core/ui/progress.hxx,False,False,game
 0x4B1FB0,569,sub_4B1FB0,VuProgressManagerImpl,VuProgressManagerImpl+9,engine core / math / containers,verified,hydro/workspace/core/ui/progress.hxx,False,False,game
-0x4B21F0,166,sub_4B21F0,VuProgressManagerImpl,VuProgressManagerImpl+10,engine core / math / containers,verified,hydro/workspace/core/ui/progress.hxx,False,False,game
+0x4B21F0,166,sub_4B21F0,VuProgressManagerImpl,VuProgressManagerImpl+10,engine core / math / containers,verified,hydro/workspace/core/ui/completion.hxx; hydro/workspace/core/ui/progress.hxx,False,False,game
 0x4B22A0,662,VuProgressManagerImpl_load_Progress,VuProgressManagerImpl,VuProgressManagerImpl+12,engine core / math / containers,verified,hydro/workspace/core/ui/progress.hxx; hydro/workspace/core/world/profile.hxx,False,False,game
 0x4B2540,459,sub_4B2540,VuProgressManagerImpl,VuProgressManagerImpl+11,engine core / math / containers,verified,hydro/workspace/core/ui/progress.hxx,False,False,game
 0x4B2710,977,sub_4B2710,VuProgressManagerImpl,VuProgressManagerImpl+13,engine core / math / containers,verified,hydro/workspace/core/ui/progress.hxx,False,False,game
@@ -3101,7 +3101,7 @@ address,size,ida_name,classes,vtable_slots,subsystem,status,cited_in,thunk,libra
 0x4B34D0,395,VuProgressManagerImpl_load_AllTimeRaceBronzes,VuProgressManagerImpl,VuProgressManagerImpl+19,engine core / math / containers,verified,hydro/workspace/core/ui/progress.hxx,False,False,game
 0x4B3660,395,VuProgressManagerImpl_load_AllTimeSlalomBronzes,VuProgressManagerImpl,VuProgressManagerImpl+20,engine core / math / containers,verified,hydro/workspace/core/ui/progress.hxx,False,False,game
 0x4B37F0,395,VuProgressManagerImpl_load_AllTimeTimeTrialBronzes,VuProgressManagerImpl,VuProgressManagerImpl+21,engine core / math / containers,verified,hydro/workspace/core/ui/progress.hxx; hydro/workspace/utility/checks/results.hxx,False,False,game
-0x4B3980,161,VuProgressManagerImpl_load_Championship,VuProgressManagerImpl,VuProgressManagerImpl+22,engine core / math / containers,verified,hydro/workspace/core/ui/progress.hxx; hydro/workspace/core/world/profile.hxx; hydro/workspace/utility/checks/results.hxx,False,False,game
+0x4B3980,161,VuProgressManagerImpl_load_Championship,VuProgressManagerImpl,VuProgressManagerImpl+22,engine core / math / containers,verified,hydro/workspace/core/ui/completion.hxx; hydro/workspace/core/ui/progress.hxx; hydro/workspace/core/world/profile.hxx; hydro/workspace/utility/checks/results.hxx,False,False,game
 0x4B3A30,520,VuProgressManagerImpl_load_AllTimeChampionshipCount,VuProgressManagerImpl,VuProgressManagerImpl+23,engine core / math / containers,verified,hydro/workspace/core/ui/progress.hxx; hydro/workspace/utility/checks/results.hxx,False,False,game
 0x4B3C40,61,sub_4B3C40,VuProgressManagerImpl,VuProgressManagerImpl+24,engine core / math / containers,verified,hydro/workspace/core/ui/progress.hxx; hydro/workspace/utility/checks/results.hxx,False,False,game
 0x4B3C80,212,VuProgressManagerImpl_load_AllTimeChampionshipBronzes,VuProgressManagerImpl,VuProgressManagerImpl+25,engine core / math / containers,verified,hydro/workspace/core/ui/progress.hxx; hydro/workspace/utility/checks/results.hxx,False,False,game
