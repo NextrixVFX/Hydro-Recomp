@@ -1180,8 +1180,15 @@ struct rigid_component_state_t
     rigid_component_t defaults;
 };
 
+inline void sky_box_component_load( entity_t& owner, const value_t& properties );
+
 inline void entity_load_component( entity_t& owner, entity_component_t& component, const value_t& properties, bool )
 {
+    if ( component.m_vtable == 0x74D244u && owner.m_type == "VuSkyBoxEntity" )
+    {
+        sky_box_component_load( owner, properties );
+        return;
+    }
     if ( component.m_vtable == k_rigid_body_component_vtable )
     {
         rigid_component_state_t* s = static_cast< rigid_component_state_t* >( component.m_state.get( ) );
@@ -1371,6 +1378,16 @@ template < class T >
 inline const T* entity_action( const entity_t& e )
 {
     return e.m_state && entity_action_kind( e.m_type ) ? &static_cast< const props_state_t< T >* >( e.m_state.get( ) )->value : nullptr;
+}
+
+// The sky's Vu3dDrawComponent: only its "Reflect" is read here (the shadow pass has no sky).
+inline void sky_box_component_load( entity_t& owner, const value_t& properties )
+{
+    if ( const sky_box_properties_t* p = entity_action< sky_box_properties_t >( owner ) )
+    {
+        sky_box_properties_t* mine = const_cast< sky_box_properties_t* >( p );
+        property_bool( properties, "Reflect", mine->reflect, mine->reflect );
+    }
 }
 
 // VuPropEntity's own property the race reads: "Initially Visible" (ctor 0x5464C0: bool vt 0x737450, target +0x78,

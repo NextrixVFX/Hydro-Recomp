@@ -260,6 +260,47 @@ inline gfx_texture_object_t* gfx_texture_load( gfx_api_t& api, const std::uint8_
     return t;
 }
 
+// 0x609460 (VuCubeTexture_createFromStream, the asset's load 0x5AE140): the options as a 2D texture's, the edge, the levels, the format, then six images each { code, width, height, levels, count, data }; a face's
+// level goes to subresource face x levels + level; 0x609240's sampler is gfx_texture_sampler's. Misc 4 = TEXTURECUBE. The levels drop to 1 under feature level 10 (the device's +0x94): not taken, ours is 10 or better.
+// Not recreated: 0x606550 under g 0x75906B, as gfx_texture_load.
+inline gfx_texture_object_t* gfx_cube_load( gfx_api_t& api, const std::uint8_t* bytes )
+{
+    std::uint32_t head[ 8 ];
+    std::memcpy( head, bytes, sizeof( head ) );
+    gfx_texture_options_t o;
+    o.m_address_u = head[ 0 ];
+    o.m_address_v = head[ 1 ];
+    o.m_min = static_cast< std::int32_t >( head[ 2 ] );
+    o.m_mag = static_cast< std::int32_t >( head[ 3 ] );
+    o.m_mip = static_cast< std::int32_t >( head[ 4 ] );
+    const gfx_texture_desc_t d{ head[ 5 ], head[ 5 ], head[ 6 ], 6u, head[ 7 ], 1u, 0u, 0u, 8u, 0u, 4u };
+    const gfx_handle_t texture = api.create_texture( d );
+    const gfx_handle_t view = api.create_view( texture );
+    const std::uint8_t* at = bytes + sizeof( head );
+    for ( std::uint32_t face = 0; face < 6u; ++face )
+    {
+        std::uint32_t image[ 5 ];
+        std::memcpy( image, at, sizeof( image ) );
+        const std::uint8_t* data = at + sizeof( image );
+        for ( std::uint32_t level = 0; level < head[ 6 ]; ++level )
+        {
+            const std::int32_t lw = static_cast< std::int32_t >( image[ 1 ] ) >> level, lh = static_cast< std::int32_t >( image[ 2 ] ) >> level;
+            const std::uint32_t size = gfx_image_size( image[ 0 ], lw, lh );
+            api.update_texture( texture, face * head[ 6 ] + level, data, gfx_image_pitch( image[ 0 ], lw ), size );
+            data += size;
+        }
+        at += sizeof( image ) + image[ 4 ];
+    }
+    gfx_texture_object_t* t = new gfx_texture_object_t( );
+    t->m_width = t->m_height = static_cast< std::int32_t >( head[ 5 ] );
+    t->m_levels = head[ 6 ];
+    gfx_texture_sampler( api, *t, o );
+    t->m_format = head[ 7 ];
+    t->m_texture = texture;
+    t->m_view = view;
+    return t;
+}
+
 // 0x57C6C0 vt+8 (level, bytes, an unread size): a format the table does not name uploads with pitch 0, as retail does.
 inline void gfx_texture_update( gfx_api_t& api, const gfx_texture_object_t& t, std::int32_t level, const void* bytes )
 {

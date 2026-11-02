@@ -55,6 +55,15 @@ struct gfx_retail_t
         m_backend.m_callbacks[ k_gfx_cb_model ] = colour( k_gfx_pass_colour );
         m_backend.m_callbacks[ k_gfx_cb_model_back ] = colour( k_gfx_pass_prepass );
         m_backend.m_callbacks[ k_gfx_cb_model_front ] = colour( k_gfx_pass_equal );
+        // 0x5EBFF0 (the sky's record: the matrix, the part at +0x40): only the matrix constant, then the draw.
+        m_backend.m_callbacks[ k_gfx_cb_sky ] = [ this ]( std::uint8_t* r )
+        {
+            std::uint32_t id;
+            std::memcpy( &id, r + 0x40, 4 );
+            const gfx_model_part_t& part = m_parts[ id - 1u ];
+            gfx_programs_t::set_matrix( m_api, *part.m_shader->m_program, *part.m_shader->m_matrix, r );
+            m_device.draw_indexed( 3u, part.m_start, part.m_triangles );
+        };
     }
 
     gfx_direct_t m_api;
@@ -72,19 +81,49 @@ struct gfx_retail_t
     std::deque< gfx_model_shader_t > m_shaders;
     std::deque< gfx_model_part_t > m_parts;                       // a record's part id - 1
     std::uint32_t m_missing_textures = 0, m_cubes_absent = 0;
+    struct cube_slot_t
+    {
+        gfx_texture_object_t* m_object;
+        std::string m_resolved;
+    };
+    std::map< std::string, std::uint32_t > m_cube_ids;
+    std::map< std::string, cube_slot_t > m_cube_objects;
+    std::function< std::string( const std::string& ) > m_cube_name;
+    const gfx_scene_view_t* m_sky = nullptr;   // VuSkyBoxEntity's asset
+    bool m_sky_reflect = false;
     float m_view[ 16 ] = { }, m_view_proj[ 16 ] = { }, m_eye[ 4 ] = { };
     std::uint8_t m_fog_colour[ 4 ] = { };
     light_manager_t m_lights;
     gfx_camera_t m_camera;
     int m_passes = 0;
 
-    // 0x4269D0 + 0x426A90 by asset kind. A kind 1 is VuCubeTextureAsset: not made yet, counted; the sampler stays as it was.
+    // A VuCubeTextureAsset's object (0x5AE140). A substitution (VuSubstituteAssetEntity) changes the object in place: `m_cube_name` answers the resolved name, frame( ) follows it.
+    gfx_texture_object_t* cube_object( const std::string& name )
+    {
+        std::vector< std::uint8_t > bytes;
+        if ( name.empty( ) || !m_read( "VuCubeTextureAsset/" + name, bytes ) )
+            return nullptr;
+        return gfx_cube_load( m_api, bytes.data( ) );
+    }
+
+    // 0x4269D0 + 0x426A90 by asset kind (0 VuTextureAsset, 1 VuCubeTextureAsset).
     std::uint32_t texture( std::uint32_t kind, const std::string& name )
     {
         if ( kind != 0u )
         {
-            ++m_cubes_absent;
-            return 0u;
+            const auto cube = m_cube_ids.find( name );
+            if ( cube != m_cube_ids.end( ) )
+                return cube->second;
+            gfx_texture_object_t* object = cube_object( m_cube_name ? m_cube_name( name ) : name );
+            if ( object == nullptr )
+            {
+                ++m_cubes_absent;
+                return 0u;
+            }
+            const std::uint32_t id = m_backend.add_texture( object );
+            m_cube_ids.emplace( name, id );
+            m_cube_objects.emplace( name, cube_slot_t{ object, m_cube_name ? m_cube_name( name ) : name } );
+            return id;
         }
         const auto found = m_textures.find( name );
         if ( found != m_textures.end( ) )
@@ -247,6 +286,19 @@ struct gfx_retail_t
         m_backend.m_far_plane = far_plane;
         m_lights = lights;
         m_sort.tick( dt );
+        if ( m_cube_name )
+            for ( auto& slot : m_cube_objects )
+            {
+                const std::string resolved = m_cube_name( slot.first );
+                if ( resolved == slot.second.m_resolved )
+                    continue;
+                slot.second.m_resolved = resolved;
+                if ( gfx_texture_object_t* object = cube_object( resolved ) )
+                {
+                    slot.second.m_object->m_view = object->m_view;
+                    slot.second.m_object->m_sampler = object->m_sampler;
+                }
+            }
     }
 
     // One engine pass: the view's statics, the planes, the frame's walk, the sort's frame. `reflecting`: the mirror pass, retail's 0x558C00 params: lod 0.05, the plane z = 0, the clip plane in clip space.
@@ -294,6 +346,8 @@ struct gfx_retail_t
         m_device.clip_plane( clip );
         m_sort.set_layer( 1u );
         m_sort.set_screen( 8u );
+        if ( m_sky != nullptr && ( !reflecting || m_sky_reflect ) )
+            gfx_sky_draw( m_sort, m_eye, m_sky );
         m_draw( m_sort, p );
         m_sort.flip( );
         if ( ++m_passes == 300 )

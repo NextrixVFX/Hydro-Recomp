@@ -78,6 +78,7 @@ inline void c_world::load_entity_tree( const char* asset, const value_t& project
     std::set< std::string > fresh_ifs;
     std::map< std::string, entity_t* > fresh_logic;
     std::string fresh_sky;
+    bool fresh_sky_reflect = false;
     // The event graph addresses an entity by its names below the project
     // root, '/'-joined.
     std::map< std::string, std::string > fresh_types;
@@ -214,7 +215,10 @@ inline void c_world::load_entity_tree( const char* asset, const value_t& project
         // VuWaterTextureSettingsEntity (ctor 0x5D2BD0): its words reach the water renderer through its game-start Trigger
         // 0x5D2B00 (graph.hxx), not at load.
         if ( const auto* p = entity_action< sky_box_properties_t >( e ); p && e.m_type == "VuSkyBoxEntity" && !p->model_asset.empty( ) )
+        {
             fresh_sky = p->model_asset;
+            fresh_sky_reflect = p->reflect != 0u;
+        }
         // The three graph nodes that carry no property: their path is the state.
         if ( e.m_ctor && e.m_type == "VuOneShotFilterEntity" )
             fresh_filters.emplace( trail, filter_t{ } );
@@ -429,7 +433,16 @@ inline void c_world::load_entity_tree( const char* asset, const value_t& project
                 LOG_VERBOSE( "logic link: %s . %s <-> %s . %s", pair.first.first.c_str( ), pair.first.second.c_str( ), edge.entity.c_str( ),
                              edge.plug.c_str( ) );
     if ( !fresh_sky.empty( ) )
+    {
         m_sky = fresh_sky;
+        if ( !m_retail )
+            retail_attach( );
+        if ( m_retail )
+        {
+            m_retail->m_sky = m_retail->model( fresh_sky );
+            m_retail->m_sky_reflect = fresh_sky_reflect;
+        }
+    }
     for ( trigger_t& gate : fresh_triggers )
         m_triggers.add( std::move( gate ) );
     LOG_INFO( "entity tree: %s (%s) - %d entities, %d UNKNOWN (nothing below one is loaded); %d coronas placed, %d with an "

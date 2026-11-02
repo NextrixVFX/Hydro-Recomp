@@ -1432,6 +1432,7 @@ public:
             return;   // the self-test's scenes have no window
         m_retail = std::make_unique< gfx_retail_t >( device, context );
         m_retail->m_read = [ this ]( const std::string& entry, std::vector< std::uint8_t >& out ) { return m_archive.read( entry.c_str( ), out ); };
+        m_retail->m_cube_name = [ this ]( const std::string& name ) { return m_rig.substitute( "VuCubeTextureAsset", name ); };
         m_retail->m_draw = [ this ]( gfx_sort_t& sort, const gfx_draw_params_t& p ) {
             for ( static_draw_item_t& item : m_static_draws )
                 if ( item.retail && !item.off && ( ( p.m_reflecting & item.draw.reflect ) == p.m_reflecting ) )
