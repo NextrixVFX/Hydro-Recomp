@@ -2786,8 +2786,7 @@ inline void race_session_slalom_start( race_session_t& s, const race_session_dbs
     race_rules_start( s.rules );
     if ( !s.slalom_draw )
     {
-        s.slalom_draw = true;
-        race_unwired( s, "VuSlalomGame +0x744 Vu3dDrawComponent: the draw manager's add (g 0x7590B8 vt+0x28) - its draw callback not recreated (the renderer's)" );
+        s.slalom_draw = true;   // c_world's draw list runs slalom_draw_gates while this holds
     }
 }
 
