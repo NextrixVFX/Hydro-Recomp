@@ -546,6 +546,9 @@
     <ClInclude Include="workspace\core\world\pfxclass.hxx">
       <Filter>workspace\core\world</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\core\world\pfxdraw.hxx">
+      <Filter>workspace\core\world</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\core\world\pfxload.hxx">
       <Filter>workspace\core\world</Filter>
     </ClInclude>

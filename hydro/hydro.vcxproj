@@ -274,6 +274,7 @@
     <ClInclude Include="workspace\core\world\pause.hxx" />
     <ClInclude Include="workspace\core\world\pfx.hxx" />
     <ClInclude Include="workspace\core\world\pfxclass.hxx" />
+    <ClInclude Include="workspace\core\world\pfxdraw.hxx" />
     <ClInclude Include="workspace\core\world\pfxload.hxx" />
     <ClInclude Include="workspace\core\world\pfxmgr.hxx" />
     <ClInclude Include="workspace\core\world\pfxsim.hxx" />
