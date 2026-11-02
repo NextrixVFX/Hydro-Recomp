@@ -94,6 +94,34 @@ inline void c_world::settings_start( )
     m_settings_hooks.has_accelerometer = m_settings_platform.m_sys_54;
     m_settings_hooks.has_tilt = m_settings_platform.m_sys_58;
     settings_load( m_settings, m_constant_db, m_profile.data, m_settings_hooks, m_settings_platform );
+    // Ours, not retail: the user's Video settings. --frame-limit, --vsync, --display-scale, --fov, --camera-shake and --camera-zoom (percent for the last two) are test drivers.
+    ui_settings_ours_t& ours = m_settings.ui.m_ours;
+    ui_json_float( member( member( member( m_constant_db, "VuDBAsset" ), "Camera" ), "VerticalFOV" ), ours.fov_default );
+    settings_ours_defaults( ours );
+    settings_ours_load( ours, m_profile.data );
+    if ( const char* v = c_engine::option( "frame-limit" ) )
+        ours.frame_limit = std::atoi( v );
+    if ( const char* v = c_engine::option( "vsync" ) )
+        ours.vsync = std::atoi( v ) != 0;
+    if ( const char* v = c_engine::option( "display-scale" ) )
+        m_settings.ui.m_display = m_settings.ui.m_display_out = static_cast< float >( std::atof( v ) );
+    if ( const char* v = c_engine::option( "fov" ) )
+        ours.fov = static_cast< float >( std::atof( v ) );
+    if ( const char* v = c_engine::option( "camera-shake" ) )
+        ours.shake = static_cast< float >( std::atof( v ) ) / 100.0f;
+    if ( const char* v = c_engine::option( "camera-zoom" ) )
+        ours.zoom = static_cast< float >( std::atof( v ) ) / 100.0f;
+    m_settings.ui.m_ours_changed = [ this ] {
+        const ui_settings_ours_t& o = m_settings.ui.m_ours;
+        c_engine::frame_limit( o.frame_limit );
+        c_engine::vsync( o.vsync );
+        g_camera_ours_fov = o.fov;
+        g_camera_ours_shake = o.shake;
+        g_camera_ours_zoom = o.zoom;
+        LOG_INFO( "settings (ours): frame limit %d, vsync %d, fov %.1f, shake %.2f, zoom out %.2f", o.frame_limit, o.vsync ? 1 : 0, o.fov, o.shake, o.zoom );
+    };
+    m_settings.ui.m_ours_changed( );
+    c_engine::display_scale_source( &m_settings.ui.m_display_out );
     if ( const char* fidelity = c_engine::option( "fidelity" ) )   // ours (a test driver): Low, Medium or High for this run
         ui_settings_set_fidelity( m_settings.ui, fidelity, m_settings_platform );
     cloud_profile_load( m_cloud_profile, m_profile.data );
@@ -219,6 +247,7 @@ inline void c_world::saves_profile_listeners( )
     if ( in )
         in->manager.save_profile( m_profile.data );
     settings_save( m_settings, m_profile.data, m_settings_hooks );
+    settings_ours_save( m_settings.ui.m_ours, m_profile.data );   // ours, not retail
     cloud_profile_save( m_cloud_profile, m_profile.data );
 }
 

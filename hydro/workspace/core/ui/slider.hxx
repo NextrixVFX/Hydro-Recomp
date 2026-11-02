@@ -48,6 +48,41 @@ inline bool ui_is_slider_vtable( std::uint32_t vt )
     return vt == k_ui_effect_volume_vtable || vt == k_ui_music_volume_vtable || vt == k_ui_display_scale_vtable || vt == k_ui_steering_vtable;
 }
 
+// OURS, NOT RETAIL: the user's Video settings (world/video.hxx adds them to the screen, settings_ours_load / _save persist
+// them). Each entity is a retail slider or combo told apart by its name, which no retail entity has. The defaults are
+// retail's behaviour: no limit, vsync off, ConstantDB's VerticalFOV, 100% of the shake and of the speed / falling zoom out.
+enum ui_ours_t : int
+{
+    ui_ours_none = 0,
+    ui_ours_frame_limit,
+    ui_ours_vsync,
+    ui_ours_fov,
+    ui_ours_shake,
+    ui_ours_zoom,
+};
+
+inline int ui_ours_tag( const std::string& name )
+{
+    if ( name == "OursFrameLimit" ) return ui_ours_frame_limit;
+    if ( name == "OursVSync" ) return ui_ours_vsync;
+    if ( name == "OursFieldOfView" ) return ui_ours_fov;
+    if ( name == "OursCameraShake" ) return ui_ours_shake;
+    if ( name == "OursCameraZoomOut" ) return ui_ours_zoom;
+    return ui_ours_none;
+}
+
+inline constexpr float k_ui_ours_fov_low = 50.0f, k_ui_ours_fov_high = 110.0f;
+
+struct ui_settings_ours_t
+{
+    std::int32_t frame_limit = 0;   // hertz, 0 unlimited
+    bool vsync = false;
+    float fov = 70.0f;              // degrees
+    float fov_default = 70.0f;      // ConstantDB's VerticalFOV
+    float shake = 1.0f;             // 0 .. 2
+    float zoom = 1.0f;              // 0 .. 2
+};
+
 // VuSettingsManager g 0x758FE0 (the fields the sliders read and write) and the
 // display object g 0x758F94 +0xC (written by the display-scale setter).
 struct ui_settings_t
@@ -65,6 +100,8 @@ struct ui_settings_t
     std::string m_units;               // +0x44 std::string (VuUIUnitsSettingEntity 0x46D3E0 / 0x46D640)
     std::string m_fidelity;            // +0x60 std::string (VuUIFidelitySettingEntity 0x46DA70 / setter 0x4B50A0)
     std::int32_t m_flip_interval = 0;  // +0x78 (VuUIFlipIntervalSettingEntity 0x46DE30 / 0x46E050)
+    ui_settings_ours_t m_ours;                 // ours, not retail
+    std::function< void( ) > m_ours_changed;   // ours: puts m_ours into the engine and the camera
 };
 
 struct ui_slider_hooks_t
@@ -101,6 +138,7 @@ struct ui_slider_t
     float m_src_on_delta[ 2 ] = { };                   // +0x190
     std::int32_t m_count = 0;                          // +0x198
     float m_depth = 0.0f;                              // the draw component (+0x60) +0x14 "Depth"
+    int m_ours = ui_ours_none;                         // ours, not retail: ui_ours_tag
 };
 
 class c_ui_slider
@@ -112,6 +150,12 @@ public:
     float value( ) const
     {
         const ui_settings_t* m = m_hooks.m_settings;
+        if ( m && m_s.m_ours == ui_ours_fov )
+            return ( m->m_ours.fov - k_ui_ours_fov_low ) / ( k_ui_ours_fov_high - k_ui_ours_fov_low );
+        if ( m && m_s.m_ours == ui_ours_shake )
+            return m->m_ours.shake * 0.5f;
+        if ( m && m_s.m_ours == ui_ours_zoom )
+            return m->m_ours.zoom * 0.5f;
         switch ( m_s.m_vtable )
         {
         case k_ui_effect_volume_vtable: return m ? m->m_effect : 0.5f;
@@ -128,6 +172,18 @@ public:
         ui_settings_t* m = m_hooks.m_settings;
         if ( !m )
             return;
+        if ( m_s.m_ours != ui_ours_none )
+        {
+            if ( m_s.m_ours == ui_ours_fov )
+                m->m_ours.fov = k_ui_ours_fov_low + v * ( k_ui_ours_fov_high - k_ui_ours_fov_low );
+            else if ( m_s.m_ours == ui_ours_shake )
+                m->m_ours.shake = v * 2.0f;
+            else if ( m_s.m_ours == ui_ours_zoom )
+                m->m_ours.zoom = v * 2.0f;
+            if ( m->m_ours_changed )
+                m->m_ours_changed( );
+            return;
+        }
         switch ( m_s.m_vtable )
         {
         case k_ui_effect_volume_vtable:

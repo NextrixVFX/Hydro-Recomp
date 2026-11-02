@@ -46,6 +46,9 @@ inline constexpr std::uint32_t k_ui_flip_vtable = 0x73DE6Cu;        // VuUIFlipI
 inline constexpr std::uint32_t k_ui_vibration_vtable = 0x73E0BCu;   // VuVibrationSettingsEntity
 inline constexpr std::uint32_t k_ui_tilt_vtable = 0x73E15Cu;        // VuTiltSteeringSettingsEntity
 
+// Ours, not retail: the Frame Rate Limit's steps; 0 Unlimited, the default.
+inline constexpr std::int32_t k_ui_ours_limits[ 10 ] = { 30, 60, 75, 90, 120, 144, 165, 240, 360, 0 };
+
 inline bool ui_is_settings_combo_vtable( std::uint32_t vt )
 {
     return vt == k_ui_subtitles_vtable || vt == k_ui_units_vtable || vt == k_ui_fidelity_vtable || vt == k_ui_flip_vtable ||
@@ -352,6 +355,30 @@ public:
                 }
             }
         };
+        if ( m_ours == ui_ours_frame_limit )   // ours, not retail
+        {
+            ui_touch_add( touch, this, 0u );
+            for ( int k = 0; k < 10; ++k )
+            {
+                const std::int32_t hertz = k_ui_ours_limits[ k ];
+                push( hertz != 0 ? "Settings_Ours_Limit_" + std::to_string( hertz ) : std::string( "Settings_Ours_Unlimited" ) );
+                if ( hertz == s.m_ours.frame_limit )
+                {
+                    m_current = k;
+                    m_shown = static_cast< float >( k );
+                }
+            }
+            return true;
+        }
+        if ( m_ours == ui_ours_vsync )         // ours, not retail
+        {
+            ui_touch_add( touch, this, 0u );
+            push( "Settings_Off" );
+            push( "Settings_On" );
+            m_current = s.m_ours.vsync ? 1 : 0;
+            m_shown = static_cast< float >( m_current );
+            return true;
+        }
         switch ( m_vtable )
         {
         case k_ui_subtitles_vtable:
@@ -417,6 +444,20 @@ public:
     // - tilt steering 0x46C9B0: only when the choices count > 1: +0x2E = current != 0.
     bool apply_settings( ui_settings_t& s, ui_settings_platform_t& p ) const
     {
+        if ( m_ours != ui_ours_none )          // ours, not retail
+        {
+            if ( m_ours == ui_ours_frame_limit )
+            {
+                if ( m_current < 0 || m_current >= 10 )
+                    return false;
+                s.m_ours.frame_limit = k_ui_ours_limits[ m_current ];
+            }
+            else
+                s.m_ours.vsync = m_current != 0;
+            if ( s.m_ours_changed )
+                s.m_ours_changed( );
+            return true;
+        }
         switch ( m_vtable )
         {
         case k_ui_subtitles_vtable: s.m_subtitles = m_current != 0; return true;
@@ -476,6 +517,7 @@ public:
 
     std::uint32_t m_id;
     std::uint32_t m_vtable;
+    int m_ours = ui_ours_none;       // ours, not retail: ui_ours_tag
     ui_combo_box_hooks_t& m_hooks;
     std::vector< std::pair< std::string, std::uint8_t > > m_choice_texts;   // +0x294 (28-byte entries: VuString, byte)
     // authored (OUR loaded properties)

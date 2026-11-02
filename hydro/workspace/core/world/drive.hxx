@@ -514,7 +514,23 @@ inline void race_drive_camera( void* user, float dt )
     r.camera_env.control_method = r.session->world.control_method;
     r.camera_env.display_w = r.session->world.display_w;
     r.camera_env.display_h = r.session->world.display_h;
-    if ( !boat_camera_tick( d.camera, cb, r.camera_env, dt ) )
+    if ( g_camera_ours_fov > 0.0f )   // ours, not retail: the Field of View setting
+    {
+        std::uint32_t bits;
+        std::memcpy( &bits, &g_camera_ours_fov, 4 );
+        r.camera_env.vertical_fov.type = 2;
+        r.camera_env.vertical_fov.payload = bits;
+    }
+    const bool ticked = boat_camera_tick( d.camera, cb, r.camera_env, dt );
+    static const bool ours_log = c_engine::option( "camera-log" ) != nullptr;   // ours (a test driver): the eye's distance to the pivot and the shake's peak, every 60 ticks
+    static int ours_ticks = 0;
+    if ( ours_log && ++ours_ticks % 60 == 0 )
+    {
+        const float x = state_f( d.camera, 0 ) - state_f( d.camera, 0x10 ), y = state_f( d.camera, 4 ) - state_f( d.camera, 0x14 ), z = state_f( d.camera, 8 ) - state_f( d.camera, 0x18 );
+        LOG_INFO( "camera-log: tick %d eye to pivot %.4f, shake peak %.4f, projection y %.4f", ours_ticks, std::sqrt( x * x + y * y + z * z ), g_camera_ours_shake_peak, state_f( d.camera, 0x44 ) );
+        g_camera_ours_shake_peak = 0.0f;
+    }
+    if ( !ticked )
         race_unwired( *r.session, "the camera's mode +0x2A0 is none of 0 / 1 / 2 under control method 2 - UNKNOWN, nothing written" );
 }
 
