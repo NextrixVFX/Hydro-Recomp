@@ -125,7 +125,6 @@ copy /Y "$(ProjectDir)impl\engine.hxx" "$(ProjectDir)..\hydro\impl\engine\engine
     <ClInclude Include="workspace\utility\collide.hxx" />
     <ClInclude Include="workspace\utility\crash.hxx" />
     <ClInclude Include="workspace\utility\drawstats.hxx" />
-    <ClInclude Include="workspace\utility\spikes.hxx" />
     <ClInclude Include="workspace\utility\golden.hxx" />
     <ClInclude Include="workspace\utility\logger.hxx" />
     <ClInclude Include="workspace\utility\math.hxx" />
@@ -133,6 +132,7 @@ copy /Y "$(ProjectDir)impl\engine.hxx" "$(ProjectDir)..\hydro\impl\engine\engine
     <ClInclude Include="workspace\utility\narrow.hxx" />
     <ClInclude Include="workspace\utility\random.hxx" />
     <ClInclude Include="workspace\utility\solver.hxx" />
+    <ClInclude Include="workspace\utility\spikes.hxx" />
     <ClInclude Include="workspace\utility\trace.hxx" />
     <ClInclude Include="workspace\utility\verify.hxx" />
     <ClInclude Include="workspace\core\assets\archive.hxx" />

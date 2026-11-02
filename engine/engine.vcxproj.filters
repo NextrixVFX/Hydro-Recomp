@@ -116,9 +116,6 @@
     <ClInclude Include="workspace\utility\drawstats.hxx">
       <Filter>workspace\utility</Filter>
     </ClInclude>
-    <ClInclude Include="workspace\utility\spikes.hxx">
-      <Filter>workspace\utility</Filter>
-    </ClInclude>
     <ClInclude Include="workspace\utility\golden.hxx">
       <Filter>workspace\utility</Filter>
     </ClInclude>
@@ -138,6 +135,9 @@
       <Filter>workspace\utility</Filter>
     </ClInclude>
     <ClInclude Include="workspace\utility\solver.hxx">
+      <Filter>workspace\utility</Filter>
+    </ClInclude>
+    <ClInclude Include="workspace\utility\spikes.hxx">
       <Filter>workspace\utility</Filter>
     </ClInclude>
     <ClInclude Include="workspace\utility\trace.hxx">
