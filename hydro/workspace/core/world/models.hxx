@@ -201,6 +201,28 @@ inline const std::vector< c_world::cached_part_t >& c_world::model_for( const st
         bytes.clear( );
         loaded = {};
         loaded_ok = m_archive.read( animated_name.c_str( ), bytes ) && load_model( bytes, loaded );
+        // The scene VuAnimatedModelAsset's load reads (0x5322C0's scene_load_gfx with the flag 1): each part's shader gives its
+        // sort type, as load_model_scene does for a static model. No mesh aabb here: the depth takes the node's origin (ours).
+        if ( loaded_ok )
+        {
+            scene_t scene;
+            scene_reader_t reader{ };
+            reader.data = bytes.data( );
+            reader.size = bytes.size( );
+            if ( scene_load_gfx( reader, scene, 1, false ) )
+                for ( model_part_t& part : loaded.parts )
+                    if ( part.shader >= 0 && static_cast< std::size_t >( part.shader ) < scene.shaders.size( ) )
+                    {
+                        const scene_shader_t& shader = scene.shaders[ static_cast< std::size_t >( part.shader ) ];
+                        part.layer = static_cast< int >( shader.mode );
+                        part.shading = shader.name == "GenericVertexColor" ? 1 : 0;
+                        for ( const scene_constant_t& c : shader.tables[ 0 ].constants )
+                            if ( c.name == "DiffuseAlpha" && c.type == 1 )
+                                std::memcpy( &part.diffuse_alpha, c.value, 4 );
+                        if ( part.layer >= 5 )
+                            LOG_INFO( "model %s: part's shader %s, sort type %d", asset.c_str( ), shader.name.c_str( ), part.layer );
+                    }
+        }
     }
     if ( !loaded_ok )
     {
