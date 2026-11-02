@@ -1,6 +1,8 @@
 ﻿#pragma once
 
 #include <cstring>
+#include <functional>
+#include <vector>
 
 #include <impl/engine.hxx>
 #include <workspace/core/render/device.hxx>
@@ -21,6 +23,8 @@ public:
     void lift( int alpha_test, float extra );
     bool move( int id, const float* world );
     bool show( int id, bool visible );
+    bool layer( int id, int type, int shading, float diffuse_alpha, const float* box );
+    void sorted( void ( *pass )( void*, const sorted_pass_t& ), void* user ) { m_sorted = pass; m_sorted_user = user; }
     mesh_vertex_t* edit( int geometry, int& count );
     void refresh( int geometry );
     void stream( int geometry );
@@ -98,7 +102,31 @@ private:
         // show(): a hidden placement is kept (its handle, matrix and state) but not submitted - the static model
         // component's LOD instances, one shown at a time by the world's draw selection.
         bool hidden = false;
+        // layer( ): retail's sort type (-1: none set), the shading, DiffuseAlpha, the mesh's aabb.
+        int layer = -1;
+        int shading = 0;
+        float diffuse_alpha = 1.0f;
+        bool has_box = false;
+        float box[ 8 ]{};
     };
+
+    // The sort type of a placement the blend pass takes, or -1 for the opaque pass. Retail's own when the material gave one:
+    // types past 4 blend or skip the depth write (the table 0x735A00). The old tags without a retail type keep their pass:
+    // 7 the waterfall, type 11; 3 type 8; 10 the Blend shader, type 2.
+    static int sorted_type( const placement_t& item )
+    {
+        if ( item.alpha_test == 2 || item.alpha_test == 5 || item.alpha_test == 6 || item.alpha_test == 11 )
+            return -1;
+        if ( item.layer >= 5 )
+            return item.layer;
+        if ( item.alpha_test == 7 )
+            return 11;
+        if ( item.alpha_test == 3 )
+            return 8;
+        if ( item.alpha_test == 10 )
+            return item.layer >= 0 ? item.layer : 2;
+        return -1;
+    }
 
     bool ensure( );
 
@@ -114,6 +142,8 @@ private:
     float m_fog_color[ 3 ] = { 156.0f / 255.0f, 196.0f / 255.0f, 215.0f / 255.0f };
     bool m_reflecting = false;
     bool m_ready = false;
+    void ( *m_sorted )( void*, const sorted_pass_t& ) = nullptr;
+    void* m_sorted_user = nullptr;
 #if HYDRO_HOST_WINDOWS
     ID3D11BlendState* m_blend = nullptr;
     ID3D11DepthStencilState* m_depth = nullptr;
@@ -263,6 +293,23 @@ int c_geometry::place( int geometry, int texture, int index_start, int index_cou
         item.alpha_test = alpha_test;
     m_placements.push_back( item );
     return item.id;
+}
+
+bool c_geometry::layer( int id, int type, int shading, float diffuse_alpha, const float* box )
+{
+    for ( placement_t& item : m_placements )
+    {
+        if ( item.id != id )
+            continue;
+        item.layer = type;
+        item.shading = shading;
+        item.diffuse_alpha = diffuse_alpha;
+        item.has_box = box != nullptr;
+        if ( box != nullptr )
+            std::memcpy( item.box, box, sizeof( item.box ) );
+        return true;
+    }
+    return false;
 }
 
 bool c_geometry::shade( int id, int cube, const float* specular, float specular_amount, float environment_amount, const float* diffuse )
@@ -771,7 +818,10 @@ void c_geometry::draw( )
         constants.color[ 1 ] = item.color[ 1 ];
         constants.color[ 2 ] = item.color[ 2 ];
         constants.color[ 3 ] = item.alpha_test == 11 || item.alpha_test == 2 ? item.color[ 3 ] : item.alpha_test >= 8 ? static_cast< float >( item.alpha_test - 7 ) : 1.0f;
-        constants.flags[ 0 ] = item.alpha_test == 11 ? 4.0f : item.alpha_test == 10 ? 3.0f : item.alpha_test == 6 || item.alpha_test == 7 ? -1.0f : item.alpha_test == 5 ? 2.0f : item.alpha_test == 3 ? 0.25f : item.alpha_test == 1 ? 1.0f : 0.0f;
+        const bool retail_blend = item.layer >= 5 && item.alpha_test == 0;   // shader.hxx's branch 5: retail's mode 12 pixel shader
+        if ( retail_blend )
+            constants.color[ 3 ] = item.diffuse_alpha;
+        constants.flags[ 0 ] = retail_blend ? ( item.shading == 1 ? 5.0f : 5.5f ) : item.alpha_test == 12 ? 6.0f : item.alpha_test == 13 ? 6.5f : item.alpha_test == 11 ? 4.0f : item.alpha_test == 10 ? 3.0f : item.alpha_test == 6 || item.alpha_test == 7 ? -1.0f : item.alpha_test == 5 ? 2.0f : item.alpha_test == 3 ? 0.25f : item.alpha_test == 1 ? 1.0f : 0.0f;
         constants.flags[ 2 ] = item.alpha_test == 11 ? item.scroll : 0.0f;
         constants.flags[ 3 ] = item.alpha_test == 11 ? item.surface[ 3 ] : item.alpha_test == 3 ? 0.35f : 0.0f;
         if ( item.alpha_test == 2 || item.alpha_test == 11 )
@@ -815,40 +865,36 @@ void c_geometry::draw( )
 
     for ( const placement_t& item : m_placements )
     {
-        if ( item.alpha_test != 2 && item.alpha_test != 3 && item.alpha_test != 5 && item.alpha_test != 6 && item.alpha_test != 7 && item.alpha_test != 10 && item.alpha_test != 11 )
+        if ( item.alpha_test != 2 && item.alpha_test != 5 && item.alpha_test != 6 && item.alpha_test != 11 && sorted_type( item ) < 0 )
             submit( item );
     }
 
-    if ( m_blend != nullptr )
+    // The blend passes: the game's sort (hydro world/sorted.hxx) orders these and sets the layer's state through gfx_device_t.
+    if ( m_sorted != nullptr )
     {
-        const FLOAT factor[ 4 ] = { 1, 1, 1, 1 };
-        context->OMSetBlendState( m_blend, factor, 0xFFFFFFFF );
-        bound_geometry = -1;
-        bound_texture = -2;
-        bound_cull = nullptr;
-        for ( const placement_t& item : m_placements )
+        std::vector< sorted_item_t > items;
+        for ( std::size_t k = 0; k < m_placements.size( ); ++k )
         {
-            if ( item.alpha_test == 10 || item.alpha_test == 3 )
-                submit( item );
+            const placement_t& item = m_placements[ k ];
+            const int type = sorted_type( item );
+            if ( type >= 0 && !item.hidden )
+                items.push_back( sorted_item_t{ static_cast< int >( k ), type, item.texture, item.world, item.has_box ? item.box : nullptr } );
         }
-        context->OMSetBlendState( nullptr, factor, 0xFFFFFFFF );
-    }
-
-    if ( m_blend != nullptr && m_depth_fade != nullptr )
-    {
-        const FLOAT factor[ 4 ] = { 1, 1, 1, 1 };
-        context->OMSetBlendState( m_blend, factor, 0xFFFFFFFF );
-        context->OMSetDepthStencilState( m_depth_fade, 0 );
-        bound_geometry = -1;
-        bound_texture = -2;
-        bound_cull = nullptr;
-        for ( const placement_t& item : m_placements )
+        struct draw_ctx_t
         {
-            if ( item.alpha_test == 7 )
-                submit( item );
-        }
+            std::function< void( int ) > one;
+        } ctx;
+        ctx.one = [ & ]( int index ) {
+            bound_cull = nullptr;   // the commit before this draw bound its own rasterizer
+            submit( m_placements[ static_cast< std::size_t >( index ) ] );
+        };
+        sorted_pass_t pass{ items.data( ), static_cast< int >( items.size( ) ), eye, &ctx,
+                            []( void* u, int index ) { static_cast< draw_ctx_t* >( u )->one( index ); } };
+        m_sorted( m_sorted_user, pass );
+        const FLOAT factor[ 4 ] = { 1, 1, 1, 1 };
         context->OMSetBlendState( nullptr, factor, 0xFFFFFFFF );
         context->OMSetDepthStencilState( m_depth, 0 );
+        bound_cull = nullptr;
     }
 
     if ( !m_reflecting && m_blend != nullptr && m_depth != nullptr )
@@ -972,6 +1018,26 @@ bool c_engine::shade( int placement, int cube, const float* specular, float spec
 int c_engine::texture( const unsigned char* rgba, int width, int height )
 {
     return g_geometry( ).texture( rgba, width, height );
+}
+
+void c_engine::api( void*& device, void*& context )
+{
+#if HYDRO_HOST_WINDOWS
+    device = g_device( ).device( );
+    context = g_device( ).context( );
+#else
+    device = context = nullptr;
+#endif
+}
+
+void c_engine::sorted( void ( *pass )( void*, const sorted_pass_t& ), void* user )
+{
+    g_geometry( ).sorted( pass, user );
+}
+
+bool c_engine::layer( int placement, int type, int shading, float diffuse_alpha, const float* box )
+{
+    return g_geometry( ).layer( placement, type, shading, diffuse_alpha, box );
 }
 
 int c_engine::place( int geometry, int texture, int index_start, int index_count, const float* world, const float* color, int alpha_test, const float* surface, int detail, float scroll, const float* bias )

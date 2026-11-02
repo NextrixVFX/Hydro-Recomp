@@ -296,6 +296,8 @@ inline void c_world::bind_game_screens( )
         race_unwired( m_race, std::string( "the Results screen's external input " ) + e.m_type + " . " + plug + " (a platform hook) - not run" );
         return ui_ret_t{ };
     };
+    // g 0x759038 slot 9( pad, name ): the manager's "pressed" (Results' Select).
+    hooks.m_input = [ this ]( int pad, const char* name ) { return m_race.input && m_race.input->manager.pressed( pad, name ); };
     g.m_hooks = hooks;
     m_race.rules.screen_hooks.results_open = [ this ]( const char* project ) { return m_race.screens.results_open( project ); };
     m_race.rules.screen_hooks.screen = [ this ]( int screen, int verb, float dt ) {
@@ -307,7 +309,7 @@ inline void c_world::bind_game_screens( )
 
 // ui_hud_env_fill before each HUD call: the rules' boats (their 0x520 images), the human's index, the count, the
 // settings' units (below), the track's built / circuit answers; the control method g 0x758FC0 +0x18 = the session's
-// (race_world_t::control_method - the input layer's answer, a platform hook: 0, the gamepad method).
+// (race_world_t::control_method - c_input_device's, set each "Input" phase).
 inline void c_world::hud_env( hud_project_t& h )
 {
     std::vector< const std::uint8_t* > images;

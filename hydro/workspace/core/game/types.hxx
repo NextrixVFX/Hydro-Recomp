@@ -1240,6 +1240,16 @@ struct corona_state_t
     corona_properties_t defaults;
 };
 
+// VuFoliageEntity's properties, by its ctor 0x5E69A0 (world/foliage.hxx foliage_entity_t).
+struct foliage_state_t
+{
+    std::string texture;                                        // "Texture Asset"
+    std::uint8_t fog = 0;                                       // "Fog Enabled"
+    std::uint32_t color = 0x00FFFFFFu;                          // "Color"
+    float uv[ 4 ] = { 0.0f, 0.0f, 1.0f, 1.0f };                 // "U0" "V0" "U1" "V1"
+    float draw_distance = 3.4028235e38f;                        // "Draw Distance"
+};
+
 // VuAmbientLightEntity / VuDirectionalLightEntity (engine entity/rig.hxx).
 struct ambient_light_state_t
 {
@@ -1376,6 +1386,8 @@ inline std::shared_ptr< void > entity_state_for( const std::string& cls )
         return std::make_shared< prop_entity_state_t >( );
     if ( const action_kind_t* k = entity_action_kind( cls ) )
         return k->m_make( );
+    if ( cls == "VuFoliageEntity" )
+        return std::make_shared< foliage_state_t >( );
     if ( cls == "VuCoronaEntity" )
     {
         auto s = std::make_shared< corona_state_t >( );
@@ -1445,6 +1457,19 @@ inline void entity_load_properties( entity_t& entity, const value_t& properties 
     {
         prop_entity_state_t* s = static_cast< prop_entity_state_t* >( entity.m_state.get( ) );
         property_bool( properties, "Initially Visible", s->visible, s->visible_default );
+    }
+    else if ( entity.m_type == "VuFoliageEntity" && entity.m_state )
+    {
+        // Each load falls back to what stands: the ctor's value, or the template's (the loaded values are the defaults).
+        foliage_state_t* s = static_cast< foliage_state_t* >( entity.m_state.get( ) );
+        property_string( properties, "Texture Asset", s->texture, std::string( s->texture ) );
+        property_bool( properties, "Fog Enabled", s->fog, s->fog );
+        property_color( properties, "Color", s->color, s->color );
+        property_float( properties, "U0", s->uv[ 0 ], s->uv[ 0 ], false );
+        property_float( properties, "V0", s->uv[ 1 ], s->uv[ 1 ], false );
+        property_float( properties, "U1", s->uv[ 2 ], s->uv[ 2 ], false );
+        property_float( properties, "V1", s->uv[ 3 ], s->uv[ 3 ], false );
+        property_float( properties, "Draw Distance", s->draw_distance, s->draw_distance, false );
     }
     else if ( entity.m_type == "VuCoronaEntity" && entity.m_state )
     {

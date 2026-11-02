@@ -264,6 +264,8 @@
     <ClInclude Include="workspace\core\world\rotate.hxx" />
     <ClInclude Include="workspace\core\world\rules.hxx" />
     <ClInclude Include="workspace\core\world\session.hxx" />
+    <ClInclude Include="workspace\core\world\opening.hxx" />
+    <ClInclude Include="workspace\core\world\sorted.hxx" />
     <ClInclude Include="workspace\core\world\settings.hxx" />
     <ClInclude Include="workspace\core\world\skeleton.hxx" />
     <ClInclude Include="workspace\core\world\slalom.hxx" />

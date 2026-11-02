@@ -296,6 +296,7 @@ inline void c_world::load_entity_tree( const char* asset, const value_t& project
             const gfx_settings_t& g = static_cast< const gfx_settings_state_t* >( e.m_state.get( ) )->value;
             m_authored_far = g.camera_far_plane;
             m_water_ambient = g.water_ambient_color;   // world.hxx water_draw
+            m_foliage_tint = g.foliage_tint;           // models.hxx foliage_frame
             m_water_diffuse = g.water_diffuse_color;
             const float red = static_cast< float >( g.fog_color & 0xFF ) / 255.0f;
             const float green = static_cast< float >( ( g.fog_color >> 8 ) & 0xFF ) / 255.0f;
@@ -394,6 +395,8 @@ inline void c_world::load_entity_tree( const char* asset, const value_t& project
     m_refs = std::move( fresh_refs );
     LOG_INFO( "event graph: %u linked plugs, %d link entries (each connection on both ends), %u bound refs - from the tree",
         static_cast< unsigned >( m_graph.size( ) ), graph_links, static_cast< unsigned >( m_refs.size( ) ) );
+    if ( m_tree )
+        foliage_build( *m_tree );
     m_entity_type = std::move( fresh_types );
     m_type_census = std::move( fresh_census );
     m_rotators = std::move( fresh_rotators );

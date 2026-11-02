@@ -41,6 +41,12 @@ struct model_part_t
     std::string texture;
     std::string detail;
     int alpha_test = 0;
+    // load_model_scene: the shader's sort type +0x20 (-1: not read), 1 for GenericVertexColor's unlit colour, DiffuseAlpha, the mesh's aabb.
+    int layer = -1;
+    int shading = 0;
+    float diffuse_alpha = 1.0f;
+    bool has_box = false;
+    float box[ 8 ]{};
     float node[ 16 ]{};
     // Authored shading constants from the material table, which lives in the
     // model file outside every DXBC chunk. The shader bytecode declares these
@@ -1353,6 +1359,13 @@ inline bool load_model_scene( const std::vector< std::uint8_t >& blob, model_t& 
                     else if ( c.name == "EnvironmentAmount" && c.type == 1 )
                         part.environment_amount = v[ 0 ];
                 }
+                part.layer = static_cast< int >( shader.mode );
+                part.shading = shader.name == "GenericVertexColor" ? 1 : 0;
+                for ( const scene_constant_t& c : table.constants )
+                    if ( c.name == "DiffuseAlpha" && c.type == 1 )
+                        std::memcpy( &part.diffuse_alpha, c.value, 4 );
+                part.has_box = true;
+                std::memcpy( part.box, scene.meshes[ mesh ].aabb, sizeof( part.box ) );
                 const bool blend = shader.name == "Blend" && !second.empty( );
                 if ( blend )
                     part.detail = second;

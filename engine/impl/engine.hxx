@@ -34,10 +34,38 @@ public:
     float m_color[ 3 ]{ 1.0f, 1.0f, 1.0f };
 };
 
+// One placement the sorted pass draws (render/mesh.hxx): its index for `draw`, retail's sort type (the shader's +0x20, the layer
+// of the table 0x735A00), the texture, its world matrix and the mesh's aabb (min xyzw, max xyzw; null: none).
+struct sorted_item_t
+{
+    int index;
+    int type;
+    int texture;
+    const float* world;
+    const float* box;
+};
+
+// The pass handed to the game's sort. `draw` draws one item on the state the caller has committed.
+struct sorted_pass_t
+{
+    const sorted_item_t* items;
+    int count;
+    const float* eye;
+    void* draw_user;
+    void ( *draw )( void* draw_user, int index );
+};
+
 class c_engine
 {
 public:
     static void attach( c_draw& draw );
+    // The D3D11 device and context as opaque pointers (null with no device): hydro's render/direct.hxx backend.
+    static void api( void*& device, void*& context );
+    // Installs the game's sorted pass, called once per c_geometry::draw in place of the blend passes.
+    static void sorted( void ( *pass )( void* user, const sorted_pass_t& pass_data ), void* user );
+    // Retail's sort type of a placement's material, its shading (0 lit, 1 the vertex colour, unlit), the shader's DiffuseAlpha
+    // and the mesh's aabb (8 floats, or null).
+    static bool layer( int placement, int type, int shading, float diffuse_alpha, const float* box );
     static void add( c_node& node );
     static void look( const float position[ 3 ] );
     static void camera( const float* eye, const float* target, float far_plane );

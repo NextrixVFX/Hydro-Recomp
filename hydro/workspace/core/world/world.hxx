@@ -33,6 +33,8 @@
 #include <workspace/core/world/background.hxx>
 #include <workspace/core/world/action.hxx>
 #include <workspace/core/world/settings.hxx>
+#include <workspace/core/world/sorted.hxx>
+#include <workspace/core/world/foliage.hxx>
 #include <workspace/core/assets/texture.hxx>
 #include <workspace/utility/logger.hxx>
 #include <workspace/utility/trace.hxx>
@@ -97,6 +99,11 @@ private:
         int index_count = 0;
         int alpha_test = 0;
         int shader = -1;   // the part's material (model_part_t::shader) - a skin's index
+        int layer = -1;    // model_part_t's type, shading, DiffuseAlpha and aabb
+        int shading = 0;
+        float diffuse_alpha = 1.0f;
+        bool has_box = false;
+        float box[ 8 ]{};
         float node[ 16 ]{};
         // The authored shading constants, carried from the model's material
         // table through to c_engine::shade(). The cube is kept as a NAME and
@@ -145,6 +152,8 @@ private:
 
     // place_model: models.hxx
     // `skin`: per shader, what a skin pass (world/livery.hxx) changed for the draw (livery_draw_of).
+    void foliage_build( const entity_t& root );
+    void foliage_frame( );
     void place_model( const std::string& asset, const float* world, int bob = 0, int alpha_override = -1, const float* tint = nullptr, const std::vector< livery_draw_t >* skin = nullptr, int geometry_override = -1, std::vector< int >* out_placements = nullptr, std::vector< std::array< float, 16 > >* out_nodes = nullptr );
 
     const value_t* template_root( const std::string& name )
@@ -599,8 +608,11 @@ private:
 
     void wipe_scene( )
     {
-        for ( int alpha = 0; alpha <= 11; ++alpha )
+        for ( int alpha = 0; alpha <= 13; ++alpha )
             c_engine::drop( alpha );
+        m_foliage = foliage_manager_t{ };
+        m_foliage_entities.clear( );
+        m_foliage_draws.clear( );
         m_pfx.clear( );
         m_draws = 0;
         m_stack.clear( );
@@ -962,6 +974,20 @@ public:
     {
         if ( !m_opened )
             load( );
+        if ( !m_sorted )
+        {
+            void* device = nullptr;
+            void* context = nullptr;
+            c_engine::api( device, context );
+            if ( device )
+            {
+                m_sorted = std::make_unique< gfx_sorted_t >( device, context );
+                c_engine::sorted( []( void* u, const sorted_pass_t& pass ) {
+                    c_world& w = *static_cast< c_world* >( u );
+                    w.m_sorted->run( pass, w.m_far );
+                }, this );
+            }
+        }
         if ( c_engine::option( "front-end" ) != nullptr )
         {
             load_background( );
@@ -1119,6 +1145,17 @@ public:
             else
                 LOG_ERROR( "race: --input-script %s did not load (no keys) - the device answers", script );
         }
+        if ( const char* keys = c_engine::option( "keys" ) )
+        {
+            std::istringstream list( keys );
+            std::string one;
+            while ( std::getline( list, one, ',' ) )
+            {
+                const std::size_t a = one.find( ':' ), b = one.rfind( ':' );
+                if ( a != std::string::npos && b > a )
+                    m_race.key_script.push_back( { std::atoi( one.c_str( ) ), input_key_index( one.substr( a + 1, b - a - 1 ).c_str( ) ), one[ b + 1 ] == '1' } );
+            }
+        }
         // The queries' view of VuWater as the load left it: the race's first frame reads VuWater (DynamicsSync,
         // Decision) before its first "Water" phase rebuilds the view.
         water_view_build( m_water, m_water_view );
@@ -1167,7 +1204,14 @@ public:
                 const std::string& asset = b.io.boat_strings[ at[ i ] ];
                 if ( asset.empty( ) )
                     continue;
-                place_model( asset, m, 0, -1, nullptr, draws[ i ].empty( ) ? nullptr : &draws[ i ], -1, &b.placements[ i ] );
+                model_for( asset );
+                // The animated instance +0x2A4: its own vertices, posed each draw (race_draw). SUBSTITUTION, as the animated
+                // props: CPU skinning streamed to a clone, where retail uploads gMatrixArray to the vertex shader.
+                const auto skinned = m_skinned.find( asset );
+                if ( i == 0 && skinned != m_skinned.end( ) && skinned->second.skin.size( ) == skinned->second.bind.size( ) )
+                    b.hull_geometry = c_engine::geometry( skinned->second.bind.data( ), static_cast< int >( skinned->second.bind.size( ) ),
+                                                          skinned->second.indices.data( ), static_cast< int >( skinned->second.indices.size( ) ) );
+                place_model( asset, m, 0, -1, nullptr, draws[ i ].empty( ) ? nullptr : &draws[ i ], i == 0 ? b.hull_geometry : -1, &b.placements[ i ] );
                 for ( int handle : b.placements[ i ] )
                     c_engine::show( handle, false );
             }
@@ -1208,6 +1252,33 @@ public:
             race_boat_draw_matrix( boat, transform, m );
             const int at[ 3 ] = { 0xC4, 0xDC, 0xF4 };
             const std::vector< cached_part_t >& parts = model_for( b.io.boat_strings[ at[ pick ] ] );
+            // 0x532AD0's palette: instance +0x1C / +0x20 by +0x28, the one setPose 0x532720 wrote last (world/rig.hxx boat_rig_pose).
+            if ( pick == 0 && b.hull_geometry >= 0 && b.rig.model )
+            {
+                const auto skinned = m_skinned.find( b.io.boat_strings[ at[ 0 ] ] );
+                const auto bones = m_skeletons.find( b.io.boat_strings[ at[ 0 ] ] );
+                const skel_instance_t& pose = b.rig.model->instance;
+                if ( skinned != m_skinned.end( ) && bones != m_skeletons.end( ) && pose.palette[ pose.word28 ].size( ) == bones->second.size( ) * 16 )
+                {
+                    const mesh_vertex_t* posed = skin_geometry( b.hull_geometry, skinned->second, bones->second, pose.palette[ pose.word28 ] );
+                    // Dev trace (--verbose, ours): how far the pose took the hull from its bind vertices.
+                    if ( g_verbose && posed && m_race.frames % 480 == 0 && k + 1 == m_race.boats.size( ) )
+                    {
+                        float most = 0.0f;
+                        for ( std::size_t v = 0; v < skinned->second.bind.size( ); ++v )
+                            for ( int c = 0; c < 3; ++c )
+                                most = ( std::max )( most, std::fabs( posed[ v ].position[ c ] - skinned->second.bind[ v ].position[ c ] ) );
+                        LOG_VERBOSE( "race: %s hull pose, frame %d: %d bones, a vertex moved %.3f from bind", b.name.c_str( ), m_race.frames,
+                                     static_cast< int >( bones->second.size( ) ), most );
+                    }
+                }
+                else if ( !b.hull_refused )
+                {
+                    b.hull_refused = true;
+                    LOG_WARNING( "race: %s hull: the palette (%d floats) and the model's bones (%d) differ - bind pose (UNKNOWN)", b.name.c_str( ),
+                                 static_cast< int >( pose.palette[ pose.word28 ].size( ) ), bones != m_skeletons.end( ) ? static_cast< int >( bones->second.size( ) ) : -1 );
+                }
+            }
             for ( std::size_t i = 0; i < b.placements[ pick ].size( ) && i < parts.size( ); ++i )
             {
                 float placed[ 16 ];
@@ -1397,6 +1468,16 @@ public:
         }
         else
             dev_vantage( dt );
+        // Ours (a test driver): --look "ex ey ez tx ty tz" pins the view, to put a still on a chosen thing.
+        if ( const char* look = c_engine::option( "look" ) )
+        {
+            float v[ 6 ] = { };
+            std::istringstream in( look );
+            for ( float& x : v )
+                in >> x;
+            std::memcpy( m_eye, v, sizeof( m_eye ) );
+            std::memcpy( m_target, v + 3, sizeof( m_target ) );
+        }
         scene_frame_rest( dt );
     }
     // VuWater's tick 0x529E30 on the built water (surface.hxx water_built_tick), then the query's view rebuilt
@@ -1430,6 +1511,7 @@ public:
     void scene_frame_rest( float dt )
     {
         race_draw( );
+        foliage_frame( );
         water_draw( );
         // The crossing test wants the position of whatever the plane's Trigger
         // Type accepts. With no boat in the scene the dev vantage stands in,
@@ -1539,6 +1621,19 @@ private:
     float m_eye[ 3 ]{};
     float m_target[ 3 ]{};
     float m_far = 800.0f;
+    std::unique_ptr< gfx_sorted_t > m_sorted;   // the render seam (world/sorted.hxx)
+    // VuFoliageManager and the level's VuFoliageEntity (models.hxx foliage_build / foliage_frame).
+    struct foliage_draw_t
+    {
+        foliage_bucket_t* bucket = nullptr;
+        int geometry = -1;
+        int capacity = 0;
+        std::vector< mesh_vertex_t > scratch;
+    };
+    foliage_manager_t m_foliage;
+    std::vector< foliage_entity_t > m_foliage_entities;
+    std::vector< foliage_draw_t > m_foliage_draws;
+    std::uint32_t m_foliage_tint = 0xFFFFFFFFu;
 
     // VuWaterTextureSettingsEntity_ctor @0x5d2bd0, read in property order:
     // Gravity 9.801, WorldSize 10, WindSpeed 10, DirectionalPower 0,

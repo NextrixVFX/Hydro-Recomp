@@ -117,7 +117,7 @@ inline skel_instance_t* c_world::prop_instance( entity_t& e )
             return nullptr;
         skel_animated_init( s->animated, *s->model.instance.skeleton );
         std::vector< std::uint8_t > clip;
-        if ( !item.clip.empty( ) && m_archive.read( ( "VuAnimationAsset/" + item.clip ).c_str( ), clip ) &&
+        if ( !item.clip.empty( ) && m_archive.read( item.clip.c_str( ), clip ) &&
              skel_animation_load( clip.data( ), clip.size( ), s->clip ) )
         {
             s->control.animation = &s->clip;
