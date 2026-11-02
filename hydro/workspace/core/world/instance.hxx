@@ -119,6 +119,17 @@ inline bool gfx_box_in_cascade( const gfx_shadow_params_t& p, int cascade, const
     return gfx_box_near( p.m_eye, p.m_lod, p.m_clip, a, m, size, c, radius ) && gfx_volume_visible( p.m_cascade[ cascade ].m_volume, c, radius );
 }
 
+// The sort depth of a mesh's centre under the matrix: its distance from the camera over the far plane; minss with 1 second, so NaN gives 1.
+inline float gfx_mesh_depth( const gfx_scene_mesh_t& mesh, const float m[ 16 ], const gfx_camera_t& camera )
+{
+    const float cx = ( mesh.m_min[ 0 ] + mesh.m_max[ 0 ] ) * 0.5f, cy = ( mesh.m_min[ 1 ] + mesh.m_max[ 1 ] ) * 0.5f, cz = ( mesh.m_min[ 2 ] + mesh.m_max[ 2 ] ) * 0.5f;
+    const float wx = ( ( cy * m[ 4 ] + cx * m[ 0 ] ) + cz * m[ 8 ] ) + m[ 12 ] - camera.m_eye[ 0 ];
+    const float wy = ( ( cy * m[ 5 ] + cx * m[ 1 ] ) + cz * m[ 9 ] ) + m[ 13 ] - camera.m_eye[ 1 ];
+    const float wz = ( ( cy * m[ 6 ] + cx * m[ 2 ] ) + cz * m[ 10 ] ) + m[ 14 ] - camera.m_eye[ 2 ];
+    const float scaled = hull_sqrt( ( wy * wy + wx * wx ) + wz * wz ) / camera.m_far;
+    return scaled < 1.0f ? scaled : 1.0f;
+}
+
 struct gfx_static_model_t
 {
     // 0x520130 (matrix, params): nothing without a scene.
@@ -224,12 +235,7 @@ struct gfx_static_model_t
         if ( node.m_mesh )
         {
             const gfx_scene_mesh_t& mesh = *node.m_mesh;
-            const float cx = ( mesh.m_min[ 0 ] + mesh.m_max[ 0 ] ) * 0.5f, cy = ( mesh.m_min[ 1 ] + mesh.m_max[ 1 ] ) * 0.5f, cz = ( mesh.m_min[ 2 ] + mesh.m_max[ 2 ] ) * 0.5f;
-            const float wx = ( ( cy * m[ 4 ] + cx * m[ 0 ] ) + cz * m[ 8 ] ) + m[ 12 ] - p.m_camera->m_eye[ 0 ];
-            const float wy = ( ( cy * m[ 5 ] + cx * m[ 1 ] ) + cz * m[ 9 ] ) + m[ 13 ] - p.m_camera->m_eye[ 1 ];
-            const float wz = ( ( cy * m[ 6 ] + cx * m[ 2 ] ) + cz * m[ 10 ] ) + m[ 14 ] - p.m_camera->m_eye[ 2 ];
-            const float scaled = hull_sqrt( ( wy * wy + wx * wx ) + wz * wz ) / p.m_camera->m_far;
-            const float depth = scaled < 1.0f ? scaled : 1.0f;   // minss with 1 second: NaN gives 1
+            const float depth = gfx_mesh_depth( mesh, m, *p.m_camera );
             for ( const gfx_scene_part_t* pp : mesh.m_parts )
             {
                 const gfx_scene_part_t& part = *pp;
@@ -283,4 +289,139 @@ struct gfx_static_model_t
     std::uint32_t m_colour = 0;               // +0x18
     std::uint8_t m_byte_1c = 0;               // +0x1C
     std::uint8_t m_two_pass = 0;              // +0x1D
+};
+
+constexpr std::uint32_t k_gfx_cb_skin = 0x533C90u, k_gfx_cb_skin_back = 0x533D40u, k_gfx_cb_skin_front = 0x533E30u, k_gfx_cb_skin_depth = 0x533F00u, k_gfx_cb_skin_shadow = 0x533F80u;
+
+// VUANIMATEDMODELINSTANCE'S DRAW (water batch 31): 0x532AD0, shadow 0x533060, prefetch 0x5333A0. No culling of its own: every mesh, every part. Instance: +4 a word, +8 the material
+// map, [+0x10] +0xC the model's word, +0x14 the meshes, +0x1C + 4 x [+0x28] the current bone buffer (world/skeleton.hxx), +0x90 the colour (alpha +0x93), +0x94 a byte, +0x95 two-pass.
+struct gfx_animated_model_t
+{
+    std::uint8_t* record( gfx_sort_t& sort, const float m[ 16 ], const gfx_scene_part_t& part ) const
+    {
+        std::uint8_t* r = sort.allocate( 0x58 );
+        std::memcpy( r, m, 64 );
+        std::memcpy( r + 0x40, &m_colour, 4 );
+        std::memcpy( r + 0x44, &m_word, 4 );
+        std::memcpy( r + 0x48, &part.m_id, 4 );
+        std::memcpy( r + 0x4C, &m_model_word, 4 );
+        std::memcpy( r + 0x50, &m_bones, 4 );
+        r[ 0x54 ] = m_byte;
+        return r;
+    }
+
+    std::uint8_t* short_record( gfx_sort_t& sort, const float m[ 16 ], const gfx_scene_part_t& part ) const
+    {
+        std::uint8_t* r = sort.allocate( 0x4C );
+        std::memcpy( r, m, 64 );
+        std::memcpy( r + 0x40, &part.m_id, 4 );
+        std::memcpy( r + 0x44, &m_model_word, 4 );
+        std::memcpy( r + 0x48, &m_bones, 4 );
+        return r;
+    }
+
+    // 0x532AD0 (matrix, params). Unlike the static walk the blended path takes every type.
+    void draw( gfx_sort_t& sort, const float m[ 16 ], const gfx_draw_params_t& p ) const
+    {
+        if ( !m_meshes )
+            return;
+        const bool opaque = ( m_colour >> 24 ) == 0xFFu;
+        for ( const gfx_scene_mesh_t* mesh : *m_meshes )
+        {
+            const float depth = gfx_mesh_depth( *mesh, m, *p.m_camera );
+            for ( const gfx_scene_part_t* pp : mesh->m_parts )
+            {
+                const gfx_scene_part_t& part = *pp;
+                const gfx_scene_material_t& row = *part.m_row;
+                if ( row.m_skip )
+                    continue;
+                std::uint32_t material = row.m_material;
+                if ( m_map )
+                    material = m_map->map( row.m_name );
+                record( sort, m, part );
+                if ( !opaque )
+                {
+                    if ( m_two_pass )
+                    {
+                        sort.submit( 11, material, part.m_chunk, k_gfx_cb_skin_back, depth + k_gfx_model_bias );
+                        sort.submit( 11, material, part.m_chunk, k_gfx_cb_skin_front, depth );
+                    }
+                    else
+                        sort.submit( 11, material, part.m_chunk, k_gfx_cb_skin, depth );
+                    continue;
+                }
+                const std::uint32_t type = row.m_type;
+                if ( row.m_by_depth )
+                    sort.submit( type, material, part.m_chunk, k_gfx_cb_skin, depth );
+                else
+                    sort.submit_keyed( type, material, part.m_chunk, k_gfx_cb_skin, depth );
+                if ( type != 1 )
+                    continue;
+                const std::uint32_t screen = ( sort.m_key_hi >> 18 ) & 0xFu;
+                short_record( sort, m, part );
+                sort.set_screen( 6 );
+                sort.submit_keyed( 2, row.m_depth_material, part.m_chunk, k_gfx_cb_skin_depth, depth );
+                if ( p.m_second_depth && row.m_flag_1d )
+                {
+                    sort.set_screen( 5 );
+                    sort.submit_keyed( 2, row.m_depth_material, part.m_chunk, k_gfx_cb_skin_depth, depth );
+                }
+                sort.set_screen( screen );
+            }
+        }
+    }
+
+    // 0x533060 (matrix, shadow params): each casting part into each cascade; the screen field = cascade + 1, left set. Retail works out the mesh's depth here too and never uses it.
+    void draw_shadow( gfx_sort_t& sort, const float m[ 16 ], const gfx_shadow_params_t& p ) const
+    {
+        if ( !m_meshes )
+            return;
+        for ( const gfx_scene_mesh_t* mesh : *m_meshes )
+        {
+            for ( const gfx_scene_part_t* pp : mesh->m_parts )
+            {
+                if ( !pp->m_row->m_casts )
+                    continue;
+                for ( int i = 0; i < p.m_cascades; ++i )
+                {
+                    float product[ 16 ];
+                    hull_multiply( m, product, p.m_cascade[ i ].m_matrix );
+                    short_record( sort, product, *pp );
+                    sort.set_screen( static_cast< std::uint32_t >( i ) + 1u );
+                    sort.submit_keyed( 2, pp->m_row->m_shadow_material, pp->m_chunk, k_gfx_cb_skin_shadow, 0.0f );
+                }
+            }
+        }
+    }
+
+    // 0x5333A0: every mesh, each part not skipped, under the identity 0x7593B0 at depth 0.5.
+    void prefetch( gfx_sort_t& sort ) const
+    {
+        static constexpr float k_identity[ 16 ] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
+        if ( !m_meshes )
+            return;
+        for ( const gfx_scene_mesh_t* mesh : *m_meshes )
+        {
+            for ( const gfx_scene_part_t* pp : mesh->m_parts )
+            {
+                const gfx_scene_material_t& row = *pp->m_row;
+                if ( row.m_skip )
+                    continue;
+                std::uint32_t material = row.m_material;
+                if ( m_map )
+                    material = m_map->map( row.m_name );
+                record( sort, k_identity, *pp );
+                sort.submit_keyed( 2, material, pp->m_chunk, k_gfx_cb_skin, 0.5f );
+            }
+        }
+    }
+
+    std::uint32_t m_word = 0;                 // +4
+    gfx_material_map_t* m_map = nullptr;      // +8
+    std::uint32_t m_model_word = 0;           // [+0x10] +0xC
+    const std::vector< const gfx_scene_mesh_t* >* m_meshes = nullptr;  // [+0x14] +0x18
+    std::uint32_t m_bones = 0;                // +0x1C + 4 x [+0x28]
+    std::uint32_t m_colour = 0;               // +0x90
+    std::uint8_t m_byte = 0;                  // +0x94
+    std::uint8_t m_two_pass = 0;              // +0x95
 };
