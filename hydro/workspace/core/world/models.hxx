@@ -15,10 +15,10 @@ inline std::string c_world::pack_path( ) const
     {
         const std::string hydro = directory + "\\HydroThunderUWP\\Base.apf";
         const std::string local = directory + "\\Base.apf";
+        if ( GetFileAttributesA( local.c_str( ) ) != INVALID_FILE_ATTRIBUTES )   // beside the exe first: a loose copy wins
+            return local;
         if ( GetFileAttributesA( hydro.c_str( ) ) != INVALID_FILE_ATTRIBUTES )
             return hydro;
-        if ( GetFileAttributesA( local.c_str( ) ) != INVALID_FILE_ATTRIBUTES )
-            return local;
         const auto parent = directory.find_last_of( "\\/" );
         if ( parent == std::string::npos )
             break;
