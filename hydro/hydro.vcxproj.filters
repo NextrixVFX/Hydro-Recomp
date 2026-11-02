@@ -270,6 +270,9 @@
     <ClInclude Include="workspace\core\ui\expand.hxx">
       <Filter>workspace\core\ui</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\core\ui\fade.hxx">
+      <Filter>workspace\core\ui</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\core\ui\flow.hxx">
       <Filter>workspace\core\ui</Filter>
     </ClInclude>

@@ -182,6 +182,7 @@
     <ClInclude Include="workspace\core\ui\draw.hxx" />
     <ClInclude Include="workspace\core\ui\entity.hxx" />
     <ClInclude Include="workspace\core\ui\expand.hxx" />
+    <ClInclude Include="workspace\core\ui\fade.hxx" />
     <ClInclude Include="workspace\core\ui\flow.hxx" />
     <ClInclude Include="workspace\core\ui\frame.hxx" />
     <ClInclude Include="workspace\core\ui\fsm.hxx" />
