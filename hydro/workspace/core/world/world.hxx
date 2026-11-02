@@ -25,6 +25,7 @@
 #include <workspace/core/world/strings.hxx>
 #include <workspace/core/world/session.hxx>
 #include <workspace/core/world/joints.hxx>
+#include <workspace/core/world/latch.hxx>
 #include <workspace/core/world/build.hxx>
 #include <workspace/core/world/drive.hxx>
 #include <workspace/core/world/water.hxx>
@@ -460,6 +461,9 @@ private:
 
     // ref_target: motion.hxx
     std::string ref_target( const std::string& owner, const std::string& name ) const;
+
+    // generic_event: graph.hxx
+    void generic_event( const std::string& name, int depth );
 
     // update_rotators: motion.hxx
     void update_rotators( float dt );
@@ -1671,6 +1675,9 @@ private:
     std::map< std::string, action_t > m_actions;
     std::map< std::string, delay_t > m_delays;
     std::map< std::string, front_end_camera_t > m_front_end;
+    // update_delay: graph.hxx
+    void update_delay( const std::string& path, delay_t& wait, float dt );
+
     // Every VuGenericEventEntity's Event Name, which is the whole bus.
     std::map< std::string, std::string > m_events;
     std::vector< std::string > m_initialized;

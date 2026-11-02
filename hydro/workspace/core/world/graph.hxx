@@ -437,10 +437,9 @@ inline c_world::retval_t c_world::dispatch( const std::string& entity, const std
         // "Out" and THEN set it. The order is retail's, not a tidy-up.
         if ( plug == "In" )
         {
-            if ( latch->second.fired )
-                return retval_t{};
-            fire( entity, "Out", depth );
-            latch->second.fired = true;
+            std::uint8_t shot = latch->second.fired ? 1 : 0;
+            one_shot_in( shot, [ & ] { fire( entity, "Out", depth, params ); } );
+            latch->second.fired = shot != 0;
             return retval_t{};
         }
         count_unhandled( entity, plug );
@@ -489,12 +488,17 @@ inline c_world::retval_t c_world::dispatch( const std::string& entity, const std
     {
         if ( plug == "In" )
         {
-            if ( !wait->second.pending )
-            {
-                wait->second.pending = true;
-                wait->second.remaining = m_vurandom.draw( ) * wait->second.window
-                    + wait->second.delay;
-            }
+            std::uint8_t pending = wait->second.pending ? 1 : 0;
+            delay_in( pending, wait->second.remaining, wait->second.delay, wait->second.window, [ this ] { return m_vurandom.draw( ); } );
+            wait->second.pending = pending != 0;
+            return retval_t{};
+        }
+        if ( plug == "OnManualTick" )
+        {
+            std::int32_t size = 0;
+            if ( params )
+                std::memcpy( &size, params + 0x80, 4 );
+            update_delay( wait->first, wait->second, delay_manual_dt( params, size ) );
             return retval_t{};
         }
         count_unhandled( entity, plug );
@@ -511,11 +515,7 @@ inline c_world::retval_t c_world::dispatch( const std::string& entity, const std
     {
         if ( plug == "Broadcast" )
         {
-            for ( const auto& pair : m_events )
-            {
-                if ( pair.second == event->second )
-                    fire( pair.first, "OnReceived", depth );
-            }
+            generic_event( event->second, depth );
             return retval_t{};
         }
         count_unhandled( entity, plug );
@@ -569,9 +569,14 @@ inline c_world::retval_t c_world::dispatch( const std::string& entity, const std
         // VuBoolean_onToggle: setValue( value == 0 ).
         if ( plug == "Toggle" )
             return set_boolean( entity, !boolean->second, depth );
-        // "Set" takes its value from the incoming VuParams, which our
-        // events do not carry. Counted, not guessed - and nothing in
-        // Hydroelectric is wired to it.
+        // "Set" 0x5E5E10: the first parameter's byte when its tag is 3, else false.
+        if ( plug == "Set" )
+        {
+            std::int32_t size = 0;
+            if ( params )
+                std::memcpy( &size, params + 0x80, 4 );
+            return set_boolean( entity, boolean_set_value( params, size ) != 0, depth );
+        }
         count_unhandled( entity, plug );
         return retval_t{};
     }
@@ -707,12 +712,35 @@ inline c_world::retval_t c_world::dispatch( const std::string& entity, const std
 inline c_world::retval_t c_world::set_boolean( const std::string& entity, bool value, int depth )
 {
     const auto found = m_booleans.find( entity );
-    if ( found == m_booleans.end( ) || found->second == value )
+    if ( found == m_booleans.end( ) )
         return retval_t{};
-    found->second = value;
-    fire( entity, "OnChanged", depth );
-    fire( entity, value ? "OnChangedTrue" : "OnChangedFalse", depth );
+    std::uint8_t held = found->second ? 1 : 0;
+    boolean_set( held, value ? 1 : 0, [ & ]( const char* plug ) {
+        found->second = held != 0;
+        fire( entity, plug, depth );
+    } );
     return retval_t{};
+}
+
+// The "OnGenericEvent" post (VuGenericEventEntity's Broadcast 0x5F0330, a clip's BroadcastGenericEvent 0x5ED680): every instance's
+// handler 0x5F0420 on the VuParams the name made (a name that does not fit leaves them empty: instances with an empty name answer).
+// FLAGGED: the subscribers' order is ours (the path map), retail's is the VuEventManager's.
+inline void c_world::generic_event( const std::string& name, int depth )
+{
+    const ui_params_t p = generic_broadcast_params( name );
+    for ( const auto& pair : m_events )
+        if ( generic_receive( pair.second, p.m_bytes, p.m_size ) )
+            fire( pair.first, "OnReceived", depth );
+}
+
+// One delay's 0x5DFC40.
+inline void c_world::update_delay( const std::string& path, delay_t& wait, float dt )
+{
+    std::uint8_t pending = wait.pending ? 1 : 0;
+    delay_update( pending, wait.remaining, dt, [ & ] {
+        wait.pending = false;
+        fire( path, "Out" );
+    } );
 }
 
 // VuDelayEntity's countdown. VuDelayEntity_tick @0x5dfb50 is the method
@@ -732,15 +760,7 @@ inline c_world::retval_t c_world::set_boolean( const std::string& entity, bool v
 inline void c_world::update_delays( float dt )
 {
     for ( auto& pair : m_delays )
-    {
-        if ( !pair.second.pending )
-            continue;
-        pair.second.remaining -= dt;
-        if ( pair.second.remaining >= 0.0f )
-            continue;
-        pair.second.pending = false;
-        fire( pair.first, "Out" );
-    }
+        update_delay( pair.first, pair.second, dt );
 }
 
 // The Triggers tick 0x536460's trigger half in a race, after the instigator
@@ -821,11 +841,7 @@ inline void c_world::on_animation_event( const std::string& owner, const std::st
             ? named->text : std::string( );
         if ( carried.empty( ) )
             return;
-        for ( const auto& pair : m_events )
-        {
-            if ( pair.second == carried )
-                fire( pair.first, "OnReceived" );
-        }
+        generic_event( carried, 0 );
         return;
     }
     // UNBUILT, named rather than guessed: PlayAudioEvent (FMOD event at

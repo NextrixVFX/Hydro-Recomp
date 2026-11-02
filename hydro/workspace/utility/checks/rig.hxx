@@ -4,6 +4,7 @@
 
 #include <workspace/core/world/attach.hxx>
 #include <workspace/core/world/rig.hxx>
+#include <workspace/core/world/latch.hxx>
 #include <workspace/core/world/rotate.hxx>
 
 inline std::uint32_t rig_fnv( const void* data, std::size_t size )
@@ -495,9 +496,162 @@ inline bool verify_rotate_motion( )
     return true;
 }
 
+// Case graph_logic: the handlers of VuOneShotFilterEntity 0x5DECC0 / 0x5DECE0 / 0x5DF000, VuDelayEntity 0x5DFBE0 / 0x5DFC40 / 0x5DFB50,
+// VuBooleanEntity 0x5E5790 .. 0x5E57F0 / 0x5E5E10 / 0x5E5EA0, VuGenericEventEntity 0x5F0330 / 0x5F0420 over seeded sequences on
+// retail's offsets: the state after each op, the outputs in order with their params, the Broadcast's params and hash.
+inline bool verify_graph_logic( )
+{
+    static const char* const names[ 5 ] = { "Out", "OnChanged", "OnChangedTrue", "OnChangedFalse", "OnReceived" };
+    const unsigned* g = g_golden_lgc_words;
+    std::size_t at = 0;
+    int failed = 0, compared = 0, op_index = 0;
+    auto same = [ & ]( const char* what, std::uint32_t mine ) {
+        const std::uint32_t r = g[ at++ ];
+        ++compared;
+        if ( r != mine )
+        {
+            if ( failed < 8 )
+                LOG_ERROR( "graph_logic op %d: %s 0x%08X, retail 0x%08X", op_index, what, mine, r );
+            ++failed;
+        }
+    };
+    auto bits = []( float f ) {
+        std::uint32_t b;
+        std::memcpy( &b, &f, 4 );
+        return b;
+    };
+    auto as_float = []( std::uint32_t b ) {
+        float f;
+        std::memcpy( &f, &b, 4 );
+        return f;
+    };
+    std::vector< std::array< std::uint32_t, 3 > > fires;
+    auto fires_same = [ & ]( ) {
+        same( "fires", static_cast< std::uint32_t >( fires.size( ) ) );
+        const unsigned n = g[ at - 1 ];
+        for ( unsigned k = 0; k < n; ++k )
+        {
+            const std::array< std::uint32_t, 3 > mine = k < fires.size( ) ? fires[ k ] : std::array< std::uint32_t, 3 >{ 99u, 99u, 99u };
+            same( "fire name", mine[ 0 ] );
+            same( "fire params size", mine[ 1 ] );
+            same( "fire params incoming", mine[ 2 ] );
+        }
+    };
+    auto out = [ & ]( const char* name, std::uint32_t incoming ) {
+        std::uint32_t id = 99;
+        for ( std::uint32_t k = 0; k < 5; ++k )
+            if ( std::strcmp( names[ k ], name ) == 0 )
+                id = k;
+        fires.push_back( { id, incoming ? 16u : 0u, incoming } );
+    };
+    std::uint8_t shot = 0, pending = 0, value = 0;
+    float delay = 0.0f, window = 0.0f, remaining = 0.0f;
+    const unsigned ops = g[ at++ ];
+    for ( op_index = 0; op_index < static_cast< int >( ops ); ++op_index )
+    {
+        fires.clear( );
+        const unsigned kind = g[ at++ ];
+        if ( kind == 0 )   // a new object
+        {
+            shot = pending = value = 0;
+            delay = as_float( g[ at++ ] );
+            window = as_float( g[ at++ ] );
+            remaining = 0.0f;
+        }
+        else if ( kind == 1 )
+        {
+            const unsigned op = g[ at++ ];
+            if ( op == 0 )
+                shot = 0;
+            else if ( op == 1 )
+                shot = 1;
+            else
+                one_shot_in( shot, [ & ] { out( "Out", 1 ); } );
+            same( "shot", shot );
+            fires_same( );
+        }
+        else if ( kind == 2 )
+        {
+            const unsigned op = g[ at++ ];
+            const std::uint32_t a = g[ at++ ], b = g[ at++ ], c = g[ at++ ];
+            if ( op == 0 )
+                delay_in( pending, remaining, delay, window, [ & ] { return as_float( a ); } );
+            else if ( op == 1 )
+                delay_update( pending, remaining, as_float( a ), [ & ] { out( "Out", 0 ); } );
+            else
+            {
+                std::uint32_t image[ 2 ] = { b, c };
+                delay_update( pending, remaining, delay_manual_dt( reinterpret_cast< const std::uint8_t* >( image ), static_cast< std::int32_t >( a ) ), [ & ] { out( "Out", 0 ); } );
+            }
+            same( "pending", pending );
+            same( "remaining", bits( remaining ) );
+            fires_same( );
+        }
+        else if ( kind == 3 )
+        {
+            const unsigned op = g[ at++ ];
+            const std::uint32_t size = g[ at++ ], tag = g[ at++ ], byte = g[ at++ ];
+            std::uint32_t ret_type = 0, ret_byte = 0;
+            auto fire = [ & ]( const char* name ) { out( name, 0 ); };
+            if ( op == 0 )
+                boolean_set( value, 1, fire );
+            else if ( op == 1 )
+                boolean_set( value, 0, fire );
+            else if ( op == 2 )
+                boolean_set( value, value == 0 ? 1 : 0, fire );
+            else if ( op == 3 )
+            {
+                ret_type = 3;
+                ret_byte = value;
+            }
+            else
+            {
+                std::uint32_t image[ 2 ] = { tag, byte };
+                boolean_set( value, boolean_set_value( reinterpret_cast< const std::uint8_t* >( image ), static_cast< std::int32_t >( size ) ), fire );
+            }
+            same( "value", value );
+            same( "ret type", ret_type );
+            same( "ret byte", ret_byte );
+            fires_same( );
+        }
+        else
+        {
+            std::string name, own;
+            for ( unsigned n = g[ at++ ]; n; --n )
+                name.push_back( static_cast< char >( g[ at++ ] ) );
+            for ( unsigned n = g[ at++ ]; n; --n )
+                own.push_back( static_cast< char >( g[ at++ ] ) );
+            const ui_params_t p = generic_broadcast_params( name );
+            std::uint32_t hash = 0x811C9DC5u;
+            for ( const char* c = "OnGenericEvent"; *c; ++c )
+                hash = ( hash ^ static_cast< std::uint8_t >( *c ) ) * 0x1000193u;
+            same( "hash", hash );
+            same( "params size", static_cast< std::uint32_t >( p.m_size ) );
+            for ( int k = 0; k < p.m_size; ++k )
+                same( "params byte", p.m_bytes[ k ] );
+            if ( generic_receive( own, p.m_bytes, p.m_size ) )
+                out( "OnReceived", 0 );
+            fires_same( );
+        }
+    }
+    if ( at != g_golden_lgc_size )
+    {
+        LOG_ERROR( "graph_logic: %zu words read of %u", at, g_golden_lgc_size );
+        return false;
+    }
+    if ( failed )
+    {
+        LOG_ERROR( "graph_logic: %d of %d values differ", failed, compared );
+        return false;
+    }
+    LOG_SUCCESS( "The graph's logic entities (one-shot filter, delay, boolean, generic event): %u ops, %d values bit-exact against retail's own code", ops, compared );
+    return true;
+}
+
 inline bool verify_rig_all( )
 {
     bool ok = true;
+    ok = verify_graph_logic( ) && ok;
     ok = verify_boat_rig( ) && ok;
     ok = verify_attach_components( ) && ok;
     ok = verify_attach_entity( ) && ok;
