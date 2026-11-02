@@ -3,6 +3,7 @@
 #include <workspace/core/ui/bind.hxx>
 #include <workspace/core/ui/frame.hxx>
 #include <workspace/core/ui/pages.hxx>
+#include <workspace/core/ui/loading.hxx>
 #include <workspace/core/ui/remap.hxx>
 #include <workspace/core/ui/results.hxx>
 
@@ -186,7 +187,10 @@ inline ui_frame_inputs_t ui_screen_inputs( c_ui_binding& binding, ui_screen_env_
             return env.m_string7( *id );
         const std::uint32_t vt = e.m_ctor ? e.m_ctor->m_vtable : 0u;
         if ( const std::string* award = b->award_state( e ) )   // slot 12: 0x443920 +0x10C as it is; 0x446DE0 VuStringDB slot 7 on it
-            return vt == k_ui_award_credit_vtable || !env.m_string7 ? *award : env.m_string7( *award );
+            return vt == k_ui_award_credit_vtable || vt == k_ui_event_text_vtable || vt == k_ui_penalty_text_vtable || vt == k_ui_track_text_vtable || vt == k_ui_tuning_text_vtable ||
+                           vt == k_ui_unlock_text_vtable || !env.m_string7
+                       ? *award
+                       : env.m_string7( *award );
         if ( vt == k_ui_achievement_name_vtable || vt == k_ui_achievement_value_vtable )
         {
             const ui_slot_t* key = ui_property_value( e, "Achievement" );

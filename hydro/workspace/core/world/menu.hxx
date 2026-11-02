@@ -154,6 +154,70 @@ inline ui_bind_hooks_t c_world::menu_hooks( int id )
     hooks.m_settings = &m_settings.ui;
     hooks.m_settings_platform = &m_settings_platform;
     hooks.m_champ = &m_champ_env;
+    hooks.m_texture_exists = [ this ]( const char* name ) { return !m_archive.names( std::string( "VuTextureAsset/" ) + name ).empty( ); };
+    // The remapping rows' capture (remap.hxx): the box 0x461940, the device, the input manager's slots 13 / 14 / 15.
+    hooks.m_remap_hooks.m_open_box = [ this ]( const std::string& heading, bool can_auto, std::function< void( std::int32_t ) > done ) {
+        m_remap_box = boxes_show( heading, "Control_Mapping_MB_Body", can_auto ? "MessageBox_Auto" : "", "MessageBox_Cancel" );
+        if ( m_remap_box )
+            m_remap_box->m_callback = [ done ]( msgbox_t& box ) { done( box.m_result ); };
+    };
+    hooks.m_remap_hooks.m_close_box = [ this ] {
+        if ( m_remap_box )
+            m_remap_box->m_destroyed = true;
+        m_remap_box.reset( );
+    };
+    hooks.m_remap_hooks.m_channels = [ ] { return 6; };
+    hooks.m_remap_hooks.m_axis = [ this ]( int i ) { return m_menu_input ? m_menu_input->device.controller( 0 ).axes[ i ] : 0.0f; };
+    hooks.m_remap_hooks.m_button_bits = [ this ] { return m_menu_input ? m_menu_input->device.controller( 0 ).buttons : 0u; };
+    hooks.m_remap_hooks.m_key = [ this ]( int k ) { return m_menu_input && m_menu_input->device.pressed( )[ k ] != 0; };
+    hooks.m_remap_hooks.m_bind = [ this ]( int slot, std::int32_t config, const std::string& channel, int kind, int index ) {
+        if ( !m_menu_input )
+            return;
+        input_binding_t b;
+        b.type = kind;
+        b.index = index;
+        if ( slot == 15 )
+            m_menu_input->manager.set_button( 0, config, channel.c_str( ), b );
+        else if ( slot == 13 )
+            m_menu_input->manager.set_positive( 0, config, channel.c_str( ), b );
+        else
+            m_menu_input->manager.set_negative( 0, config, channel.c_str( ), b );
+    };
+    hooks.m_remap_auto = [ this ]( std::int32_t config, std::uint8_t value ) {
+        if ( config == 0 )
+            m_settings.auto_throttle_pad = value != 0;
+        else if ( config == 1 )
+            m_settings.auto_throttle_keys = value != 0;
+    };
+    // Screens/Loading*: the leaves' slot 6 over the GameData the menus built. The unlock manager's reward slots, game/unlock.hxx.
+    hooks.m_loading = [ this ]( std::uint32_t vt, std::int32_t place, std::string& out ) {
+        ui_loading_env_t env;
+        env.d = m_difficulty_env;
+        env.d.m_root = &m_menu_util;
+        env.m_constant_db = &m_constant_db;
+        env.m_track_db = &m_track_db;
+        env.m_string6 = env.m_string7 = [ this ]( const std::string& id ) { return string_db_get( m_string_db, id ); };
+        env.m_reward = [ this ]( const char* mode, const std::string& key, std::int32_t tier ) {
+            return std::strcmp( mode, "RubberDucky" ) == 0 ? m_unlock.reward_ducky( tier ) : m_unlock.reward( mode, key, tier );
+        };
+        ui_loading_text( env, vt, place, out );
+    };
+    // 0x440400: TrackDB [ level ].LoadingBackground, then its "_1" .. "_7" that exist; one by VuRandom's global draw (ui_champ_pick's arithmetic), which the draw shows.
+    hooks.m_loading_image = [ this ]( ) {
+        ui_loading_env_t env;
+        env.d.m_root = &m_menu_util;
+        const std::string base = ui_json_text( member( ui_db_entry( &m_track_db, ui_loading_level( env ) ), "LoadingBackground" ) );
+        std::vector< std::string > names;
+        const auto exists = [ this ]( const std::string& n ) { return !m_archive.names( "VuTextureAsset/" + n ).empty( ); };
+        if ( exists( base ) )
+            names.push_back( base );
+        for ( int k = 1; k < 8; ++k )
+            if ( const std::string n = base + "_" + std::to_string( k ); exists( n ) )
+                names.push_back( n );
+        if ( names.empty( ) || !m_champ_env.m_random )
+            return std::string( );
+        return names[ static_cast< std::size_t >( ui_champ_pick( *m_champ_env.m_random, static_cast< int >( names.size( ) ) ) ) ];
+    };
     return hooks;
 }
 
@@ -324,6 +388,13 @@ inline const std::string& c_world::menu_tick( float dt )
     // screen is not read again by that screen in the same frame.
     const std::string& next = m_menu->tick( dt );
     menu_any_key( );
+    // The screen's entities registered on "Decision" (the remapping rows' 0x4623D0, the mini boards' 0x47E170, the ladders' 0x47B640): a screen under a box keeps them.
+    if ( m_menu )
+    {
+        const auto at = m_menu_projects.find( m_menu->m_project );
+        if ( at != m_menu_projects.end( ) )
+            at->second.binding->decision( );
+    }
     m_menu_engine.m_fade.tick( dt, nullptr );
     return next;
 }

@@ -679,6 +679,7 @@ private:
     logic_services_t m_logic_services;
     value_t m_profile_temp;                             // g 0x759084 +0x18
     value_t m_option_db;                                // gameutil +0x34
+    msgbox_ref_t m_remap_box;                           // the remapping row's box (0x461940)
     value_t m_page_db;                                  // VuDBAsset/PageLayoutDB
     std::string m_logic_sku;                            // m_logic_game.sku: the pack's
     float m_menu_dt = 0.0f;                             // the tick manager's delta the screen tick sees
