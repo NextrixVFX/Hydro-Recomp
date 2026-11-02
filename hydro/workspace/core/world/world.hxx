@@ -641,6 +641,7 @@ private:
         std::map< const entity_t*, msgbox_entity_t > boxes;    // VuMessageBoxEntity (world/msgbox.hxx)
     };
     screen_state_t m_game_screen_state;                 // the Results and Award projects
+    screen_state_t m_pause_screen_state;                // the pause menu's project: goes with it (0x4BBC20)
     c_ui_binding* m_logic_binding = nullptr;            // the screen a logic handler runs on
     // The message boxes, world/msgbox.hxx: g 0x758FD4 and its project.
     c_msgbox_manager m_boxes;
@@ -662,6 +663,7 @@ private:
     void ghost_labels( );
     msgbox_ref_t boxes_show( const std::string& heading, const std::string& body, const std::string& text_a, const std::string& text_b = std::string( ) );
     void boxes_release( screen_state_t& state );
+    void screen_state_release( screen_state_t& state );
     bool boxes_entity( screen_state_t& state, c_ui_binding& binding, entity_t& e, const char* plug );
     std::unique_ptr< entity_t > menu_load_root( const std::string& name );
     struct menu_project_t
