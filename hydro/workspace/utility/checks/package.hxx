@@ -1152,3 +1152,4 @@ inline bool verify_asset_loads( )
 #include <workspace/utility/checks/input.hxx>
 #include <workspace/utility/checks/foliage.hxx>
 #include <workspace/utility/checks/save.hxx>
+#include <workspace/utility/checks/profile.hxx>
