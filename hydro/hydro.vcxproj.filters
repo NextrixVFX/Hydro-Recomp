@@ -306,6 +306,9 @@
     <ClInclude Include="workspace\core\world\animate.hxx">
       <Filter>workspace\core\world</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\core\world\awards.hxx">
+      <Filter>workspace\core\world</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\core\world\background.hxx">
       <Filter>workspace\core\world</Filter>
     </ClInclude>
@@ -411,6 +414,9 @@
     <ClInclude Include="workspace\core\world\motion.hxx">
       <Filter>workspace\core\world</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\core\world\pause.hxx">
+      <Filter>workspace\core\world</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\core\world\pfx.hxx">
       <Filter>workspace\core\world</Filter>
     </ClInclude>
@@ -466,6 +472,9 @@
       <Filter>workspace\core\world</Filter>
     </ClInclude>
     <ClInclude Include="workspace\core\world\tick.hxx">
+      <Filter>workspace\core\world</Filter>
+    </ClInclude>
+    <ClInclude Include="workspace\core\world\tiretrack.hxx">
       <Filter>workspace\core\world</Filter>
     </ClInclude>
     <ClInclude Include="workspace\core\world\transform.hxx">

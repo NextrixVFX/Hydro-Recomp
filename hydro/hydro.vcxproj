@@ -194,6 +194,7 @@
     <ClInclude Include="workspace\core\ui\wiring.hxx" />
     <ClInclude Include="workspace\core\world\action.hxx" />
     <ClInclude Include="workspace\core\world\animate.hxx" />
+    <ClInclude Include="workspace\core\world\awards.hxx" />
     <ClInclude Include="workspace\core\world\background.hxx" />
     <ClInclude Include="workspace\core\world\blend.hxx" />
     <ClInclude Include="workspace\core\world\bodies.hxx" />
@@ -229,6 +230,7 @@
     <ClInclude Include="workspace\core\world\models.hxx" />
     <ClInclude Include="workspace\core\world\modes.hxx" />
     <ClInclude Include="workspace\core\world\motion.hxx" />
+    <ClInclude Include="workspace\core\world\pause.hxx" />
     <ClInclude Include="workspace\core\world\pfx.hxx" />
     <ClInclude Include="workspace\core\world\pfxclass.hxx" />
     <ClInclude Include="workspace\core\world\pfxload.hxx" />
@@ -248,6 +250,7 @@
     <ClInclude Include="workspace\core\world\strings.hxx" />
     <ClInclude Include="workspace\core\world\surface.hxx" />
     <ClInclude Include="workspace\core\world\tick.hxx" />
+    <ClInclude Include="workspace\core\world\tiretrack.hxx" />
     <ClInclude Include="workspace\core\world\transform.hxx" />
     <ClInclude Include="workspace\core\world\tree.hxx" />
     <ClInclude Include="workspace\core\world\voice.hxx" />
