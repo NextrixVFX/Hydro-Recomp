@@ -174,12 +174,31 @@ int c_engine::run( const char* title )
     // window. In the title so it costs nothing to draw and never reaches a still.
     double fps_start = trace::now( ), fps_last = fps_start, fps_worst = 0.0;
     int fps_frames = 0;
+
+    // Ours (a test driver): --frame-log FILE keeps every frame's phases in memory and writes them when the run ends: finding a hitch must not cause one.
+    struct frame_row_t
+    {
+        double at, pump, tick, overlay, present, end;
+        int lines;
+    };
+    const char* frame_log = c_engine::option( "frame-log" );
+    std::vector< frame_row_t > frame_rows;
+    if ( frame_log )
+        frame_rows.reserve( 400000 );
+
     while ( window.pump( ) )
     {
+        const double phase_pump = trace::now( );
+        const int lines_before = logger::g_lines;
         g_draw( ).tick( );
+        const double phase_tick = trace::now( );
         if ( g_overlay_pass )
             g_overlay_pass( g_overlay_user );
+        const double phase_overlay = trace::now( );
         swap.present( );
+        const double phase_present = trace::now( );
+        if ( frame_log )
+            frame_rows.push_back( { fps_last, phase_pump, phase_tick, phase_overlay, phase_present, 0.0, logger::g_lines - lines_before } );
 
         const double fps_now = trace::now( );
         fps_worst = ( std::max )( fps_worst, fps_now - fps_last );
@@ -198,11 +217,24 @@ int c_engine::run( const char* title )
             fps_worst = 0.0;
             fps_frames = 0;
         }
+        if ( frame_log )
+            frame_rows.back( ).end = trace::now( );
 
         if ( !g_bench( ).step( ) )
             break;
         if ( exit_after && ++frames >= std::atol( exit_after ) )
             break;
+    }
+
+    if ( frame_log )
+    {
+        FILE* out = nullptr;
+        if ( fopen_s( &out, frame_log, "w" ) == 0 && out )
+        {
+            for ( const frame_row_t& r : frame_rows )
+                std::fprintf( out, "%.3f %.3f %.3f %.3f %.3f %.3f %d\n", r.at, r.pump, r.tick, r.overlay, r.present, r.end, r.lines );
+            std::fclose( out );
+        }
     }
 
     const int code = g_bench( ).report( );

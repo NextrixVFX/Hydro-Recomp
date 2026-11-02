@@ -7,7 +7,7 @@
 //   Pfx +0x210; +8 identity; the model 0x520080 on +0x48; +0x50 = +0x68; 0x5243A0 on the solver +0x78; the collision asset 0x413110 at +0x1A0; +0x1B0 += the asset's aabb centre (x 0.5 0x6F765C);
 //   the convex hull over the VuStridingMesh +0x180 (+0x204, the boat's own shape: boat/load.hxx load_shape), the compound +0x200 holding it under identity with origin -(+0x1B0);
 //   calculateLocalInertia( Mass ) (vt+0x1C); 0x4131E0( Mass, the piece as motion state, the compound, inertia ), linear / angular damping 0.1 (0x3DCCCCCD, cinfo +0x70 / +0x74), sleep
-//   thresholds 0 (+0x80 / +0x84); the VuRigidBody 0x527B80( cinfo, group 0, mask 0x100, -1 ) at +0x208; its +0x2C8 = the surface byte; setGravity inline (rigid_set_gravity);
+//   thresholds 0 (+0x80 / +0x84); the VuRigidBody 0x527B80( cinfo, owner 0, group 0x100, mask -1 ) at +0x208 (pushes -1, 0x100, 0: ebp+0xC the owner, +0x10 group, +0x14 mask); its +0x2C8 = the surface byte; setGravity inline (rigid_set_gravity);
 //   solver +0x14 = +0x18 = Mass / the fluids asset's +0xA0 / Buoyancy; solver +0x20 .. +0x28 = SkinFricion three times.
 // The asset's fluids and collision meshes share the name: the piece's Asset.
 // ORDER OURS (flagged): setGravity runs at the first launch, not at the load: the session's dynamics do not exist yet when the sections load.
@@ -165,7 +165,7 @@ inline bool race_piece_load( race_piece_t& p, const value_t& e, boat_load_t& io,
         return true;
     };
     std::uint32_t unique_id = 0xFFFFFFFFu;
-    if ( !vu_rigid_body_construct( p.body.body, cinfo.image, 0, 0x100, unique_id, get, i ) )
+    if ( !vu_rigid_body_construct( p.body.body, cinfo.image, 0x100, -1, unique_id, get, i ) )
     {
         why = "0x412270: the VuRigidBody ctor 0x527B80 refused";
         return false;

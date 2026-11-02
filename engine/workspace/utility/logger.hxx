@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstring>
 #include <ctime>
+#include <string>
 
 #if HYDRO_HOST_WINDOWS
 #  ifndef WIN32_LEAN_AND_MEAN
@@ -51,14 +52,38 @@ namespace logger
 #endif
         }
 
+        // Ours: one console write per line. A console's stdout is unbuffered, so printing the per-character gradient
+        // directly was one write per printf / putchar, some 500 a line: 4 ms a line, a visible hitch. Same bytes, composed here.
+        inline std::string& line( ) noexcept
+        {
+            thread_local std::string text;
+            return text;
+        }
+
+        template<typename... Args>
+        static inline void put( const char* format, Args... args ) noexcept
+        {
+            char piece[ 4200 ];
+            const int size = std::snprintf( piece, sizeof( piece ), format, args... );
+            if ( size > 0 )
+                line( ).append( piece, static_cast< std::size_t >( size ) < sizeof( piece ) ? static_cast< std::size_t >( size ) : sizeof( piece ) - 1 );
+        }
+
+        static inline void flush( ) noexcept
+        {
+            std::fwrite( line( ).data( ), 1, line( ).size( ), stdout );
+            std::fflush( stdout );
+            line( ).clear( );
+        }
+
         static inline void set_rgb( uint8_t r, uint8_t g, uint8_t b ) noexcept
         {
-            std::printf( "\x1b[38;2;%u;%u;%um", r, g, b );
+            put( "\x1b[38;2;%u;%u;%um", r, g, b );
         }
 
         static inline void reset( ) noexcept
         {
-            std::printf( "\x1b[0m" );
+            put( "\x1b[0m" );
         }
 
         static inline uint8_t lerp( uint8_t a, uint8_t b, float t ) noexcept
@@ -88,7 +113,7 @@ namespace logger
                     lerp( g1, g2, t ),
                     lerp( b1, b2, t )
                 );
-                std::putchar( text[ i ] );
+                put( "%c", text[ i ] );
             }
 
             reset( );
@@ -107,7 +132,7 @@ namespace logger
 #endif
 
             set_rgb( 100, 100, 100 );
-            std::printf( "[%02d/%02d/%04d %02d:%02d:%02d] ",
+            put( "[%02d/%02d/%04d %02d:%02d:%02d] ",
                 local_tm.tm_mon + 1, local_tm.tm_mday, local_tm.tm_year + 1900,
                 local_tm.tm_hour, local_tm.tm_min, local_tm.tm_sec );
             reset( );
@@ -117,11 +142,11 @@ namespace logger
         {
             switch ( lvl )
             {
-            case level::verbose: set_rgb( 140, 140, 140 ); std::printf( "[*] " ); break;
-            case level::info:    set_rgb( 59, 130, 246 );   std::printf( "[~] " ); break;
-            case level::success: set_rgb( 80, 200, 120 );   std::printf( "[+] " ); break;
-            case level::warning: set_rgb( 255, 215, 0 );    std::printf( "[!] " ); break;
-            case level::error:   set_rgb( 255, 80, 80 );    std::printf( "[-] " ); break;
+            case level::verbose: set_rgb( 140, 140, 140 ); put( "[*] " ); break;
+            case level::info:    set_rgb( 59, 130, 246 );   put( "[~] " ); break;
+            case level::success: set_rgb( 80, 200, 120 );   put( "[+] " ); break;
+            case level::warning: set_rgb( 255, 215, 0 );    put( "[!] " ); break;
+            case level::error:   set_rgb( 255, 80, 80 );    put( "[-] " ); break;
             }
             reset( );
         }
@@ -140,25 +165,29 @@ namespace logger
 
                 const char* name = separator + 1;
 
-                set_rgb( 100, 100, 100 ); std::printf( "[" );
-                set_rgb( 180, 180, 210 ); std::printf( "%s", context );
-                set_rgb( 100, 100, 100 ); std::printf( "] " );
-                set_rgb( 220, 220, 235 ); std::printf( "%s", name );
-                set_rgb( 100, 100, 100 ); std::printf( ": " );
+                set_rgb( 100, 100, 100 ); put( "[" );
+                set_rgb( 180, 180, 210 ); put( "%s", context );
+                set_rgb( 100, 100, 100 ); put( "] " );
+                set_rgb( 220, 220, 235 ); put( "%s", name );
+                set_rgb( 100, 100, 100 ); put( ": " );
             }
             else
             {
-                set_rgb( 220, 220, 235 ); std::printf( "%s", function );
-                set_rgb( 100, 100, 100 ); std::printf( ": " );
+                set_rgb( 220, 220, 235 ); put( "%s", function );
+                set_rgb( 100, 100, 100 ); put( ": " );
             }
 
             reset( );
         }
     }
 
+    // Ours: what the console cost, for runtime.hxx's --frame-log.
+    inline int g_lines = 0;
+
     template<typename... Args>
     inline void log( level lvl, const char* caller, const char* format, Args... args ) noexcept
     {
+        ++g_lines;
         detail::initialize_console( );
         detail::print_timestamp( );
         detail::print_level( lvl );
@@ -168,7 +197,8 @@ namespace logger
         std::snprintf( buffer, sizeof( buffer ), format, args... );
         detail::print_gradient( buffer );
 
-        std::printf( "\n" );
+        detail::put( "\n" );
+        detail::flush( );
     }
 
 #if HYDRO_HOST_WINDOWS
