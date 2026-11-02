@@ -101,6 +101,90 @@ inline void gfx_scene_view_build( gfx_scene_view_t& v, const scene_t& scene, con
         v.m_roots.push_back( &v.m_nodes[ static_cast< std::size_t >( root ) ] );
 }
 
+// VUSKYBOXENTITY'S DRAW (water batch 32). The sky has no culling, no material map and no skip: every part of every node, a 0x44-byte record (matrix, part), type 5, depth 0, screen 8.
+constexpr std::uint32_t k_gfx_cb_sky = 0x5EBFF0u;
+
+// 0x5EBE80 (node, parent matrix, eye; the eye only passed down).
+inline void gfx_sky_node( gfx_sort_t& sort, const gfx_scene_node_t& node, const float parent[ 16 ] )
+{
+    float m[ 16 ];
+    hull_multiply( node.m_matrix, m, parent );
+    if ( node.m_mesh )
+    {
+        for ( const gfx_scene_part_t* pp : node.m_mesh->m_parts )
+        {
+            std::uint8_t* r = sort.allocate( 0x44 );
+            std::memcpy( r, m, 64 );
+            std::memcpy( r + 0x40, &pp->m_id, 4 );
+            sort.submit_keyed( 5, pp->m_row->m_material, pp->m_chunk, k_gfx_cb_sky, 0.0f );
+        }
+    }
+    for ( const gfx_scene_node_t* child : node.m_children )
+        gfx_sky_node( sort, *child, m );
+}
+
+// 0x5EBDB0 (eye, the asset; no asset: nothing): under identity x translation( eye ), the screen field put back after.
+inline void gfx_sky_draw( gfx_sort_t& sort, const float eye[ 3 ], const gfx_scene_view_t* v )
+{
+    if ( !v )
+        return;
+    const std::uint32_t screen = ( sort.m_key_hi >> 18 ) & 0xFu;
+    sort.set_screen( 8 );
+    float identity[ 16 ], translation[ 16 ], m[ 16 ];
+    vu_identity( identity );
+    vu_identity( translation );
+    translation[ 12 ] = eye[ 0 ];
+    translation[ 13 ] = eye[ 1 ];
+    translation[ 14 ] = eye[ 2 ];
+    hull_multiply( identity, m, translation );
+    for ( const gfx_scene_node_t* root : v->m_roots )
+        gfx_sky_node( sort, *root, m );
+    sort.set_screen( screen );
+}
+
+// The entity: +0x7C's +0x4C the sky asset, +0x80 four per-viewport overrides. 0x5EBD70 (draw, params +0's eye): the override of the key's viewport bits (+0x77 & 3) or the asset. 0x5EBCF0 (info
+// params: the camera's eye): the asset, always. (Its local params are not read by 0x5EBDB0.)
+struct gfx_skybox_t
+{
+    const gfx_scene_view_t* m_asset = nullptr;
+    const gfx_scene_view_t* m_viewport[ 4 ] = { };
+
+    void draw( gfx_sort_t& sort, const float eye[ 3 ] ) const
+    {
+        const gfx_scene_view_t* v = m_viewport[ ( sort.m_key_hi >> 24 ) & 3u ];
+        gfx_sky_draw( sort, eye, v ? v : m_asset );
+    }
+
+    void draw_info( gfx_sort_t& sort, const float eye[ 3 ] ) const
+    {
+        gfx_sky_draw( sort, eye, m_asset );
+    }
+};
+
+// VuBreakableModelInstance slot 1 0x51E640: per root, in order, a zeroed 0xD8-byte piece: +0 the node, +4 the inverse of the node's matrix (0x4157C0), +0x44 its aabb's centre. The fourth word
+// of +0x44 is stack, not written here. The rest of the piece is 0x51E790's (boat/effects.hxx boat_debris_parts_launch). Instance +0x6C = the scene's +0x48, the root count.
+struct gfx_piece_seed_t
+{
+    const gfx_scene_node_t* m_node = nullptr;
+    float m_inverse[ 16 ] = { };
+    float m_pivot[ 3 ] = { };
+};
+
+inline std::vector< gfx_piece_seed_t > gfx_pieces_seed( const gfx_scene_view_t& v )
+{
+    std::vector< gfx_piece_seed_t > out( v.m_roots.size( ) );
+    for ( std::size_t i = 0; i < out.size( ); ++i )
+    {
+        const gfx_scene_node_t& n = *v.m_roots[ i ];
+        out[ i ].m_node = &n;
+        std::memcpy( out[ i ].m_inverse, n.m_matrix, 64 );
+        hull_invert( out[ i ].m_inverse );
+        for ( int k = 0; k < 3; ++k )
+            out[ i ].m_pivot[ k ] = ( n.m_aabb[ 4 + k ] + n.m_aabb[ k ] ) * 0.5f;
+    }
+    return out;
+}
+
 // VuGfxDrawInfoParams -> VuGfxDrawParams, the local 0x5B0600 and 0x61DAE0 build: the camera's eye (four words), the camera, everything else zero.
 inline gfx_draw_params_t gfx_info_params( const gfx_camera_t& camera, float eye_w )
 {

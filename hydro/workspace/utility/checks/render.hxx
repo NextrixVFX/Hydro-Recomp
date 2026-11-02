@@ -1808,6 +1808,34 @@ inline bool verify_gfx_real_model( )
             compare_commands( );
             g.eq( sort.m_key_lo, g.take( ) );
             g.eq( sort.m_key_hi, g.take( ) );
+            sort.m_key_lo = g.take( );
+            sort.m_key_hi = g.take( );
+            const unsigned sky_slot = g.take( ), sky_over = g.take( );
+            gfx_skybox_t sky;
+            if ( sky_over )
+                sky.m_viewport[ sky_slot ] = &view;
+            else
+                sky.m_asset = &view;
+            float sky_eye[ 3 ];
+            for ( float& f : sky_eye )
+                f = real( g.take( ) );
+            fresh( );
+            sky.draw( sort, sky_eye );
+            compare_commands( );
+            g.eq( sort.m_key_lo, g.take( ) );
+            g.eq( sort.m_key_hi, g.take( ) );
+        }
+        const std::vector< gfx_piece_seed_t > seed = gfx_pieces_seed( view );
+        g.take( );
+        g.eq( static_cast< unsigned >( seed.size( ) ), g.take( ) );
+        for ( const gfx_piece_seed_t& s : seed )
+        {
+            g.eq( static_cast< unsigned >( s.m_node - view.m_nodes.data( ) ), g.take( ) );
+            for ( float f : s.m_inverse )
+                g.eq( bits( f ), g.take( ) );
+            for ( float f : s.m_pivot )
+                g.eq( bits( f ), g.take( ) );
+            g.eq( 0u, g.take( ) );
         }
         const unsigned count = g.take( );
         gfx_static_model_t model;
@@ -1954,6 +1982,15 @@ inline bool verify_gfx_components( )
             g.eq( casts ? 0x68u : 0u, g.take( ) );
             g.eq( casts ? 0x104u : 0u, g.take( ) );
             drawn += casts ? 1 : 0;
+        }
+        else if ( kind == 6 )
+        {
+            float euler[ 3 ], m[ 16 ];
+            for ( float& f : euler )
+                f = real( g.take( ) );
+            gfx_matrix_set_euler( m, euler );
+            for ( float f : m )
+                g.eq( bits( f ), g.take( ) );
         }
         else
         {
