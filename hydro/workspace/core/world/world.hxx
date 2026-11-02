@@ -651,6 +651,7 @@ private:
     void boxes_tick( float dt );
     void boxes_draw( );
     void fade_draw( );
+    void ghost_labels( );
     msgbox_ref_t boxes_show( const std::string& heading, const std::string& body, const std::string& text_a, const std::string& text_b = std::string( ) );
     void boxes_release( screen_state_t& state );
     bool boxes_entity( screen_state_t& state, c_ui_binding& binding, entity_t& e, const char* plug );

@@ -383,5 +383,13 @@ inline void race_session_ghost_bind( race_session_t& s )
             state->m_exit = [ &s ] { s.ticks.pause_count -= 1; };
         }
     }
-    s.rules.hooks.gates = nullptr;   // slot 7 0x485380's copy over the +0x75C list's boats: NOT DONE, the ghost's own Game enter copy stands
+    // Slot 7 0x485380, after race_rules_tick's body: each loaded ghost's boat +0x4DC = its transform's world (+0x50).
+    s.rules.hooks.gates = [ &s ] {
+        for ( const std::unique_ptr< ghost_record_t >& g : s.ghost_records )
+        {
+            race_session_boat_t& b = *static_cast< race_session_boat_t* >( g->boat );
+            if ( const std::uint8_t* transform = race_session_image( b, 0, 0x50 ) )
+                std::memcpy( b.graph.objects[ 0 ].image.data( ) + 0x4DC, transform + 0x50, 64 );
+        }
+    };
 }

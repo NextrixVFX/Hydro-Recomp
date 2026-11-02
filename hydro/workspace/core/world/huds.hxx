@@ -481,6 +481,37 @@ inline ui_screen_env_t c_world::ui_screen_environment( )
 #endif
 
 #if HYDRO_UI_PASS
+// The ghost's draw 0x422590's tail, with the params' +0x18 byte clear (not the reflection): its driver's name over the boat, the font "HUD_PlayerName" (0x422310's +0x52C; its params the boat's
+// +0x54C), 0x536C10 with flags 0x66 and alpha 1. FLAGGED: drawn on the UI pass with the sort key it holds there, retail's draw runs in the 3D view's submit.
+inline void c_world::ghost_labels( )
+{
+    if ( !m_race.active )
+        return;
+    for ( std::size_t k = 0; k < m_race.boats.size( ) && k < m_race.start_boats.size( ); ++k )
+    {
+        race_session_boat_t& b = *m_race.boats[ k ];
+        const std::uint8_t* transform = m_race.start_boats[ k ].transform;
+        if ( !b.ghost || !transform || !b.driver )
+            continue;
+        std::uint8_t* boat = b.graph.objects[ 0 ].image.data( );
+        const ui_frame_inputs_t in = ui_inputs( );
+        std::uint8_t params[ 60 ] = { };
+        std::string asset;
+        ui_font_params( m_font_db, "HUD_PlayerName", params, asset );
+        std::memcpy( boat + 0x54C, params, 60 );
+        ghost_label_t label;
+        if ( !ghost_boat_label( boat, transform, m_race.viewport_camera, label ) )
+            continue;
+        const std::uint32_t font = asset.empty( ) ? 0u : m_ui_pass->font_asset( asset );
+        const auto name = b.driver->strings.find( 0x60 );
+        if ( font == 0u || name == b.driver->strings.end( ) )
+            continue;
+        const float rect[ 4 ] = { label.x, label.y, 0.0f, 0.0f };
+        const float offset[ 2 ] = { 0.0f, 0.0f };
+        ui_font_draw( m_ui_pass->m_sort, in.m_env, font, name->second.c_str( ), label.params, rect, 0x66u, 1.0f, offset, label.depth );
+    }
+}
+
 // VuFadeManager's draw 0x4AEF70 (render hook g 0x759024, ctor 0x4AED60), while its value > 0: the sort key's layer 4 and bits 0xB, a colour ( 0, 0, 0, value ) (0x4AECF0: fistp of x 255),
 // 0x507830 over ( 0, 0, 1, 1 ) at depth 0. The race's manager is m_fade, the menus' and the title's m_menu_engine.m_fade: one object in retail, g 0x758FC4.
 inline void c_world::fade_draw( )
@@ -506,6 +537,7 @@ inline void c_world::ui_frame( )
         return;
     m_ui_pass->begin( m_race.world.display_w, m_race.world.display_h );
     m_modes.draw( );
+    ghost_labels( );
     boxes_draw( );
     fade_draw( );
     m_ui_pass->end( );

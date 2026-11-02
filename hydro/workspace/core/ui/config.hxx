@@ -144,6 +144,7 @@ struct ui_game_env_t
     // current championship round's container (0x4C2300 only); null = the
     // static null container.
     const value_t* championship = nullptr;
+    std::function< const value_t*( ) > championship_now;   // the same answer asked at 0x4C2300's own moment (the screen's unload writes it)
     // HOOK: VuStringDBImpl getString (g 0x759078 slot 6, thiscall(this, const
     // char* id) -> const std::string&) - the string tables are not recreated.
     std::function< std::string( const char* ) > string_db;
@@ -389,7 +390,8 @@ inline bool ui_ghost_game_data( value_t& game_data, value_t& root, const ui_game
 inline bool ui_championship_game_data( value_t& game_data, value_t& root, const ui_game_env_t& env )
 {
     static const value_t null{ };
-    const value_t& champ = env.championship ? *env.championship : null;
+    const value_t* const round = env.championship_now ? env.championship_now( ) : env.championship;
+    const value_t& champ = round ? *round : null;
     const value_t& boats_db = env.boat_db ? member( *env.boat_db, "VuDBAsset" ) : null;
     const value_t& tracks_db = env.track_db ? member( *env.track_db, "VuDBAsset" ) : null;
     const std::string name = ui_json_text( member( champ, "Name" ) );

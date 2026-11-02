@@ -228,6 +228,7 @@ inline void c_world::menu_exit( )
     env.track_db = dbs.track_db;
     env.random = &m_vurandom;
     env.player_name = platform_gamer_tag( );
+    env.championship_now = [ this ] { return &ui_progress_champ_state( m_cloud.data ); };   // 0x4C2300's progress vt+0x6C, after the screen's unload saved it
     env.string_db = [ this ]( const char* id ) { return string_db_get( m_string_db, id ? id : "" ); };
     const ui_game_config_t config = m_menu->exit( m_menu_util, env );
     LOG_INFO( "front end: exit to %s, GameData builder 0x%X %s", m_menu->m_mode.c_str( ), config.builder, config.built ? "built" : "not built" );
