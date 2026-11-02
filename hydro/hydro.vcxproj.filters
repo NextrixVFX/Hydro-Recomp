@@ -114,6 +114,9 @@
     <ClInclude Include="workspace\core\boat\fluid.hxx">
       <Filter>workspace\core\boat</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\core\boat\ghost.hxx">
+      <Filter>workspace\core\boat</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\core\boat\hull.hxx">
       <Filter>workspace\core\boat</Filter>
     </ClInclude>
@@ -186,10 +189,19 @@
     <ClInclude Include="workspace\core\game\input.hxx">
       <Filter>workspace\core\game</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\core\game\packages.hxx">
+      <Filter>workspace\core\game</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\core\game\plugs.hxx">
       <Filter>workspace\core\game</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\core\game\settings.hxx">
+      <Filter>workspace\core\game</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\core\game\types.hxx">
+      <Filter>workspace\core\game</Filter>
+    </ClInclude>
+    <ClInclude Include="workspace\core\game\unlock.hxx">
       <Filter>workspace\core\game</Filter>
     </ClInclude>
     <ClInclude Include="workspace\core\light\rig.hxx">
@@ -657,6 +669,9 @@
     <ClInclude Include="workspace\utility\checks\pfx.hxx">
       <Filter>workspace\utility\checks</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\utility\checks\profile.hxx">
+      <Filter>workspace\utility\checks</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\utility\checks\race.hxx">
       <Filter>workspace\utility\checks</Filter>
     </ClInclude>
@@ -664,6 +679,9 @@
       <Filter>workspace\utility\checks</Filter>
     </ClInclude>
     <ClInclude Include="workspace\utility\checks\render.hxx">
+      <Filter>workspace\utility\checks</Filter>
+    </ClInclude>
+    <ClInclude Include="workspace\utility\checks\replay.hxx">
       <Filter>workspace\utility\checks</Filter>
     </ClInclude>
     <ClInclude Include="workspace\utility\checks\results.hxx">

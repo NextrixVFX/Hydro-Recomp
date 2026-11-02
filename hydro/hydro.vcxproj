@@ -130,6 +130,7 @@
     <ClInclude Include="workspace\core\boat\events.hxx" />
     <ClInclude Include="workspace\core\boat\fleet.hxx" />
     <ClInclude Include="workspace\core\boat\fluid.hxx" />
+    <ClInclude Include="workspace\core\boat\ghost.hxx" />
     <ClInclude Include="workspace\core\boat\hull.hxx" />
     <ClInclude Include="workspace\core\boat\human.hxx" />
     <ClInclude Include="workspace\core\boat\keys.hxx" />
@@ -154,8 +155,11 @@
     <ClInclude Include="workspace\core\boat\update.hxx" />
     <ClInclude Include="workspace\core\game\game.hxx" />
     <ClInclude Include="workspace\core\game\input.hxx" />
+    <ClInclude Include="workspace\core\game\packages.hxx" />
     <ClInclude Include="workspace\core\game\plugs.hxx" />
+    <ClInclude Include="workspace\core\game\settings.hxx" />
     <ClInclude Include="workspace\core\game\types.hxx" />
+    <ClInclude Include="workspace\core\game\unlock.hxx" />
     <ClInclude Include="workspace\core\light\rig.hxx" />
     <ClInclude Include="workspace\core\trigger\set.hxx" />
     <ClInclude Include="workspace\core\trigger\volume.hxx" />
@@ -311,9 +315,11 @@
     <ClInclude Include="workspace\utility\checks\menu.hxx" />
     <ClInclude Include="workspace\utility\checks\package.hxx" />
     <ClInclude Include="workspace\utility\checks\pfx.hxx" />
+    <ClInclude Include="workspace\utility\checks\profile.hxx" />
     <ClInclude Include="workspace\utility\checks\race.hxx" />
     <ClInclude Include="workspace\utility\checks\rays.hxx" />
     <ClInclude Include="workspace\utility\checks\render.hxx" />
+    <ClInclude Include="workspace\utility\checks\replay.hxx" />
     <ClInclude Include="workspace\utility\checks\results.hxx" />
     <ClInclude Include="workspace\utility\checks\rig.hxx" />
     <ClInclude Include="workspace\utility\checks\save.hxx" />
