@@ -265,9 +265,6 @@ inline void ui_record_icons( ui_record_device_t& d, const ui_minimap_t& m, const
 //
 // What is OURS, flagged:
 // - Its own sort, flipped once a frame after the composer: retail's UI commands share the frame's one sort, type 17 sorting them last.
-// - A texture's sampler: clamp, linear, the first mip only (decode_texture's). Retail's options come from the asset (0x57C9B0's
-//   options; the asset's load is not recreated): SUBSTITUTION.
-// - The texture is decoded to RGBA8 (format 4) in place of the asset's own block-compressed format.
 #if __has_include( <workspace/core/render/program.hxx> ) && __has_include( <workspace/core/render/resource.hxx> ) && HYDRO_HOST_WINDOWS
 #  define HYDRO_UI_PASS 1
 #  include <workspace/core/render/program.hxx>
@@ -550,29 +547,20 @@ struct gfx_ui_pass_t final : gfx_sort_hooks_t, ui_record_device_t, ui_boost_devi
             return at->second.m_handle ? &at->second : nullptr;
         ui_texture_t& out = m_by_name[ name ];
         std::vector< std::uint8_t > bytes;
-        image_t image;
-        if ( !m_read( "VuTextureAsset/" + name, bytes ) || !decode_texture( bytes, image ) )
+        if ( !m_read( "VuTextureAsset/" + name, bytes ) || bytes.size( ) < 56u )
         {
-            LOG_WARNING( "UI pass: texture %s did not load, %zu bytes, format word 0x%X (UNKNOWN: not drawn)", name.c_str( ), bytes.size( ), bytes.size( ) >= 36 ? bytes[ 32 ] | bytes[ 33 ] << 8 : 0 );
+            LOG_WARNING( "UI pass: texture %s did not load, %zu bytes (UNKNOWN: not drawn)", name.c_str( ), bytes.size( ) );
             return nullptr;
         }
-        out.m_handle = upload( image.width, image.height, 4u, image.rgba.data( ), 0 );
-        out.m_width = image.width;
-        out.m_height = image.height;
-        m_sizes[ out.m_handle ] = { image.width, image.height };
-        return &out;
-    }
-
-    std::uint32_t upload( std::int32_t w, std::int32_t h, std::uint32_t format, const void* bytes, std::int32_t mip )
-    {
-        gfx_texture_options_t o;
-        o.m_address_u = o.m_address_v = 1u;
-        o.m_min = o.m_mag = 2;
-        o.m_mip = mip;
-        gfx_texture_object_t* t = gfx_texture_create( m_direct, w, h, format, o );
-        gfx_texture_update( m_direct, *t, 0, bytes );
+        // 0x57C740: the asset's own format, levels and sampler (its five option words). In the pack 231 UI textures wrap with a chain, 83 clamp: the boost
+        // strips scroll by gBoostTextureVOffset (0..1, wrapped by 0x42B860), so they need their wrap.
+        gfx_texture_object_t* t = gfx_texture_load( m_direct, bytes.data( ) );
         m_textures.push_back( t );
-        return static_cast< std::uint32_t >( m_textures.size( ) );
+        out.m_handle = static_cast< std::uint32_t >( m_textures.size( ) );
+        out.m_width = t->m_width;
+        out.m_height = t->m_height;
+        m_sizes[ out.m_handle ] = { t->m_width, t->m_height };
+        return &out;
     }
 
 #if HYDRO_UI_TEXT
