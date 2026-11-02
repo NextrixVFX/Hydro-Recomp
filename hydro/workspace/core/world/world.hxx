@@ -12,6 +12,7 @@
 #include <workspace/core/assets/reader.hxx>
 #include <workspace/core/assets/tree.hxx>
 #include <workspace/core/game/input.hxx>
+#include <workspace/core/game/identity.hxx>
 #include <workspace/core/world/control.hxx>
 #include <workspace/core/world/effects.hxx>
 #include <workspace/core/world/pfx.hxx>
@@ -1124,7 +1125,10 @@ public:
             front_end = front_end_defaults( text( mode ), text( track ), text( course ), dbs, game_data );
         else if ( race )
             front_end = race_session_game_data( text( mode ), text( track ), text( course ), text( c_engine::option( "boat" ) ),
-                                                text( c_engine::option( "skin" ) ), dbs, m_vurandom, game_data );
+                                                text( c_engine::option( "skin" ) ), dbs, m_vurandom, game_data, [ this ]( const char* id ) -> std::string {
+                                                    string_db_ready( );
+                                                    return string_db_get( m_string_db, id ? id : "" );
+                                                } );
         if ( !front_end )
         {
             game_data = value_t{ };
@@ -1267,6 +1271,7 @@ public:
                 LOG_ERROR( "race: --input-script %s did not load (no keys) - the device answers", script );
         }
         m_race.autopilot = c_engine::option( "autopilot" ) != nullptr;
+        m_race.autopilot_keys = c_engine::option( "autopilot-keys" ) != nullptr;
         if ( const char* size = c_engine::option( "window-size" ) )
             sscanf_s( size, "%dx%d", &m_race.world.display_w, &m_race.world.display_h );
         if ( const char* keys = c_engine::option( "keys" ) )

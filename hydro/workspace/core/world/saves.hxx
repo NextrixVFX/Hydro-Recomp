@@ -26,7 +26,7 @@ inline void c_world::saves_start( )
     if ( const char* dir = c_engine::option( "save-dir" ) )
         save_seam::redirect( dir );
     else
-        for ( const char* driver : { "bench", "background", "exit-after", "input-script", "keys", "menu-keys", "fixed-step", "autopilot" } )
+        for ( const char* driver : { "bench", "background", "exit-after", "input-script", "keys", "menu-keys", "fixed-step", "autopilot", "autopilot-keys" } )
             if ( c_engine::option( driver ) != nullptr )
             {
                 LOG_INFO( "saves: off (--%s, no --save-dir): a test run never touches the player's folder", driver );
@@ -167,6 +167,7 @@ inline void c_world::unlock_bind( )
             m_champ_db = c_reader( bytes ).parse( );
     }
     c.m_champ_db = &m_champ_db;
+    c.m_player_name = platform_gamer_tag( );
     c.m_random = &m_vurandom;
     c.m_string = [ this ]( const char* id ) { return string_db_get( m_string_db, id ? id : "" ); };
     c.m_broadcast = [ this ]( const char* event, const ui_params_t& p ) {

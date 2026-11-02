@@ -456,6 +456,8 @@ inline ui_screen_env_t c_world::ui_screen_environment( )
     // A text leaf's slot 12: VuUITextEntity's 0x446DE0 is VuStringDB slot 7 on its String ID; the screen's bound text has no runtime
     // String ID object here, so the loaded one (SUBSTITUTION until a screen's SetText path needs it).
     env.m_text = [ this ]( const entity_t& e ) {
+        if ( e.m_type == "VuGamerTagUITextEntity" )   // slot 12 0x445DE0
+            return platform_gamer_tag( );
         const ui_slot_t* id = ui_property_value( e, "String ID" );
         return id && !id->m_text.empty( ) ? string_db_get( m_string_db, id->m_text ) : std::string( );
     };

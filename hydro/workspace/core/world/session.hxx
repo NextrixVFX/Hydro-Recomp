@@ -436,6 +436,8 @@ struct race_session_t
     // run (race_session_frame), the script's clock.
     std::shared_ptr< struct race_input_script_t > input_script;
     bool autopilot = false;   // --autopilot (world/autopilot.hxx)
+    bool autopilot_keys = false;   // --autopilot-keys
+    int autopilot_held = 0;
     // The input retail reads (game/input.hxx): the managers on InputDB's document, which `input_db` keeps alive. Made here at
     // the session's start, not by the engine's init 0x566230 (ours: no input exists outside a race yet). Null: InputDB did not
     // load; the hooks answer 0.
@@ -2006,9 +2008,33 @@ inline void race_session_dev_trace( const race_session_t& s, int before )
 // The "Input" phase: the device's, the manager's and the control method's ticks (c_input_device::tick), `real_dt` = the tick
 // manager's unscaled frame time; then g 0x758FC0 +0x18 where the session reads it. A loaded --input-script keeps method 0,
 // the method its keys were written for (ours: the device still ticks, so the UI's "Select" stays live).
+inline float race_autopilot_axis( const race_session_t& s, const char* name );   // world/autopilot.hxx
+
 inline void race_input_tick( void* user, float dt )
 {
     race_session_t& s = *static_cast< race_session_t* >( user );
+    // --autopilot-keys (ours): the autopilot's steering as LEFT / RIGHT on the device, so the whole keyboard path runs; ConstantDB's auto throttle drives.
+    if ( s.autopilot_keys )
+    {
+        // A pad on the test machine (XInput 0) would take the control method to 0 at a time of its own: this run has no pads.
+        s.input->device.hooks.get_state = [ ]( void*, int, input_xinput_state_t* ) -> std::uint32_t { return 0x48Fu; };
+        s.input->device.hooks.get_caps = [ ]( void*, int, std::uint8_t* ) -> std::uint32_t { return 0x48Fu; };
+        const float steer = race_autopilot_axis( s, "Steering" );
+        const int left = input_key_index( "LEFT" ), right = input_key_index( "RIGHT" );
+        const int want = steer < -0.2f ? -1 : steer > 0.2f ? 1 : 0;
+        if ( want != s.autopilot_held )
+        {
+            if ( s.autopilot_held < 0 )
+                s.input->device.key_up( left );
+            else if ( s.autopilot_held > 0 )
+                s.input->device.key_up( right );
+            if ( want < 0 )
+                s.input->device.key_down( left );
+            else if ( want > 0 )
+                s.input->device.key_down( right );
+            s.autopilot_held = want;
+        }
+    }
     for ( const race_session_t::key_script_t& k : s.key_script )
         if ( k.frame == s.frames )
         {
@@ -2276,7 +2302,8 @@ struct race_session_dbs_t
 // when an option is missing or the builder is not recreated. The roster picks
 // draw from the shared VuRandom 0x736810 in whatever state the run has left it.
 inline bool race_session_game_data( const std::string& mode, const std::string& track_name, const std::string& course, const std::string& boat,
-                                    const std::string& skin, const race_session_dbs_t& db, fleet_random_t& random, value_t& out )
+                                    const std::string& skin, const race_session_dbs_t& db, fleet_random_t& random, value_t& out,
+                                   std::function< std::string( const char* ) > string_db = nullptr )
 {
     if ( mode.empty( ) || boat.empty( ) || skin.empty( ) || track_name.empty( ) )
     {
@@ -2292,6 +2319,8 @@ inline bool race_session_game_data( const std::string& mode, const std::string& 
     env.boat_db = db.boat_db;
     env.track_db = db.track_db;
     env.random = &random;
+    env.player_name = platform_gamer_tag( );
+    env.string_db = std::move( string_db );
     ui_game_config_t built;
     out = ui_front_end_game_data( mode, track_name, course, boat, skin, env, &built );
     if ( !built.built )
