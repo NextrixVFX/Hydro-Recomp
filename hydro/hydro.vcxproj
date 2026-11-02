@@ -199,6 +199,7 @@
     <ClInclude Include="workspace\core\ui\wiring.hxx" />
     <ClInclude Include="workspace\core\world\action.hxx" />
     <ClInclude Include="workspace\core\world\animate.hxx" />
+    <ClInclude Include="workspace\core\world\attach.hxx" />
     <ClInclude Include="workspace\core\world\awards.hxx" />
     <ClInclude Include="workspace\core\world\background.hxx" />
     <ClInclude Include="workspace\core\world\blend.hxx" />
@@ -247,6 +248,7 @@
     <ClInclude Include="workspace\core\world\primitive.hxx" />
     <ClInclude Include="workspace\core\world\query.hxx" />
     <ClInclude Include="workspace\core\world\race.hxx" />
+    <ClInclude Include="workspace\core\world\rig.hxx" />
     <ClInclude Include="workspace\core\world\rules.hxx" />
     <ClInclude Include="workspace\core\world\session.hxx" />
     <ClInclude Include="workspace\core\world\settings.hxx" />
@@ -279,6 +281,7 @@
     <ClInclude Include="workspace\utility\checks\rays.hxx" />
     <ClInclude Include="workspace\utility\checks\render.hxx" />
     <ClInclude Include="workspace\utility\checks\results.hxx" />
+    <ClInclude Include="workspace\utility\checks\rig.hxx" />
     <ClInclude Include="workspace\utility\checks\session.hxx" />
     <ClInclude Include="workspace\utility\checks\ui.hxx" />
     <ClInclude Include="workspace\utility\checks\update.hxx" />

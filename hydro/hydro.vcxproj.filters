@@ -321,6 +321,9 @@
     <ClInclude Include="workspace\core\world\animate.hxx">
       <Filter>workspace\core\world</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\core\world\attach.hxx">
+      <Filter>workspace\core\world</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\core\world\awards.hxx">
       <Filter>workspace\core\world</Filter>
     </ClInclude>
@@ -465,6 +468,9 @@
     <ClInclude Include="workspace\core\world\race.hxx">
       <Filter>workspace\core\world</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\core\world\rig.hxx">
+      <Filter>workspace\core\world</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\core\world\rules.hxx">
       <Filter>workspace\core\world</Filter>
     </ClInclude>
@@ -559,6 +565,9 @@
       <Filter>workspace\utility\checks</Filter>
     </ClInclude>
     <ClInclude Include="workspace\utility\checks\results.hxx">
+      <Filter>workspace\utility\checks</Filter>
+    </ClInclude>
+    <ClInclude Include="workspace\utility\checks\rig.hxx">
       <Filter>workspace\utility\checks</Filter>
     </ClInclude>
     <ClInclude Include="workspace\utility\checks\session.hxx">
