@@ -46,7 +46,7 @@ enum gfx_device_slot_t
 {
     k_gfx_acquire = 0x30, k_gfx_release = 0x34, k_gfx_begin = 0x58, k_gfx_end = 0x5C, k_gfx_slot_80 = 0x80, k_gfx_program = 0x84,
     k_gfx_declaration = 0x88, k_gfx_stream = 0x8C, k_gfx_indices = 0x90, k_gfx_depth = 0x94, k_gfx_depth_write = 0x98,
-    k_gfx_colour_write = 0x9C, k_gfx_blend = 0xA0, k_gfx_blend_func = 0xA4, k_gfx_cull = 0xAC, k_gfx_texture = 0xB4, k_gfx_flush = 0xD0,
+    k_gfx_depth_func = 0x9C, k_gfx_blend = 0xA0, k_gfx_blend_func = 0xA4, k_gfx_colour_write = 0xA8, k_gfx_cull = 0xAC, k_gfx_texture = 0xB4, k_gfx_flush = 0xD0,
 };
 
 // The shader program's vtable offsets.
@@ -422,7 +422,7 @@ struct gfx_sort_t : ui_gfx_sort_t
     {
         m_hooks.device( k_gfx_depth, 1 );
         m_hooks.device( k_gfx_depth_write, 1 );
-        m_hooks.device( k_gfx_colour_write, 1 );
+        m_hooks.device( k_gfx_depth_func, 1 );
         m_hooks.device( k_gfx_blend, 0 );
         m_hooks.device( k_gfx_blend_func, 4, 5 );
         m_hooks.device( k_gfx_cull, 1 );
