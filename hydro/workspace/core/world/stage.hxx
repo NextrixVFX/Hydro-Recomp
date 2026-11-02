@@ -5,6 +5,7 @@
 //
 // SUBSTITUTIONS, each until the composer frame owns the view (world/composer.hxx):
 // - The engine still owns the frame: engine_pass runs inside c_geometry::draw's opaque stage, one flip per engine pass (main, mirror); retail has one flip a frame with the passes in the key's screen field.
+// - The reflection's camera and clip plane take the viewport's plane (0x530F10, surface.hxx water_reflection_plane_tick).
 // - The six planes come from the engine's view-projection, normalised, not from the camera's 0x57CBA0: inward and unit length as retail's, order near / far / sides differs (only a sign OR reads them).
 // - m_depth_material and m_shadow_material hold the colour material: VuGfxUtil's depth and shadow programs (g 0x75902C +8 / +0xC) are not made; nothing submits those passes yet (no depth pre-pass, no shadow pass).
 // NOT RECREATED: the dynamic lights' gather (0x562C40) answers no light until lights.hxx is fed; retain / release never free: the models live as long as the stage.
@@ -123,6 +124,7 @@ struct gfx_retail_t
     int m_passes = 0;
     std::vector< const float* > m_palettes;   // this pass's skinned draws
     std::vector< std::uint16_t > m_quad_indices;   // VuGfxUtil +0x48
+    float m_plane = 0.0f;                          // the reflection plane, viewport +0x268
 
     // A VuCubeTextureAsset's object (0x5AE140). A substitution (VuSubstituteAssetEntity) changes the object in place: `m_cube_name` answers the resolved name, frame( ) follows it.
     gfx_texture_object_t* cube_object( const std::string& name )
@@ -462,11 +464,12 @@ struct gfx_retail_t
             p.m_lod = 0.05f;
             p.m_reflecting = 1u;
             p.m_clip[ 2 ] = 1.0f;
+            p.m_clip[ 3 ] = -m_plane;
             float inverse[ 16 ];
             std::memcpy( inverse, m_view_proj, 64 );
             hull_invert( inverse );
             for ( int r = 0; r < 4; ++r )
-                clip[ r ] = ( inverse[ r * 4 + 1 ] + inverse[ r * 4 ] ) * 0.0f + inverse[ r * 4 + 2 ];   // 0x558C00's row, plane 0
+                clip[ r ] = ( ( inverse[ r * 4 + 1 ] + inverse[ r * 4 ] ) * 0.0f + inverse[ r * 4 + 2 ] ) + inverse[ r * 4 + 3 ] * -m_plane;   // 0x558C00's row
         }
         m_device.clip_plane( clip );
         m_sort.set_layer( 1u );

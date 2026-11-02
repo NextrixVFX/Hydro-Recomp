@@ -17,6 +17,7 @@ public:
     void bind_mirror( );
     void clear_mirror( float red, float green, float blue, float alpha );
     ID3D11ShaderResourceView* mirror_view( ) const { return m_mirror_srv; }
+    float reflection_plane = 0.0f;   // viewport +0x268
     float clear_colour[ 4 ] = { 0.55f, 0.74f, 0.90f, 1.0f };   // the record's +4 once a world sets it (c_engine::clear_colour); no world: the old sky colour
 
 private:

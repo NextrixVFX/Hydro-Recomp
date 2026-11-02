@@ -1821,4 +1821,36 @@ inline void water_reflection_nearest( const water_built_t& b, const float* p, fl
     distance = _mm_cvtss_f32( _mm_sqrt_ss( _mm_set_ss( best ) ) );
 }
 
+// VuViewportManager's tick 0x530F10 (registered by 0x530B00+), one viewport: +0x268 the reflection plane 0x558C00 reads, +0x26C where the move began, +0x270 the height it moves to,
+// +0x274 the distance the move began at. Ctor 0x530B00: +0x268 and +0x270 zero, +0x274 unset. The plane blends by distance / that distance to the next surface.
+struct water_reflection_plane_t
+{
+    float m_plane = 0.0f, m_from = 0.0f, m_target = 0.0f, m_start = 0.0f;
+};
+
+inline void water_reflection_plane_tick( water_reflection_plane_t& v, const water_built_t* water, const float* eye )
+{
+    float height = 0.0f, distance = 0.0f;
+    if ( water != nullptr )
+        water_reflection_nearest( *water, eye, height, distance );
+    if ( !( height == v.m_target ) )   // ucomiss, jnp over equal only: NaN moves
+    {
+        v.m_from = v.m_plane;
+        v.m_target = height;
+        v.m_start = distance;
+    }
+    if ( v.m_plane == v.m_target )
+        return;
+    const std::uint32_t epsilon = 0x34000000u;   // 0x6F7584
+    float e;
+    std::memcpy( &e, &epsilon, 4 );
+    if ( _mm_comigt_ss( _mm_set_ss( e ), _mm_set_ss( distance ) ) )
+    {
+        v.m_plane = v.m_target;
+        return;
+    }
+    const float t = distance / v.m_start;
+    v.m_plane = ( 1.0f - t ) * v.m_target + v.m_from * t;
+}
+
 #include <workspace/core/world/wake.hxx>

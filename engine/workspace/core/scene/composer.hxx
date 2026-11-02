@@ -113,10 +113,11 @@ void c_composer::reflect( )
     const float saved_eye[ 3 ] = { eye[ 0 ], eye[ 1 ], eye[ 2 ] };
     const float saved_at[ 3 ] = { at[ 0 ], at[ 1 ], at[ 2 ] };
     const float far_plane = g_viewport( ).plane( );
-    const float mirror_eye[ 3 ] = { saved_eye[ 0 ], saved_eye[ 1 ], -saved_eye[ 2 ] };
-    const float mirror_at[ 3 ] = { saved_at[ 0 ], saved_at[ 1 ], -saved_at[ 2 ] };
+    const float plane = g_target( ).reflection_plane;
+    const float mirror_eye[ 3 ] = { saved_eye[ 0 ], saved_eye[ 1 ], plane - ( saved_eye[ 2 ] - plane ) };
+    const float mirror_at[ 3 ] = { saved_at[ 0 ], saved_at[ 1 ], plane - ( saved_at[ 2 ] - plane ) };
     // 0x558C00's mirrored view: 0x50BDA0 with the camera's eye and target mirrored in the plane and the up (-x, -y, z) of the camera's: for our up (0, 0, 1) the same up. The plane is the viewport's
-    // +0x268, which no code writes: z = 0. The shader's uv is 0.5 + 0.5 * ndc in both axes: x as drawn, y flipped, which this camera gives. Winding is untouched: it is a camera, not a mirror matrix.
+    // +0x268, 0x530F10's height of the nearest reflecting surface. The shader's uv is 0.5 + 0.5 * ndc in both axes: x as drawn, y flipped, which this camera gives. Winding is untouched: it is a camera, not a mirror matrix.
     // NOT RECREATED: the clip plane 0x5BC410 (gClipPlane; our shaders do not take it), the draw params' reflection mask.
     g_viewport( ).aim( mirror_eye, mirror_at, far_plane );
     g_viewport( ).build( g_swap( ).width( ), g_swap( ).height( ) );

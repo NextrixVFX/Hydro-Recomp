@@ -1097,6 +1097,11 @@ void c_engine::device( void*& device, void*& context, void*& mirror )
 #endif
 }
 
+void c_engine::reflection_plane( float z )
+{
+    g_target( ).reflection_plane = z;
+}
+
 // 0x5BC330's colour: the bytes of 0x7596E4 over 255 (0x6F75BC), r g b a.
 void c_engine::clear_colour( const void* rgba )
 {

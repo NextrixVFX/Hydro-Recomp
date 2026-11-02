@@ -1448,6 +1448,10 @@ public:
         std::memcpy( view.m_statics.m_decal_diffuse, &record[ 16 ], 4 );
         m_stage.frame( dt, m_grid_frame, view );
         c_engine::clear_colour( &record[ 1 ] );
+        water_reflection_plane_tick( m_reflection_plane, &m_water, m_eye );
+        c_engine::reflection_plane( m_reflection_plane.m_plane );
+        if ( m_retail )
+            m_retail->m_plane = m_reflection_plane.m_plane;
         if ( m_retail )
             m_retail->frame( dt, record, m_far, m_lights );
     }
@@ -1837,6 +1841,7 @@ private:
     water_grid_t m_grid{};
     water_grid_frame_t m_grid_frame{};
     water_stage_t m_stage{};
+    water_reflection_plane_t m_reflection_plane{};
     bool m_stage_attached = false, m_stage_bound = false;
     std::unique_ptr< gfx_retail_t > m_retail;
     std::vector< std::unique_ptr< gfx_retail_boat_t > > m_retail_boats;
