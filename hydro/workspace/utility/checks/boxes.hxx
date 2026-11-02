@@ -1,6 +1,7 @@
 #pragma once
 
 #include <workspace/core/game/boxes.hxx>
+#include <workspace/core/game/touches.hxx>
 
 // VuMessageBoxManager, the screen's runtime and VuMessageBoxEntity against retail (case message_box, cases/msgbox.py): after every step of 24
 // scripts of 70 the machine, fade, time, queue, the screen's words, the five texts and the service log in order.
@@ -134,5 +135,69 @@ inline bool verify_message_box( )
         LOG_ERROR( "message_box FAILED %d of %d", bad, steps );
     else
         LOG_SUCCESS( "verify_message_box: %d steps of VuMessageBoxManager, its screen and VuMessageBoxEntity match retail", steps );
+    return bad == 0;
+}
+
+
+// 0x440890 0x440900 0x46C950 0x476120 0x476140 against retail (case ui_odds).
+inline bool verify_ui_odds( )
+{
+    save_words_t c{ g_golden_ui_odds_words };
+    int bad = 0;
+    const auto real = [ ]( unsigned u ) {
+        float f;
+        std::memcpy( &f, &u, 4 );
+        return f;
+    };
+    unsigned n = c.next( );
+    const unsigned picks = n;
+    for ( unsigned k = 0; k < n; ++k )
+    {
+        const unsigned count = c.next( ), clock = c.next( ), base = c.next( ), want = c.next( );
+        const int i = barracuda_pick( count, real( clock ), static_cast< int >( base ) );
+        if ( want != ( i < 0 ? 0u : 0x1000u + static_cast< unsigned >( i ) ) )
+            ++bad;
+    }
+    n = c.next( );
+    const unsigned ticks = n;
+    for ( unsigned k = 0; k < n; ++k )
+    {
+        const unsigned before = c.next( ), type = c.next( ), value = c.next( ), size = c.next( ), want = c.next( );
+        float clock = real( before );
+        const unsigned rec[ 2 ] = { type, value };
+        barracuda_tick( clock, reinterpret_cast< const std::uint8_t* >( rec ), static_cast< int >( size ) );
+        unsigned got;
+        std::memcpy( &got, &clock, 4 );
+        if ( got != want )
+            ++bad;
+    }
+    n = c.next( );
+    const unsigned touches = n;
+    for ( unsigned k = 0; k < n; ++k )
+    {
+        const unsigned type = c.next( ), hit = c.next( ), armed = c.next( ), mid = c.next( ), last = c.next( );
+        const std::string want = c.str( );
+        touch_special_t e;
+        e.m_type = static_cast< int >( type );
+        e.m_armed = static_cast< std::uint8_t >( armed );
+        touch_special_hit( e, static_cast< int >( hit ) );
+        const unsigned got = e.m_armed;
+        std::string log;
+        touch_special_tick( e, [ & ]( const char* s ) { log += std::string( "play:" ) + s + "|"; }, [ & ] { log += "plug:Trigger"; } );
+        if ( got != mid || e.m_armed != last || log != want )
+            ++bad;
+    }
+    n = c.next( );
+    const unsigned tilts = n;
+    for ( unsigned k = 0; k < n; ++k )
+    {
+        const unsigned a = c.next( ), b = c.next( ), s = c.next( ), type = c.next( ), v = c.next( );
+        if ( type != 3u || v != tilt_answer( a != 0, b != 0, static_cast< std::uint8_t >( s ) ) )
+            ++bad;
+    }
+    if ( bad )
+        LOG_ERROR( "ui_odds FAILED %d", bad );
+    else
+        LOG_SUCCESS( "verify_ui_odds: %u picks, %u ticks, %u touches, %u tilt answers match retail", picks, ticks, touches, tilts );
     return bad == 0;
 }
