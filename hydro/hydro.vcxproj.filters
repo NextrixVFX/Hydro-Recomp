@@ -603,6 +603,9 @@
     <ClInclude Include="workspace\core\world\playback.hxx">
       <Filter>workspace\core\world</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\core\world\prewarm.hxx">
+      <Filter>workspace\core\world</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\core\world\primitive.hxx">
       <Filter>workspace\core\world</Filter>
     </ClInclude>
