@@ -478,6 +478,9 @@ struct ui_bind_hooks_t
     // OptionDB at gameutil +0x34; the binding supplies the tick register (traced "ladder_tick|register|Decision"),
     // the touch add / remove (m_touch_device, priority 0), m_delta and the sound). Null: VuUILeaderboardEntity not bound.
     const ui_leaderboard_hooks_t* m_ladder = nullptr;
+    // VuGameConfigEntity's model half (world/dock.hxx): 0x520080 on its +0x304, and its draw object's add / remove (+0x324 passed by address). Unset: traced only.
+    std::function< void( const entity_t&, const char* model ) > m_trophy_model;
+    std::function< void( const entity_t&, bool added, const bool* shown ) > m_trophy_draw;
 };
 
 // An entity's own property slot (its loaded ui_state_t), or null.
@@ -1092,7 +1095,12 @@ private:
             ui_touch_remove( *m_hooks.m_touch_device, &c.m_nav );
             m_hooks.m_touch_device->m_handlers.erase( &c.m_nav );
         };
-        h.draw_remove = [ this, index ] { trace( ui_trace_kind_t::hook, index, "draw_remove", 0u, ui_params_t( ), true ); };   // g 0x7590B8 +44 (HOOK)
+        h.draw_remove = [ this, index, &e, &c ]
+        {
+            trace( ui_trace_kind_t::hook, index, "draw_remove", 0u, ui_params_t( ), true );   // g 0x7590B8 +44 (HOOK)
+            if ( !c.m_boat && m_hooks.m_trophy_draw )
+                m_hooks.m_trophy_draw( e, false, &c.m_game.m_trophy );
+        };
         h.fire = [ this, &e ]( const std::string& plug, const ui_params_t& params )
         {
             if ( plug_index( e, plug.c_str( ) ) < 0 )
@@ -1101,8 +1109,18 @@ private:
             return true;
         };
         h.sound = [ this ]( const char* name ) { sound( name ); };
-        h.trophy = [ this ]( const char* model ) { trace( ui_trace_kind_t::hook, -1, std::string( "trophy:" ) + model, 0u, ui_params_t( ), true ); };
-        h.draw_add = [ this, index ] { trace( ui_trace_kind_t::hook, index, "draw_add", 0u, ui_params_t( ), true ); };   // g 0x7590B8 +40 (HOOK)
+        h.trophy = [ this, &e ]( const char* model )
+        {
+            trace( ui_trace_kind_t::hook, -1, std::string( "trophy:" ) + model, 0u, ui_params_t( ), true );
+            if ( m_hooks.m_trophy_model )
+                m_hooks.m_trophy_model( e, model );
+        };
+        h.draw_add = [ this, index, &e, &c ]
+        {
+            trace( ui_trace_kind_t::hook, index, "draw_add", 0u, ui_params_t( ), true );   // g 0x7590B8 +40 (HOOK)
+            if ( !c.m_boat && m_hooks.m_trophy_draw )
+                m_hooks.m_trophy_draw( e, true, &c.m_game.m_trophy );
+        };
         if ( c.m_boat )
             ui_dock_class( c.m_class, c.m_dock, c.m_env, p, h );
         else

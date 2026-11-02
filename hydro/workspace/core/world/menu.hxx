@@ -88,6 +88,13 @@ inline ui_bind_hooks_t c_world::menu_hooks( int id )
 {
     ui_bind_hooks_t hooks;
     hooks.m_root = &m_menu_util;
+    hooks.m_leaderboard = &m_menu_board;
+    hooks.m_trophy_model = [ this, id ]( const entity_t& e, const char* model ) { menu_trophy_model( id, e, model ); };
+    hooks.m_trophy_draw = [ this, id ]( const entity_t&, bool added, const bool* shown ) {
+        const auto it = m_menu_projects.find( id );
+        if ( it != m_menu_projects.end( ) )
+            it->second.trophy_shown = added ? shown : nullptr;
+    };
     hooks.m_broadcast_out = [ this ]( std::uint32_t hash, const ui_params_t& p ) {
         menu_poster( hash, p );
         menu_dock( hash, p );
@@ -252,6 +259,15 @@ inline void c_world::menu_bind( )
 {
     const race_session_dbs_t dbs = race_dbs( );
     m_menu_engine = front_end_engine_t{ };
+    // The leaderboard manager g 0x758FA8 with no online service: the read answers at once from the save (progress.hxx ui_progress_board_local).
+    m_menu_board = ui_mini_board_hooks_t{ };
+    m_menu_board.m_read = [ this ]( const std::string&, int, int ) { m_menu_board_row = ui_progress_board_local( m_cloud.data, m_menu_util, m_menu_board_score ); };
+    m_menu_board.m_status = [ ] { return 1; };
+    m_menu_board.m_count = [ this ] { return m_menu_board_row ? 1 : 0; };
+    m_menu_board.m_row = [ this ]( int, std::string& name, std::int32_t& score ) {
+        name = platform_gamer_tag( );
+        score = m_menu_board_score;
+    };
     m_menu_engine.m_fade = action_fade_t::created( );
     m_menu_engine.m_display = [ this ]( int& w, int& h ) { w = m_race.world.display_w; h = m_race.world.display_h; };
     m_menu_engine.m_load_project = [ this ]( const std::string& name ) -> int {
@@ -285,7 +301,9 @@ inline void c_world::menu_bind( )
         if ( m_ui_pass )
         {
             menu_project_t& p = m_menu_projects[ id ];
-            const ui_frame_inputs_t in = ui_screen_inputs( *p.binding, ui_screen_environment( ) );
+            const ui_screen_env_t screen = ui_screen_environment( );
+            ui_frame_inputs_t in = ui_screen_inputs( *p.binding, screen );
+            menu_board_frame( in, *p.binding, screen );
             ui_screen_frame( *p.root, m_ui_pass->m_impl, m_ui_pass->m_sort, alpha, 4, &in );
         }
 #endif

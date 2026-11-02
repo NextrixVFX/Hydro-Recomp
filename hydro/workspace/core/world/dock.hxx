@@ -210,3 +210,70 @@ inline void c_world::poster_reload( )
     m_poster_on = true;
     LOG_INFO( "front end: poster %s", name.text.c_str( ) );
 }
+
+// The matrix of 0x45F860 / 0x45F900: identity (0x410A40) x fromEuler( rotation ) (0x435640, 0x4078C0), then x the translation (0x410AB0, 0x4078C0).
+inline void ui_game_config_trophy_matrix( const float position[ 3 ], const float rotation[ 3 ], float out[ 16 ] )
+{
+    const float identity[ 16 ] = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f };
+    float translation[ 16 ], euler[ 16 ], m[ 16 ];
+    std::memcpy( translation, identity, 64 );
+    std::memcpy( translation + 12, position, 12 );
+    vu_matrix_from_euler( euler, rotation );
+    hull_multiply( identity, m, euler );
+    hull_multiply( m, out, translation );
+}
+
+// VuGameConfigEntity's trophy (slot 12 0x45EE20 picks the model of table 0x7357CC by the best placing, ui_game_config_changed): 0x520080 on the instance +0x304 (colour +0x31C 0xFFFFFFFF
+// from the ctor), the matrix 0x45F860 builds: identity x fromEuler( Trophy Rotation +0x2F4 ) x translation( Trophy Position +0x2E4 ) (0x410A40, 0x435640, 0x4078C0, 0x410AB0, 0x4078C0).
+inline void c_world::menu_trophy_model( int id, const entity_t& e, const char* model )
+{
+    const auto it = m_menu_projects.find( id );
+    if ( it == m_menu_projects.end( ) || !m_retail )
+        return;
+    menu_project_t& p = it->second;
+    p.trophy = gfx_static_model_t{ };
+    if ( const gfx_scene_view_t* v = m_retail->model( model ) )
+        gfx_scene_view_attach( p.trophy, *v );
+    p.trophy.m_colour = 0xFFFFFFFFu;
+    float position[ 3 ] = { }, rotation[ 3 ] = { };
+    if ( const ui_slot_t* s = ui_property_value( e, "Trophy Position" ) )
+        std::memcpy( position, s->m_bits, 12 );
+    if ( const ui_slot_t* s = ui_property_value( e, "Trophy Rotation" ) )
+        std::memcpy( rotation, s->m_bits, 12 );
+    ui_game_config_trophy_matrix( position, rotation, p.trophy_matrix );
+    LOG_INFO( "front end: trophy %s", model );
+}
+
+// 0x45F860 per added draw object: +0x324 clear draws nothing; the model's 0x520130 draws nothing with no scene. FLAGGED: its shadow half 0x45F900 is not wired (the front end has no model shadow hook).
+inline void c_world::menu_trophy_draw( gfx_sort_t& sort, const gfx_draw_params_t& p )
+{
+    for ( auto& project : m_menu_projects )
+        if ( project.second.trophy_shown && *project.second.trophy_shown )
+            project.second.trophy.draw( sort, project.second.trophy_matrix, p );
+}
+
+// The frame's m_board: 0x47DB40 over the bound entity, with the three fonts of its loaded names.
+inline void c_world::menu_board_frame( ui_frame_inputs_t& in, c_ui_binding& binding, const ui_screen_env_t& env )
+{
+    in.m_board = [ this, &binding, env, db = in.m_db ]( const entity_t& e, ui_gfx_sort_t& sort, const ui_font_draw_env_t& draw ) -> bool {
+        c_ui_mini_board* board = binding.mini_board( e );
+        if ( !board || !env.m_fontdb )
+            return false;
+        ui_mini_board_draw_t d;
+        const char* const names[ 3 ] = { "NameFont", "ScoreFont", "InfoFont" };
+        for ( int k = 0; k < 3; ++k )
+        {
+            const ui_slot_t* name = ui_property_value( e, names[ k ] );
+            std::string asset;
+            ui_font_params( *env.m_fontdb, name ? name->m_text : std::string( ), d.m_fonts[ k ].m_params, asset );
+            d.m_fonts[ k ].m_font = ui_screen_font( e, names[ k ], env );
+        }
+        d.m_sort = &sort;
+        d.m_env = &draw;
+        d.m_crop = *env.m_crop;
+        d.m_db = db;
+        d.m_string = env.m_string6;
+        board->draw( d );
+        return true;
+    };
+}

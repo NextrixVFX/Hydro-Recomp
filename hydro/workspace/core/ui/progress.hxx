@@ -4,6 +4,8 @@
 #include <workspace/core/ui/select.hxx>
 #include <workspace/core/ui/standings.hxx>
 
+#include <emmintrin.h>
+
 #include <cstdint>
 #include <string>
 
@@ -223,6 +225,38 @@ inline void ui_progress_add( value_t& document, const std::string& game, const s
     ui_json_set_int( json_member( record, "Place" ), place );
     json_set_float( json_member( record, "TotalTime" ), total );
     json_set_float( json_member( record, "BestLap" ), lap );
+}
+
+// The score the three games post (0x48ACC9, 0x48E20D, 0x490B08): the human's +0x4B4 x 1000 (0x6F7828), fistp (nearest, ties to even), negated.
+inline std::int32_t ui_progress_board_score( float total )
+{
+    return static_cast< std::int32_t >( 0u - static_cast< std::uint32_t >( _mm_cvtss_si32( _mm_set_ss( total * 1000.0f ) ) ) );
+}
+
+// OURS, not retail (the user's decision: no online service, so the mini leaderboard's one row is the local best): the leaderboard manager g 0x758FA8's read answered from the save.
+// Mode / Track / Course are what 0x47E2B0 keys on and the three posts name: Race and TimeTrial group "None", Slalom its course, the time the best of the mode's records
+// (slot 12 0x4B22A0, mode 0 as the record hook stores). "Ghost": retail posts no ghost score here, so the player's own ghost time (slot 31 0x4B3F90) - ANOTHER OF OUR CHOICES. False: no record.
+inline bool ui_progress_ghost_time( const value_t& document, const std::string& boat, float& time );
+inline bool ui_progress_board_local( const value_t& document, const value_t& root, std::int32_t& score )
+{
+    const value_t& config = member( root, "GameConfig" );
+    const std::string& mode = ui_json_text( member( config, "Mode" ) );
+    const std::string& track = ui_json_text( member( config, "Track" ) );
+    float total = k_ui_progress_flt_max, lap = total;
+    if ( mode == "Ghost" )
+    {
+        if ( !ui_progress_ghost_time( document, track, total ) )
+            return false;
+    }
+    else
+    {
+        std::int32_t place = 0;
+        const std::string group = mode == "Slalom" ? ui_json_text( member( config, "Course" ) ) : std::string( "None" );
+        if ( !ui_progress_best( document, mode, track, group, 0, place, total, lap ) || !( total < k_ui_progress_flt_max ) )
+            return false;
+    }
+    score = ui_progress_board_score( total );
+    return true;
 }
 
 // Slots 16 0x4B32C0, 17 0x4B3370, 18 0x4B3420: AllTime<game>Count summed over the three modes.

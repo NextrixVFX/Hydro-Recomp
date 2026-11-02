@@ -472,6 +472,8 @@ inline ui_screen_env_t c_world::ui_screen_environment( )
     env.m_string6 = [ this ]( const std::string& id ) { return string_db_get( m_string_db, id ); };
     env.m_string7 = env.m_string6;
     env.m_credits = [ this ] { return m_unlock.total; };   // 0x445F00's g 0x758FE8 vt+0x38
+    env.m_signin.m_signed_in = true;                       // 0x445DE0: the manager's +8; ours is always signed in as the one name (game/identity.hxx)
+    env.m_signin.m_name = platform_gamer_tag( );
     static value_t achievement_db;
     if ( achievement_db.tag == 0 )
     {
