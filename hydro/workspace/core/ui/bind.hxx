@@ -11,6 +11,7 @@
 #include <workspace/core/ui/ladder.hxx>
 #include <workspace/core/ui/screen.hxx>
 #include <workspace/core/ui/slider.hxx>
+#include <workspace/core/ui/standings.hxx>
 #include <workspace/core/ui/ticker.hxx>
 #include <workspace/core/ui/wired.hxx>
 #include <workspace/core/ui/wiring.hxx>
@@ -98,6 +99,7 @@ inline constexpr std::uint32_t k_ui_if_vtable = 0x754CD4u;
 inline constexpr std::uint32_t k_ui_info_vtable = 0x73BC5Cu;
 inline constexpr std::uint32_t k_ui_page_vtable = 0x6F72C4u;
 inline constexpr std::uint32_t k_ui_results_vtable = 0x73DA38u;
+inline constexpr std::uint32_t k_ui_champ_vtable = 0x73C998u;
 inline constexpr std::uint32_t k_ui_remap_vtable = 0x73D4F4u;
 inline constexpr std::uint32_t k_ui_throttle_remap_vtable = 0x73D45Cu;
 inline constexpr std::uint32_t k_ui_set_info_vtable = 0x73E818u;
@@ -367,10 +369,14 @@ struct ui_bound_t
     bool m_remap_ticking = false;                           // "Decision" 0x4623D0 registered (slot 6 0x461200) and not yet unregistered (slot 7 0x461290)
     // batch 29: VuRaceResultsTableEntity (results.hxx): the frame's m_results reads this
     std::unique_ptr< ui_results_table_t > m_results;
+    // batch 30: VuChampionshipEntity (standings.hxx): the frame's m_champ reads this
+    std::unique_ptr< ui_champ_state_t > m_champ;
 };
 
 struct ui_bind_hooks_t
 {
+    // batch 30: what VuChampionshipEntity's slots reach (standings.hxx); null: its slots 6 / 7 stay counted in m_unknown_slots.
+    const ui_champ_env_t* m_champ = nullptr;
     // HOOK: the input manager g 0x759038 slot 9: (pad, name) -> down.
     std::function< bool( int, const char* ) > m_input;
     // HOOK: an input plug not recreated - its VuRetVal (default { 0, 0 }).
@@ -1074,6 +1080,23 @@ private:
         }
         else if ( b.m_vtable == k_ui_results_vtable )
             b.m_results = std::make_unique< ui_results_table_t >( ui_results_table_of( e ) );
+        else if ( b.m_vtable == k_ui_champ_vtable )
+        {
+            // The ctor 0x450070: OnUITick 0x451560; inputs IsBusy 0x451660, Exit 0x451690, PlayNext 0x451720 (run_input).
+            b.m_champ = std::make_unique< ui_champ_state_t >( );
+            ui_bound_t* self = &b;
+            add( b, "OnUITick", 0x451560u, [ this, self ]( const ui_params_t& p )
+            {
+                std::uint32_t type = 0xFFFFFFFFu;
+                float dt = 0.0f;
+                if ( p.m_size > 0 )
+                    std::memcpy( &type, p.m_bytes, 4 );
+                if ( type == 2u )
+                    std::memcpy( &dt, p.m_bytes + 4, 4 );
+                if ( m_hooks.m_champ )
+                    ui_champ_tick( *self->m_champ, *m_hooks.m_champ, dt );
+            } );
+        }
         else if ( b.m_vtable == k_ui_page_vtable )
         {
             // The ctor 0x62CA50: OnUITick 0x62DA30; slot 2's load 0x62E3B0.
@@ -1354,6 +1377,10 @@ private:
         }
         if ( vt == k_ui_page_vtable )
             for ( const char* name : { "StartScroll", "StopScroll", "ResetScroll" } )
+                if ( std::strcmp( plug, name ) == 0 )
+                    return true;
+        if ( vt == k_ui_champ_vtable && m_hooks.m_champ )
+            for ( const char* name : { "IsBusy", "Exit", "PlayNext" } )
                 if ( std::strcmp( plug, name ) == 0 )
                     return true;
         if ( ( vt == k_ui_remap_vtable || vt == k_ui_throttle_remap_vtable ) && ( std::strcmp( plug, "SetFocus" ) == 0 || std::strcmp( plug, "Hide" ) == 0 ) )
@@ -1666,6 +1693,8 @@ private:
             known = true;   // batch 29: 0x62D9A0 / 0x62DA10, 0x461200 / 0x461290
         else if ( b && b->m_results && init && m_hooks.m_root )
             known = true;   // batch 29: 0x469B10
+        else if ( b && b->m_champ && m_hooks.m_champ )
+            known = true;   // batch 30: 0x451370 / 0x451540
         else if ( !init && ( vt == k_ui_game_config_vtable || ( vt == k_ui_boat_config_vtable && m_hooks.m_root ) ) && b && b->m_config )
             known = true;   // batch 26: slot 7 0x45D080 / 0x44D090 (slot 6 stays config_setup( )'s)
         trace( ui_trace_kind_t::game, index, std::string( ), address, ui_params_t( ), known );
@@ -1674,7 +1703,14 @@ private:
             ++m_unknown_slots;
             return;
         }
-        if ( b && b->m_results )
+        if ( b && b->m_champ )
+        {
+            if ( init )
+                ui_champ_load( *b->m_champ, *m_hooks.m_champ );
+            else
+                ui_champ_release( *b->m_champ, *m_hooks.m_champ );
+        }
+        else if ( b && b->m_results )
             ui_results_initialize( *b->m_results, *m_hooks.m_root, m_hooks.m_dev_game_data );
         else if ( b && b->m_page )
             page_slot( *b->m_page, init );
@@ -1803,6 +1839,12 @@ public:
         focused = button && button->m_focused ? 1u : 0u;
         press = button ? button->m_press : 0u;
     }
+    // Batch 30: a bound championship's state (the frame's m_champ draws it), or null.
+    ui_champ_state_t* champ( const entity_t& e ) const
+    {
+        const int index = index_of( e );
+        return index >= 0 ? m_bound[ static_cast< std::size_t >( index ) ]->m_champ.get( ) : nullptr;
+    }
     // Batch 29: a bound race results table (the frame's m_results draws it), or null.
     ui_results_table_t* results( const entity_t& e )
     {
@@ -1851,6 +1893,7 @@ public:
     }
     // VuEventManager_broadcast 0x505690 from outside (the race's events).
     void post( std::uint32_t hash, const ui_params_t& p ) { broadcast( hash, p ); }
+    ui_ret_t input( entity_t& owner, const char* plug, const ui_params_t& p ) { return run_input( owner, plug, p ); }
     // An output plug fired from outside (the world's VuMultiDelayEntity outputs).
     ui_ret_t fire_plug( entity_t& owner, const char* plug, const ui_params_t& p ) { return fire_named( owner, plug, p ); }
     int bound_index( const entity_t& e ) const { return index_of( e ); }
@@ -1884,6 +1927,21 @@ private:
     {
         ui_ret_t out;
         const std::uint32_t vt = owner.m_ctor ? owner.m_ctor->m_vtable : 0u;
+        if ( vt == k_ui_champ_vtable )
+        {
+            ui_bound_t& b = *m_bound[ static_cast< std::size_t >( index_of( owner ) ) ];
+            if ( std::strcmp( plug, "IsBusy" ) == 0 )
+            {
+                out.m_words[ 0 ] = 3u;   // 0x451660: a VuRetVal bool: +0x294 set
+                out.m_words[ 1 ] = b.m_champ->m_award ? 1u : 0u;
+                return out;
+            }
+            if ( std::strcmp( plug, "Exit" ) == 0 )
+                ui_champ_next( *b.m_champ, *m_hooks.m_champ );
+            else
+                ui_champ_start( *b.m_champ, *m_hooks.m_champ );
+            return out;   // VuRetVal 0
+        }
         if ( vt == k_ui_page_vtable )
         {
             // 0x62E0A0 / 0x62E0C0 / 0x62E0E0: VuRetVal 0

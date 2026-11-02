@@ -71,7 +71,8 @@ inline ui_remap_t ui_remap_of( const entity_t& e, const value_t* fontdb )
     return r;
 }
 
-inline ui_champ_t ui_champ_of( const entity_t& e, const value_t* fontdb )
+// `font_asset`: FontDB's "FontAsset" -> the asset's +88 (null: the fonts stay 0, as before).
+inline ui_champ_t ui_champ_of( const entity_t& e, const value_t* fontdb, const std::function< std::uint32_t( const std::string& ) >* font_asset = nullptr )
 {
     ui_champ_t c;
     ui_results_table_t& t = c.m_table;
@@ -92,6 +93,8 @@ inline ui_champ_t ui_champ_of( const entity_t& e, const value_t* fontdb )
         std::string asset;
         if ( fontdb )
             ui_font_params( *fontdb, s ? s->m_text : std::string( ), fonts[ k ]->m_params, asset );
+        if ( font_asset && *font_asset )
+            fonts[ k ]->m_font = ( *font_asset )( asset );
     }
     ui_frame_take( e, "Width", &t.m_width, 4 );
     ui_frame_take( e, "VerticalSpacing", &t.m_spacing, 4 );

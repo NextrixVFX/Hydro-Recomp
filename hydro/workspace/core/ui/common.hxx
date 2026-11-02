@@ -8,6 +8,7 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 // VuCommonScreen (vtable 0x73F588, 0x10 bytes: +4 an event map 0x515800, +8 0, +0xC
 // the VuProject of 0x4B4360, its +0xC the root entity), the object VuGame's Results
@@ -99,6 +100,8 @@ private:
     bool m_initialized;
 };
 
+struct ui_game_award_t;   // award.hxx: VuAwardScreen with its project and binding
+
 // What the world needs for vugame_screen_hooks_t's Results path (world/rules.hxx):
 //   results_open        -> ui_game_screens_t::results_open
 //   screen( 0, verb, dt ) -> ui_game_screens_t::screen
@@ -115,6 +118,12 @@ struct ui_game_screens_t
     std::unique_ptr< entity_t > m_root;
     std::unique_ptr< c_ui_binding > m_binding;
     std::unique_ptr< c_ui_common_screen > m_results;
+    std::shared_ptr< ui_game_award_t > m_award;   // VuGame +0x88, VuChampionshipEntity +0x294 (shared_ptr: the type is award.hxx's)
+
+    // award.hxx: vugame_award_hooks_t::award_open / the award's screen( 1, verb, dt ) / award_done, and the championship's.
+    bool award_open( const char* project, std::int32_t tier, const std::string& boat_class, std::int32_t value, const std::vector< std::string >& names );
+    void award_screen( int verb, float dt );
+    bool award_done( ) const;
 
     // Results' enter 0x484110: new, 0x4B4360 on the project, slot 1. True: +0x84 set (the object always exists in retail
     // - a project that does not load leaves its +0xC null and every slot empty).

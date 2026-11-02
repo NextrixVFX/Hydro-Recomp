@@ -20,8 +20,7 @@
 // and ui_game_screens_t::m_frame is the natural place for it (common.hxx).
 //
 // What stays out, each an m_* the caller may set after the call: m_info (the ticker), m_config / m_combo (the selector runtime),
-// m_stat, m_bar, m_difficulty, m_message_box, m_board / m_leaderboard (their fonts and the platform leaderboard rows), m_champ (the
-// standings have no owner until 0x451370's load).
+// m_stat, m_bar, m_difficulty, m_message_box, m_board / m_leaderboard (their fonts and the platform leaderboard rows).
 struct ui_screen_env_t
 {
     ui_font_draw_env_t m_draw;                                                     // the materials
@@ -38,6 +37,7 @@ struct ui_screen_env_t
     ui_page_env_t m_page_env;                                                      // m_draw is replaced by each leaf's
     std::function< ui_remap_inputs_t( const entity_t& ) > m_remap;                 // a row's textures and fonts
     const value_t* m_root = nullptr;                                               // gameutil +0x50 (GameResults)
+    const ui_champ_env_t* m_champ = nullptr;                                       // the championship's (m_boat_db, the award's draw)
 };
 
 // A table's fonts from FontDB: ui_font_params on each column's VuUIFont name (verify_ui_race_results compares the same path with
@@ -90,6 +90,22 @@ inline ui_frame_inputs_t ui_screen_inputs( c_ui_binding& binding, ui_screen_env_
         if ( !table || !env.m_root )
             return false;
         ui_results_draw( sort, draw, *table, ui_results_inputs_of( e, env ), *env.m_root );
+        return true;
+    };
+    // 0x451CA0 over the state 0x451370 built; with +0x294 set its end runs the award's vt+0x10.
+    in.m_champ = [ b, env ]( const entity_t& e, ui_gfx_sort_t& sort, const ui_font_draw_env_t& draw, float )
+    {
+        ui_champ_state_t* state = b->champ( e );
+        if ( !state || !env.m_champ )
+            return false;
+        ui_champ_t c = ui_champ_of( e, env.m_fontdb, &env.m_font_asset );
+        ui_champ_inputs_t inputs;
+        inputs.m_rows = &state->m_rows;
+        inputs.m_boatdb = env.m_champ->m_boat_db;
+        inputs.m_string = env.m_string7;
+        ui_champ_draw( sort, draw, c, inputs );
+        if ( state->m_award && env.m_champ->m_award_draw )
+            env.m_champ->m_award_draw( );
         return true;
     };
     return in;

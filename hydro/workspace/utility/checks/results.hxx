@@ -5,6 +5,11 @@
 #include <workspace/core/ui/chooser.hxx>
 #include <workspace/core/ui/ladder.hxx>
 #include <workspace/core/ui/results.hxx>
+#include <workspace/core/ui/standings.hxx>
+#include <workspace/core/ui/typeset.hxx>
+#include <workspace/core/ui/savefile.hxx>
+#include <workspace/core/ui/progress.hxx>
+#include <workspace/core/assets/archive.hxx>
 
 #include <cstdio>
 #include <cstdlib>
@@ -1601,6 +1606,515 @@ inline bool verify_ui_button_touch( )
     return failed == 0;
 }
 
+// FNV-1a 64 of a text (the golden holds the dumps' hashes: the documents are large).
+inline std::uint64_t ui_chl_hash( const std::string& text )
+{
+    std::uint64_t h = 0xCBF29CE484222325ull;
+    for ( const char c : text )
+        h = ( h ^ static_cast< unsigned char >( c ) ) * 0x100000001B3ull;
+    return h;
+}
+
+inline value_t ui_chl_document( int index )
+{
+    const unsigned char* raw = reinterpret_cast< const unsigned char* >( g_golden_chl_words + g_golden_chl_at[ index ][ 0 ] );
+    return c_reader( std::vector< std::uint8_t >( raw, raw + g_golden_chl_at[ index ][ 1 ] ) ).parse( );
+}
+
+inline std::string ui_chl_hex( const std::uint8_t* bytes, int size )
+{
+    std::string out;
+    char at[ 4 ];
+    for ( int i = 0; i < size; ++i )
+    {
+        std::snprintf( at, sizeof( at ), "%02x", bytes[ i ] );
+        out += at;
+    }
+    return out;
+}
+
+// core/ui/standings.hxx against retail's VuChampionshipEntity (oracle case championship_load: 0x451370 0x451540 0x451560
+// 0x451660 0x451690 0x451720 and everything under them live on the real BoatDB / ChampDB; MSVCR110's own qsort): per op the hooks
+// in order with their params, the hash of the whole document, the standings and the game-data root, VuRandom's 34 words, +0x294.
+inline bool verify_ui_championship_load( )
+{
+    const value_t boat_db = ui_chl_document( 0 );
+    const value_t champ_db = ui_chl_document( 1 );
+    int failed = 0, ops = 0, ties = 0;
+    for ( std::size_t k = 0; k < g_golden_chl_runs_count; ++k )
+    {
+        const golden_chl_run_t& run = g_golden_chl_runs[ k ];
+        value_t root = ui_chl_document( run.m_root );
+        const value_t saved = run.m_load >= 0 ? ui_chl_document( run.m_load ) : value_t{ };
+        fleet_random_t rng;
+        const auto put_rng = [ & ]( const char* hex )
+        {
+            std::uint8_t bytes[ 136 ];
+            for ( int i = 0; i < 136; ++i )
+                bytes[ i ] = static_cast< std::uint8_t >( std::strtoul( std::string( hex + 2 * i, 2 ).c_str( ), nullptr, 16 ) );
+            std::memcpy( &rng.seed, bytes, 4 );
+            std::memcpy( &rng.last, bytes + 4, 4 );
+            std::memcpy( rng.table, bytes + 8, 128 );
+        };
+        const auto get_rng = [ & ]
+        {
+            std::uint8_t bytes[ 136 ];
+            std::memcpy( bytes, &rng.seed, 4 );
+            std::memcpy( bytes + 4, &rng.last, 4 );
+            std::memcpy( bytes + 8, rng.table, 128 );
+            return ui_chl_hex( bytes, 136 );
+        };
+        put_rng( run.m_rng );
+        std::string log;
+        const auto add = [ &log ]( const std::string& line )
+        {
+            if ( !log.empty( ) )
+                log += '\n';
+            log += line;
+        };
+        int done = 0;
+        ui_champ_env_t env;
+        env.m_root = &root;
+        env.m_boat_db = &boat_db;
+        env.m_champ_db = &champ_db;
+        env.m_random = &rng;
+        env.m_player_name = "Player One";
+        env.m_string = [ & ]( const char* id ) { add( std::string( "string:" ) + id ); return std::string( "S" ) + id; };
+        env.m_broadcast = [ & ]( const char* e, const ui_params_t& p ) { add( std::string( "event:" ) + e + ":" + ui_chl_hex( p.m_bytes, p.m_size ) ); };
+        env.m_plug = [ & ]( const char* e, const ui_params_t& p ) { add( std::string( "plug:" ) + e + ":" + ui_chl_hex( p.m_bytes, p.m_size ) ); };
+        env.m_load = [ & ]( value_t& data ) { add( "load" ); if ( run.m_load >= 0 ) data = saved; };
+        env.m_save = [ & ]( const value_t& data )
+        {
+            std::string dump;
+            vujb_dump( data, dump );
+            char at[ 32 ];
+            std::snprintf( at, sizeof( at ), "%016llx", static_cast< unsigned long long >( ui_chl_hash( dump ) ) );
+            add( std::string( "save:" ) + at );
+        };
+        env.m_commit = [ & ] { add( "commit" ); };
+        env.m_result = [ & ]( const std::string& n, std::int32_t place ) { add( "result:" + n + ":" + std::to_string( place ) ); };
+        env.m_value = [ & ]( const std::string& n, std::int32_t place ) { add( "value:" + n + ":" + std::to_string( place ) ); return run.m_value; };
+        env.m_names = [ & ]( std::int32_t value, std::vector< std::string >& names )
+        {
+            add( "names:" + std::to_string( value ) );
+            std::string held = run.m_names;
+            for ( std::size_t at = 0; !held.empty( ); )
+            {
+                at = held.find( '|' );
+                names.push_back( held.substr( 0, at ) );
+                held = at == std::string::npos ? std::string( ) : held.substr( at + 1 );
+            }
+            return run.m_answer != 0;
+        };
+        env.m_award_open = [ & ]( const char* project, std::int32_t place, const std::string& cls, std::int32_t value, const std::vector< std::string >& names )
+        {
+            add( std::string( "award new:" ) + project );
+            std::string joined;
+            for ( std::size_t i = 0; i < names.size( ); ++i )
+                joined += ( i ? "|" : "" ) + names[ i ];
+            add( "award start:" + std::to_string( place ) + ":" + cls + ":" + std::to_string( value ) + ":" + joined );
+        };
+        env.m_award_tick = [ & ]( float dt )
+        {
+            char at[ 32 ];
+            std::uint32_t bits;
+            std::memcpy( &bits, &dt, 4 );
+            std::snprintf( at, sizeof( at ), "award tick:%08x", bits );
+            add( at );
+        };
+        env.m_award_done = [ & ] { add( "award done" ); return done != 0; };
+        env.m_award_exit = [ & ] { add( "award exit" ); add( "award delete:1" ); };
+        ui_champ_state_t s;
+        for ( int t = 0; t < run.m_steps; ++t )
+        {
+            const golden_chl_step_t& g = g_golden_chl_steps[ run.m_first + t ];
+            log.clear( );
+            std::string arg;
+            const std::string op = g.m_op;
+            if ( op == "ai" )
+                ui_json_child( root, "GameResults" ) = ui_chl_document( g.m_doc );
+            else if ( op == "enter" )
+                ui_champ_load( s, env );
+            else if ( op == "leave" )
+                ui_champ_release( s, env );
+            else if ( op == "next" )
+                ui_champ_next( s, env );
+            else if ( op == "query" )
+                arg = std::string( "3:" ) + ( s.m_award ? "1" : "0" );
+            else if ( op == "start" )
+                ui_champ_start( s, env );
+            else if ( op == "tick" )
+            {
+                std::uint32_t bits = 0;
+                int paused = 0;
+                sscanf_s( g.m_arg, "%x:%d:%d", &bits, &paused, &done );
+                float dt;
+                std::memcpy( &dt, &bits, 4 );
+                env.m_paused = paused != 0;
+                ui_champ_tick( s, env, dt );
+                arg = g.m_arg;
+            }
+            std::string data, rows, whole;
+            vujb_dump( s.m_data, data );
+            if ( s.m_rows.tag == 5 )
+                vujb_dump( s.m_rows, rows );
+            else
+                rows = "5:0[]";
+            vujb_dump( root, whole );
+            if ( op == "tick" || op == "query" )
+                arg = arg == g.m_arg ? arg : "";
+            const bool same = log == g.m_log && ui_chl_hash( data ) == g.m_data && ui_chl_hash( rows ) == g.m_rows && ui_chl_hash( whole ) == g.m_root && get_rng( ) == g.m_rng &&
+                              ( s.m_award ? 1 : 0 ) == g.m_award && ( !g.m_arg || !*g.m_arg || arg == g.m_arg );
+            ++ops;
+            if ( op == "enter" )
+                for ( std::size_t i = 1; i < s.m_rows.list.size( ); ++i )
+                    ties += ui_champ_compare( s.m_rows.list[ i - 1 ], s.m_rows.list[ i ] ) == 0 ? 1 : 0;
+            if ( !same && ++failed <= 6 )
+                LOG_ERROR( "ui championship: run %s step %d %s differs (log %d data %d rows %d root %d rng %d award %d)\n  ours   %s\n  retail %s", run.m_label, t, g.m_op, log == g.m_log, ui_chl_hash( data ) == g.m_data,
+                           ui_chl_hash( rows ) == g.m_rows, ui_chl_hash( whole ) == g.m_root, get_rng( ) == g.m_rng, ( s.m_award ? 1 : 0 ) == g.m_award, log.substr( 0, 400 ).c_str( ), std::string( g.m_log ).substr( 0, 400 ).c_str( ) );
+        }
+    }
+    if ( failed == 0 )
+        LOG_SUCCESS( "ui_champ_load / _release / _tick / _next / _start match retail's VuChampionshipEntity 0x451370 0x451540 0x451560 0x451690 0x451720 (0x452E00 0x453590 0x453F40 0x4540D0 0x454EA0 0x452890 0x454410 0x454920 0x454E30 "
+                     "0x455210 0x455360 0x455490) on %d runs, %d ops: hooks in order, document, standings (%d equal-Points neighbours, MSVCR110's qsort as the reference), root, VuRandom",
+            static_cast< int >( g_golden_chl_runs_count ), ops, ties );
+    else
+        LOG_ERROR( "ui championship: %d ops differ from retail", failed );
+    return failed == 0;
+}
+
+inline std::string package_check_pack( );   // checks/package.hxx
+
+inline std::vector< std::uint8_t > ui_fnd_bytes( const char* hex )
+{
+    std::vector< std::uint8_t > out;
+    for ( const char* p = hex; p[ 0 ] && p[ 1 ]; p += 2 )
+        out.push_back( static_cast< std::uint8_t >( std::strtoul( std::string( p, 2 ).c_str( ), nullptr, 16 ) ) );
+    return out;
+}
+
+// core/ui/typeset.hxx against retail's VuFont (oracle case font_draw): VuFontAsset's load 0x5CAE60 on the real UI / Dev / Title fonts
+// (the three metrics, the glyph records' hash, the bytes consumed, the code map per code, the atlas's mip chain through the 0x618890
+// uploads, the image names), the measure 0x5370F0 (both output floats) and the draw 0x5375E0 / 0x537600 (every device and constant
+// call in order, the vertices' hash) on wide records, and 0x618890 on hand-built rectangles.
+inline bool verify_ui_font_draw( )
+{
+    int failed = 0, quads = 0, images = 0;
+    std::vector< ui_font_t > fonts( g_golden_fnd_fonts_count );
+    const std::string pack = package_check_pack( );
+    c_archive archive;
+    if ( pack.empty( ) || !archive.open( pack.c_str( ) ) )
+    {
+        LOG_ERROR( "ui font: no Base.apf" );
+        return false;
+    }
+    for ( std::size_t k = 0; k < g_golden_fnd_fonts_count; ++k )
+    {
+        const golden_fnd_font_t& g = g_golden_fnd_fonts[ k ];
+        std::vector< std::uint8_t > bytes;
+        ui_font_t& f = fonts[ k ];
+        bool same = archive.read( g.m_name, bytes ) && ui_font_load( bytes.data( ), bytes.size( ), f );
+        std::uint32_t metrics[ 3 ];
+        std::memcpy( metrics, &f.m_ascent, 4 );
+        std::memcpy( metrics + 1, &f.m_descent, 4 );
+        std::memcpy( metrics + 2, &f.m_scale, 4 );
+        same = same && std::memcmp( metrics, g.m_metrics, 12 ) == 0 && static_cast< int >( f.m_glyphs.size( ) ) == g.m_count && f.m_width == g.m_width && f.m_height == g.m_height;
+        same = same && g.m_count > 0 && ui_chl_hash( std::string( reinterpret_cast< const char* >( bytes.data( ) ) + 16, static_cast< std::size_t >( g.m_count ) * 0x2C ) ) == g.m_glyphs;
+        for ( int c = 0; c < g.m_codes; ++c )
+        {
+            const golden_fnd_code_t& w = g_golden_fnd_codes[ g.m_first_code + c ];
+            const auto at = f.m_map.m_index.find( w.m_code );
+            same = same && ( at == f.m_map.m_index.end( ) ? 0xFFFFFFFFu : at->second ) == w.m_index;
+        }
+        std::vector< std::uint8_t > level = f.m_atlas;
+        int width = f.m_width, height = f.m_height;
+        for ( int m = 0; m < g.m_mips; ++m )
+        {
+            const golden_fnd_mip_t& w = g_golden_fnd_mips[ g.m_first_mip + m ];
+            same = same && static_cast< int >( level.size( ) ) == w.m_size && ui_chl_hash( std::string( reinterpret_cast< const char* >( level.data( ) ), level.size( ) ) ) == w.m_hash;
+            const int nw = width >> 1 > 1 ? width >> 1 : 1, nh = height >> 1 > 1 ? height >> 1 : 1;
+            std::vector< std::uint8_t > next( static_cast< std::size_t >( nw ) * nh );
+            ui_font_mip( width, height, level.data( ), next.data( ) );
+            level = next;
+            width = nw;
+            height = nh;
+        }
+        same = same && static_cast< int >( f.m_images.size( ) ) == g.m_images;
+        f.m_texture = g.m_texture;
+        for ( int m = 0; same && m < g.m_images; ++m )
+        {
+            same = same && f.m_images[ static_cast< std::size_t >( m ) ] == g_golden_fnd_images[ g.m_first_image + m ].m_name;
+            f.m_image_textures[ static_cast< std::size_t >( m ) ] = g_golden_fnd_images[ g.m_first_image + m ].m_texture;
+        }
+        if ( !same && ++failed <= 6 )
+            LOG_ERROR( "ui font: the load of %s differs", g.m_name );
+    }
+    for ( std::size_t k = 0; k < g_golden_fnd_boxes_count; ++k )
+    {
+        const golden_fnd_box_t& g = g_golden_fnd_boxes[ k ];
+        const std::vector< std::uint8_t > src = ui_fnd_bytes( g.m_src ), want = ui_fnd_bytes( g.m_dst );
+        std::vector< std::uint8_t > dst( want.size( ) );
+        ui_font_mip( g.m_width, g.m_height, src.data( ), dst.data( ) );
+        if ( dst != want && ++failed <= 6 )
+            LOG_ERROR( "ui font: mip %d x %d differs", g.m_width, g.m_height );
+    }
+    for ( std::size_t k = 0; k < g_golden_fnd_measures_count; ++k )
+    {
+        const golden_fnd_measure_t& g = g_golden_fnd_measures[ k ];
+        const std::vector< std::uint8_t > text = ui_fnd_bytes( g.m_text ), params = ui_fnd_bytes( g.m_params );
+        std::string held( text.begin( ), text.end( ) );
+        float width;
+        std::memcpy( &width, &g.m_width, 4 );
+        const float screen[ 2 ] = { static_cast< float >( g.m_screen[ 0 ] ), static_cast< float >( g.m_screen[ 1 ] ) };
+        float out[ 2 ];
+        ui_font_measure( fonts[ static_cast< std::size_t >( g.m_font ) ], held.c_str( ), params.data( ), width, g.m_flags, screen, out );
+        float aspect;
+        std::memcpy( &aspect, &g.m_aspect, 4 );
+        const float line = ui_font_text_width( fonts[ static_cast< std::size_t >( g.m_font ) ], held.c_str( ), params.data( ), aspect );
+        if ( std::memcmp( &line, &g.m_line, 4 ) != 0 && ++failed <= 6 )
+            LOG_ERROR( "ui font: width %d (%s) differs: %g", static_cast< int >( k ), held.c_str( ), line );
+        if ( std::memcmp( out, g.m_out, 8 ) != 0 && ++failed <= 6 )
+            LOG_ERROR( "ui font: measure %d (%s) differs: %08x %08x want %08x %08x", static_cast< int >( k ), held.c_str( ), *reinterpret_cast< unsigned* >( out ), *reinterpret_cast< unsigned* >( out + 1 ), g.m_out[ 0 ], g.m_out[ 1 ] );
+    }
+    ui_font_renderer_t R;
+    for ( std::size_t k = 0; k < g_golden_fnd_draws_count; ++k )
+    {
+        const golden_fnd_draw_t& g = g_golden_fnd_draws[ k ];
+        const std::vector< std::uint8_t > record = ui_fnd_bytes( g.m_record );
+        for ( std::uint32_t s = 0; s < 3; ++s )
+        {
+            R.m_sets[ s ].m_program = g_golden_fnd_programs[ s ];
+            R.m_sets[ s ].m_matrix = 0x100u + s;
+            R.m_sets[ s ].m_range = 0x200u + s;
+            R.m_sets[ s ].m_outline = g.m_variant ? 0u : 0x300u + s;
+            R.m_sets[ s ].m_colour = g.m_variant ? 0u : 0x400u + s;
+        }
+        std::string log;
+        const auto add = [ &log ]( const std::string& line )
+        {
+            if ( !log.empty( ) )
+                log += '\n';
+            log += line;
+        };
+        const auto id = [ ]( std::uint32_t v ) { char at[ 16 ]; std::snprintf( at, sizeof( at ), "%08x", v ); return std::string( at ); };
+        ui_font_ops_t ops;
+        ops.m_texture = [ & ]( std::uint32_t t ) { add( "tex:" + id( t ) ); };
+        ops.m_scissor = [ & ]( const float r[ 4 ] ) { add( "scissor:" + ui_chl_hex( reinterpret_cast< const std::uint8_t* >( r ), 16 ) ); };
+        ops.m_scissor_on = [ & ]( bool on ) { add( on ? "on:1" : "on:0" ); };
+        ops.m_size = [ & ]( std::int32_t& a, std::int32_t& b ) { a = g.m_screen[ 0 ]; b = g.m_screen[ 1 ]; };
+        ops.m_program = [ & ]( std::uint32_t p ) { add( "program:" + id( p ) ); };
+        ops.m_vec2 = [ & ]( std::uint32_t p, std::uint32_t c, const float v[ 2 ] ) { add( "vec2:" + id( p ) + ":" + id( c ) + ":" + ui_chl_hex( reinterpret_cast< const std::uint8_t* >( v ), 8 ) ); };
+        ops.m_colour = [ & ]( std::uint32_t p, std::uint32_t c, const std::uint8_t* v ) { add( "colour:" + id( p ) + ":" + id( c ) + ":" + ui_chl_hex( v, 16 ) ); };
+        ops.m_matrix = [ & ]( std::uint32_t p, std::uint32_t c, const float m[ 16 ] ) { add( "matrix:" + id( p ) + ":" + id( c ) + ":" + ui_chl_hex( reinterpret_cast< const std::uint8_t* >( m ), 64 ) ); };
+        ops.m_draw = [ & ]( int count, const std::uint8_t* v )
+        {
+            char at[ 96 ];
+            std::snprintf( at, sizeof( at ), "draw:3:0:%d:%d:24:%016llx", 4 * count, 2 * count,
+                           static_cast< unsigned long long >( ui_chl_hash( std::string( reinterpret_cast< const char* >( v ), static_cast< std::size_t >( count ) * 0x60 ) ) ) );
+            add( at );
+            quads += count;
+        };
+        const std::size_t before = R.m_images.size( );
+        ui_font_submit( R, fonts[ static_cast< std::size_t >( g.m_font ) ], record.data( ), ops );
+        images += static_cast< int >( before );
+        if ( log != g.m_log && ++failed <= 6 )
+            LOG_ERROR( "ui font: draw %d differs\n  ours   %s\n  retail %s", static_cast< int >( k ), log.substr( 0, 600 ).c_str( ), std::string( g.m_log ).substr( 0, 600 ).c_str( ) );
+    }
+    if ( failed == 0 )
+        LOG_SUCCESS( "ui_font_load / _mip / _measure / _submit match retail's VuFontAsset load 0x5CAE60 (0x619310 0x6197B0 0x618890), 0x5370F0, 0x5373D0 and 0x5375E0 / 0x537600 (0x537AD0 0x537D60 0x537FA0 0x5380B0 0x538110 0x538680 0x538700): %d fonts, %d measures, "
+                     "%d draws (%d quads drawn: every device and constant call, the vertices)",
+                     static_cast< int >( g_golden_fnd_fonts_count ), static_cast< int >( g_golden_fnd_measures_count ), static_cast< int >( g_golden_fnd_draws_count ), quads );
+    else
+        LOG_ERROR( "ui font: %d differ from retail", failed );
+    return failed == 0;
+}
+
+// core/ui/savefile.hxx against retail's save (oracle case save_file): the VUJB writer's size and every byte (hash, the reference is
+// retail's file inflated), the encoded file's bytes with the stored-deflate SUBSTITUTION (the case had retail's 0x4AC930 load exactly
+// those bytes and dumped the container), ui_save_decode on retail's own files (zlib 1.2.7's output) and on eight refusals, and
+// c_save_manager's flow against VuCloudSaveManager's. Files go to a temp folder through c_save_files::set_root, never %APPDATA%.
+inline bool verify_ui_save_file( )
+{
+    int failed = 0, bytes_total = 0;
+    const auto dump_hash = [ ]( const value_t& v ) { std::string d; vujb_dump( v, d ); return ui_chl_hash( d ); };
+    for ( std::size_t k = 0; k < g_golden_svf_docs_count; ++k )
+    {
+        const golden_svf_doc_t& g = g_golden_svf_docs[ k ];
+        value_t doc;
+        if ( g.m_blob[ 0 ] )
+            doc = c_reader( ui_fnd_bytes( g.m_blob ) ).parse( );
+        else
+        {
+            ui_json_set_string( ui_json_child( doc, "blob" ), std::string( 70000, 'x' ).c_str( ) );
+            ui_json_set_string( ui_json_child( doc, "more" ), std::string( 66000, 'y' ).c_str( ) );
+        }
+        std::vector< std::uint8_t > raw = { 'V', 'U', 'J', 'B', 0, 0, 0, 1 };
+        ui_vujb_write( raw, doc );
+        const std::string text( raw.begin( ), raw.end( ) );
+        bool same = static_cast< int >( ui_vujb_size( doc ) ) == g.m_size && static_cast< int >( raw.size( ) ) == g.m_raw_size && ui_chl_hash( text ) == g.m_raw;
+        const std::vector< std::uint8_t > file = ui_save_encode( doc );
+        same = same && static_cast< int >( file.size( ) ) == g.m_stored_size && ui_chl_hash( std::string( file.begin( ), file.end( ) ) ) == g.m_stored;
+        value_t back;
+        same = same && ui_save_decode( file, back ) == ( g.m_stored_ok != 0 ) && dump_hash( back ) == g.m_stored_dump;
+        if ( g.m_file[ 0 ] )
+        {
+            value_t retail;
+            same = same && ui_save_decode( ui_fnd_bytes( g.m_file ), retail ) == ( g.m_ok != 0 ) && dump_hash( retail ) == g.m_dump;
+        }
+        bytes_total += g.m_raw_size;
+        if ( !same && ++failed <= 6 )
+            LOG_ERROR( "ui save: document %d differs", static_cast< int >( k ) );
+    }
+    for ( std::size_t k = 0; k < g_golden_svf_refusals_count; ++k )
+    {
+        const golden_svf_refusal_t& g = g_golden_svf_refusals[ k ];
+        std::vector< std::uint8_t > file = ui_fnd_bytes( g.m_file );
+        if ( !g.m_file[ 0 ] )   // "too large": a whole document past the 0x40000 bytes
+        {
+            value_t doc;
+            ui_json_set_string( ui_json_child( doc, "s" ), std::string( 0x40100u, 'a' ).c_str( ) );
+            file = ui_save_encode( doc );
+        }
+        value_t out;
+        if ( ui_save_decode( file, out ) != ( g.m_ok != 0 ) && ++failed <= 6 )
+            LOG_ERROR( "ui save: refusal %s differs", g.m_label );
+    }
+    std::filesystem::path folder = std::filesystem::temp_directory_path( ) / "hydro-selftest-saves";
+    std::error_code ignored;
+    std::filesystem::remove_all( folder, ignored );
+    c_save_files files( folder );
+    std::string log;
+    ui_save_hooks_t hooks;
+    const auto add = [ &log ]( const std::string& line )
+    {
+        if ( !log.empty( ) )
+            log += '\n';
+        log += line;
+    };
+    hooks.m_broadcast = [ & ]( const char* e ) { add( std::string( "event:" ) + e ); };
+    hooks.m_message = [ & ]( const char* a, const char* b, const char* c ) { add( std::string( "box:" ) + a + ":" + b + ":" + c ); };
+    c_save_manager manager( files, hooks );
+    const auto put = [ & ]( int index ) { manager.document( ) = c_reader( ui_fnd_bytes( g_golden_svf_flow_docs[ index ] ) ).parse( ); };
+    const auto saved = [ & ]
+    {
+        // the seam has no log: a write is seen as the file coming back after its removal
+        std::vector< std::uint8_t > held;
+        const bool had = files.read( "cloudsave", held );
+        std::filesystem::remove( folder / "cloudsave", ignored );
+        manager.request( );
+        std::vector< std::uint8_t > now;
+        if ( files.read( "cloudsave", now ) )
+            add( "write:cloudsave" );
+        else if ( had )
+            files.write( "cloudsave", held );
+    };
+    for ( std::size_t k = 0; k < g_golden_svf_flow_count; ++k )
+    {
+        const golden_svf_step_t& g = g_golden_svf_flow[ k ];
+        log.clear( );
+        const std::string op = g.m_op;
+        if ( op == "open missing" || op == "open good" )
+            manager.open( "cloudsave" );
+        else if ( op == "open corrupt" )
+        {
+            const char junk[ ] = "junk file that is not a save";
+            files.write( "cloudsave", std::vector< std::uint8_t >( junk, junk + sizeof( junk ) - 1 ) );
+            manager.open( "cloudsave" );
+        }
+        else
+        {
+            if ( op == "save" )
+                put( 0 );
+            if ( op == "save changed" )
+                put( 1 );
+            saved( );
+        }
+        // retail's log also holds the host's open: only events, boxes and writes are compared
+        std::string want;
+        for ( const char* p = g.m_log; *p; )
+        {
+            const char* end = std::strchr( p, '\n' );
+            const std::string line = end ? std::string( p, end ) : std::string( p );
+            p = end ? end + 1 : p + line.size( );
+            if ( line.rfind( "open:", 0 ) == 0 )
+                continue;
+            if ( !want.empty( ) )
+                want += '\n';
+            want += line;
+        }
+        // retail logs the host's write before nothing else; ours is appended after the event: the same order here
+        if ( ( log != want || manager.status( ) != g.m_status || dump_hash( manager.document( ) ) != g.m_doc ) && ++failed <= 6 )
+            LOG_ERROR( "ui save: flow step %s differs\n  ours   %s\n  retail %s (status %d, %d)", g.m_op, log.c_str( ), want.c_str( ), manager.status( ), g.m_status );
+    }
+    std::filesystem::remove_all( folder, ignored );
+    if ( failed == 0 )
+        LOG_SUCCESS( "ui_vujb_write / ui_save_encode / _decode / c_save_manager match retail's 0x55BDA0 0x55BEA0 0x4ACAB0 0x4AC930 0x4AC480 0x4AC5C0 0x4AC6C0 0x4ABD60 on %d documents (%d bytes), %d refusals, %d flow steps; retail's loader reads ours",
+                     static_cast< int >( g_golden_svf_docs_count ), bytes_total, static_cast< int >( g_golden_svf_refusals_count ), static_cast< int >( g_golden_svf_flow_count ) );
+    else
+        LOG_ERROR( "ui save: %d differ from retail", failed );
+    return failed == 0;
+}
+
+// core/ui/progress.hxx against retail's VuProgressManagerImpl on its own vtable (oracle case progress_champ): a seeded op script on five
+// starting documents, each op's answers and the whole document's hash.
+inline bool verify_ui_progress_champ( )
+{
+    int failed = 0, ops = 0;
+    const auto hash = [ ]( const value_t& v ) { std::string d; vujb_dump( v, d ); return ui_chl_hash( d ); };
+    const auto short_hash = [ & ]( const value_t& v ) { char at[ 32 ]; std::snprintf( at, sizeof( at ), "%016llx", static_cast< unsigned long long >( hash( v ) ) ); at[ 7 ] = 0; return static_cast< int >( std::strtoul( at, nullptr, 16 ) ); };
+    for ( std::size_t k = 0; k < g_golden_pgc_runs_count; ++k )
+    {
+        const golden_pgc_run_t& run = g_golden_pgc_runs[ k ];
+        value_t document;
+        if ( run.m_doc[ 0 ] )
+            document = c_reader( ui_fnd_bytes( run.m_doc ) ).parse( );
+        for ( int t = 0; t < run.m_steps; ++t )
+        {
+            const golden_pgc_step_t& g = g_golden_pgc_steps[ run.m_first + t ];
+            const std::string op = g.m_op;
+            int ret = 0;
+            std::int32_t a = 0x11111111, b = 0x22222222, c = 0x33333333;
+            if ( op == "result" )
+                ui_progress_champ_result( document, g.m_name, g.m_arg );
+            else if ( op == "place" )
+                ret = ui_progress_champ_place( document, g.m_name, a ) ? 1 : 0;
+            else if ( op == "count" )
+                ret = ui_progress_champ_count( document );
+            else if ( op == "medals" )
+                ui_progress_champ_medals( document, a, b, c );
+            else if ( op == "save" )
+            {
+                value_t state;
+                if ( g_golden_pgc_states[ g.m_arg ][ 0 ] )
+                    state = c_reader( ui_fnd_bytes( g_golden_pgc_states[ g.m_arg ] ) ).parse( );
+                ui_progress_champ_save( document, state );
+            }
+            else if ( op == "load" )
+            {
+                value_t out;
+                ui_progress_champ_load( document, out );
+                ret = short_hash( out );
+            }
+            else if ( op == "state" )
+                ret = short_hash( ui_progress_champ_state( document ) );
+            else if ( op == "active" )
+                ret = ui_progress_champ_active( document ) ? 1 : 0;
+            else if ( op == "used" )
+                ui_progress_boat_used( document, g.m_name );
+            else if ( op == "was" )
+                ret = ui_progress_boat_was_used( document, g.m_name ) ? 1 : 0;
+            ++ops;
+            if ( ( ret != g.m_ret || a != g.m_a || b != g.m_b || c != g.m_c || hash( document ) != g.m_doc ) && ++failed <= 6 )
+                LOG_ERROR( "ui progress: run %d step %d %s %s %d differs: %d %d %d %d, want %d %d %d %d", static_cast< int >( k ), t, g.m_op, g.m_name, g.m_arg, ret, a, b, c, g.m_ret, g.m_a, g.m_b, g.m_c );
+        }
+    }
+    if ( failed == 0 )
+        LOG_SUCCESS( "ui_progress_* match retail's VuProgressManagerImpl slots 22 .. 29, 32, 33 (0x4B3980 0x4B3A30 0x4B3C40 0x4B3C80 0x4B3D60 0x4B3D90 0x4B3DC0 0x4B3DE0 0x4B4040 0x4B4090) on %d ops", ops );
+    else
+        LOG_ERROR( "ui progress: %d ops differ from retail", failed );
+    return failed == 0;
+}
+
 inline bool verify_ui_results_all( )
 {
     bool ok = true;
@@ -1613,5 +2127,9 @@ inline bool verify_ui_results_all( )
     ok = verify_ui_touch_dispatch( ) && ok;
     ok = verify_ui_screen_game_init( ) && ok;
     ok = verify_ui_mini_board( ) && ok;
+    ok = verify_ui_championship_load( ) && ok;
+    ok = verify_ui_font_draw( ) && ok;
+    ok = verify_ui_save_file( ) && ok;
+    ok = verify_ui_progress_champ( ) && ok;
     return ok;
 }
