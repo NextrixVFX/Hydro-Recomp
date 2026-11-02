@@ -1402,7 +1402,7 @@ public:
             rt[ 0 ] = 1.0f;
         const float up[ 3 ] = { rt[ 1 ] * fw[ 2 ] - rt[ 2 ] * fw[ 1 ], rt[ 2 ] * fw[ 0 ] - rt[ 0 ] * fw[ 2 ], rt[ 0 ] * fw[ 1 ] - rt[ 1 ] * fw[ 0 ] };
         const float aspect = 1280.0f / 720.0f;
-        const water_frustum_t cam = water_frustum_build( m_eye, rt, fw, up, aspect, 0.5f, m_far, std::tan( 1.05f * 0.5f ) * aspect );
+        const water_frustum_t cam = water_frustum_build( m_eye, rt, fw, up, aspect, m_lens_near, m_far, m_lens_tan * aspect );
         water_grid_frame( m_grid, cam, m_water, &m_water_view, m_grid_frame );
         water_stage_frame( dt );
     }
@@ -1631,6 +1631,7 @@ public:
             std::memcpy( m_eye, m_race.viewport_camera + 0x00, sizeof( m_eye ) );
             std::memcpy( m_target, m_race.viewport_camera + 0x10, sizeof( m_target ) );
             m_far = m_authored_far;
+            camera_lens( m_race.viewport_camera );
         }
         else if ( m_background.rig )
         {
@@ -1642,9 +1643,15 @@ public:
             std::memcpy( m_eye, cam + 0x00, sizeof( m_eye ) );
             std::memcpy( m_target, cam + 0x10, sizeof( m_target ) );
             std::memcpy( &m_far, cam + 0x17C, sizeof( m_far ) );
+            camera_lens( cam );
         }
         else
+        {
+            m_lens_tan = std::tan( 1.05f * 0.5f );
+            m_lens_near = 0.5f;
+            c_engine::lens( 0.0f, 0.5f );
             dev_vantage( dt );
+        }
         // Ours (a test driver): --look "ex ey ez tx ty tz" pins the view, to put a still on a chosen thing.
         if ( const char* look = c_engine::option( "look" ) )
         {
@@ -1842,6 +1849,16 @@ private:
     water_grid_frame_t m_grid_frame{};
     water_stage_t m_stage{};
     water_reflection_plane_t m_reflection_plane{};
+    float m_lens_tan = 0.0f, m_lens_near = 0.5f;   // the frame camera's vertical half tangent, +0x178
+    void camera_lens( const std::uint8_t* camera )
+    {
+        std::memcpy( &m_lens_near, camera + 0x178, 4 );
+        float t, aspect;   // +0x180 is the horizontal half tangent (0x4D2C60 widened the vertical fov by the aspect)
+        std::memcpy( &t, camera + 0x180, 4 );
+        std::memcpy( &aspect, camera + 0x174, 4 );
+        m_lens_tan = t / aspect;
+        c_engine::lens( m_lens_tan, m_lens_near );
+    }
     bool m_stage_attached = false, m_stage_bound = false;
     std::unique_ptr< gfx_retail_t > m_retail;
     std::vector< std::unique_ptr< gfx_retail_boat_t > > m_retail_boats;

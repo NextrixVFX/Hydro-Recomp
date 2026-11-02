@@ -1828,11 +1828,8 @@ struct water_reflection_plane_t
     float m_plane = 0.0f, m_from = 0.0f, m_target = 0.0f, m_start = 0.0f;
 };
 
-inline void water_reflection_plane_tick( water_reflection_plane_t& v, const water_built_t* water, const float* eye )
+inline void water_reflection_plane_step( water_reflection_plane_t& v, float height, float distance )
 {
-    float height = 0.0f, distance = 0.0f;
-    if ( water != nullptr )
-        water_reflection_nearest( *water, eye, height, distance );
     if ( !( height == v.m_target ) )   // ucomiss, jnp over equal only: NaN moves
     {
         v.m_from = v.m_plane;
@@ -1851,6 +1848,15 @@ inline void water_reflection_plane_tick( water_reflection_plane_t& v, const wate
     }
     const float t = distance / v.m_start;
     v.m_plane = ( 1.0f - t ) * v.m_target + v.m_from * t;
+}
+
+// With no water: height and distance 0.
+inline void water_reflection_plane_tick( water_reflection_plane_t& v, const water_built_t* water, const float* eye )
+{
+    float height = 0.0f, distance = 0.0f;
+    if ( water != nullptr )
+        water_reflection_nearest( *water, eye, height, distance );
+    water_reflection_plane_step( v, height, distance );
 }
 
 #include <workspace/core/world/wake.hxx>

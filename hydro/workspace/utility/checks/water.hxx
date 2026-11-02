@@ -2617,6 +2617,35 @@ inline bool verify_water_reflection( )
     return bad == 0;
 }
 
+// surface.hxx water_reflection_plane_step against retail's viewport tick 0x530F10 (case reflection_plane): 400 ticks over a one-surface VuWater whose height and
+// point the case moves, NaN heights among them; the four state words after each.
+inline bool verify_reflection_plane( )
+{
+    int bad = 0;
+    water_reflection_plane_t v;
+    for ( unsigned k = 0; k < g_golden_rplane_size; k += 6 )
+    {
+        const unsigned* w = g_golden_rplane_words + k;
+        float height, distance;
+        std::memcpy( &height, &w[ 0 ], 4 );
+        std::memcpy( &distance, &w[ 1 ], 4 );
+        water_reflection_plane_step( v, height, distance );
+        unsigned o[ 4 ];
+        std::memcpy( &o[ 0 ], &v.m_plane, 4 );
+        std::memcpy( &o[ 1 ], &v.m_from, 4 );
+        std::memcpy( &o[ 2 ], &v.m_target, 4 );
+        std::memcpy( &o[ 3 ], &v.m_start, 4 );
+        for ( int i = 0; i < 4; ++i )
+            if ( o[ i ] != w[ 2 + i ] && bad++ < 4 )
+                LOG_ERROR( "reflection_plane tick %u word %d: 0x%08X, retail 0x%08X", k / 6, i, o[ i ], w[ 2 + i ] );
+    }
+    if ( bad == 0 )
+        LOG_SUCCESS( "the viewport's reflection plane (0x530F10) matches retail: %u ticks, 4 words each", g_golden_rplane_size / 6 );
+    else
+        LOG_ERROR( "reflection_plane FAILED %d", bad );
+    return bad == 0;
+}
+
 // engine entity/values.hxx's property save side against retail's slots (case property_save): per node (every property of
 // Hydroelectric's water entities as retail loaded them, plus synthetic vector2 / int / colour nodes) slot 5 / 6 / 3 / 3 at
 // the default as JSON text, the target after slot 8, slot 1 for vector2 / int enum; the notify and string-enum rows.
@@ -2764,6 +2793,7 @@ inline bool verify_water_all( )
     ok = verify_rotate_axis_angle( ) && ok;
     ok = verify_water_surface_distance( ) && ok;
     ok = verify_water_reflection( ) && ok;
+    ok = verify_reflection_plane( ) && ok;
     ok = verify_property_save( ) && ok;
     ok = verify_ocean_kernels96( ) && ok;
     ok = verify_water_built_tick( ) && ok;
