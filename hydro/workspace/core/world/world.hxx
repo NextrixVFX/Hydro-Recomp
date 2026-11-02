@@ -14,6 +14,7 @@
 #include <workspace/core/game/boxes.hxx>
 #include <workspace/core/game/input.hxx>
 #include <workspace/core/game/identity.hxx>
+#include <workspace/core/game/language.hxx>
 #include <workspace/core/world/control.hxx>
 #include <workspace/core/world/effects.hxx>
 #include <workspace/core/world/pfx.hxx>
@@ -544,8 +545,8 @@ private:
 
     // VuStringDBImpl's init (slot 5 0x53B700), once: the languages = the factory's getAssetNames("VuStringAsset")
     // (the pack's names; only their membership is read), then setLanguage (slot 11 0x53B9C0) with the PLATFORM's
-    // language (g_vumetrosys vt+0x48 - a hook: --language, else "en-us"; the dev config's override is compiled out
-    // of retail). The asset: the pack's VuStringAsset/<language> through VuDBAsset's read 0x5C1270.
+    // language (g_vumetrosys vt+0x48: --language, else system_language 0x4EBFE0 on the system's tag, game/language.hxx;
+    // the dev config's override is compiled out of retail). The asset: the pack's VuStringAsset/<language> through VuDBAsset's read 0x5C1270.
     void string_db_ready( )
     {
         if ( m_string_db_ready )
@@ -554,13 +555,18 @@ private:
         for ( const std::string& n : m_archive.names( "VuStringAsset/" ) )
             m_string_db.languages.push_back( n );
         const char* lang = c_engine::option( "language" );
-        const bool ok = string_db_set_language( m_string_db, lang ? lang : "en-us", [ this ]( const std::string& l ) -> const value_t* {
+        std::string language = k_language_default;
+        if ( lang )
+            language = lang;
+        else
+            system_language( platform_language_tag( ), language );
+        const bool ok = string_db_set_language( m_string_db, language, [ this ]( const std::string& l ) -> const value_t* {
             std::vector< std::uint8_t > blob;
             if ( !m_archive.read( ( "VuStringAsset/" + l ).c_str( ), blob ) || !pfx_asset_document( blob, m_string_asset ) )
                 return nullptr;
             return &m_string_asset;
         } );
-        LOG_INFO( "VuStringDB: language %s (the platform's answer: %s), %u strings%s", m_string_db.language.c_str( ), lang ? "--language" : "en-us, a hook",
+        LOG_INFO( "VuStringDB: language %s (the platform's answer: %s), %u strings%s", m_string_db.language.c_str( ), lang ? "--language" : "the system's tag",
                   static_cast< unsigned >( m_string_db.strings.size( ) ), ok ? "" : " - the asset did not load (UNKNOWN)" );
     }
 

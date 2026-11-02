@@ -47,6 +47,7 @@
 #include <workspace/core/world/start.hxx>
 #include <workspace/core/world/tick.hxx>
 #include <workspace/core/world/watchers.hxx>
+#include <workspace/core/world/affector.hxx>
 #include <workspace/utility/logger.hxx>
 
 #include <cstdint>
@@ -375,6 +376,7 @@ struct race_session_t
         race_session_t* session = nullptr;
     };
     std::vector< std::unique_ptr< breakable_live_t > > breakables;
+    std::vector< std::unique_ptr< force_live_t > > forces;   // VuForceAffectorEntity (world/affector.hxx), live from slot 6 0x4398C0
     // The level's VuKeyframeMotionEntity (world/keymotion.hxx), live from their slot 6 0x5CE9E0.
     struct key_live_t
     {
@@ -1884,6 +1886,28 @@ inline void race_session_level_bodies( race_session_t& s, entity_t& tree, const 
                 logic_switch_init( ls->value );
             return;
         }
+        // VuForceAffectorEntity's slot 6 0x4398C0 (world/force.hxx): Initially Active -> "Activate" 0x439CB0.
+        if ( e.m_type == "VuForceAffectorEntity" && e.m_state )
+        {
+            const transform_component_t* t = entity_transform( e );
+            if ( !t || e.m_world_unknown )
+            {
+                race_unwired( s, "a VuForceAffectorEntity without a known world - gameInitialize 0x4398C0 not run (UNKNOWN)" );
+                return;
+            }
+            auto f = std::make_unique< force_live_t >( );
+            f->entity = &e;
+            f->value = &static_cast< force_affector_state_t* >( e.m_state.get( ) )->value;
+            f->world = t->world;
+            f->scale = t->scale;
+            f->dyn = &d;
+            race_force_bind( *f );
+            force_affector_game_init( *f->value, f->world, f->scale, f->hooks );
+            if ( f->failed )
+                race_unwired( s, "VuForceAffectorEntity '" + e.m_name + "': the ghost's addCollisionObject / step callback refused" );
+            s.forces.push_back( std::move( f ) );
+            return;
+        }
         // VuLensWaterEmitterEntity's slot 6 0x5E6720 (world/lens.hxx): its emitter IF to the lens-water manager.
         if ( e.m_type == "VuLensWaterEmitterEntity" )
         {
@@ -2460,6 +2484,14 @@ inline void race_session_game_release( race_session_t& s )
             ++released;
             return;
         }
+        if ( e.m_type == "VuForceAffectorEntity" )
+            for ( const auto& f : s.forces )
+                if ( f->entity == &e )
+                {
+                    force_affector_game_release( *f->value, f->hooks );   // slot 7 0x439920
+                    ++released;
+                    return;
+                }
         if ( e.m_type == "VuKeyframeMotionEntity" )
             for ( const auto& k : s.key_motions )
                 if ( k->entity == &e )
@@ -2471,6 +2503,17 @@ inline void race_session_game_release( race_session_t& s )
         ++unknown[ e.m_type.empty( ) ? std::string( "(UNKNOWN node)" ) : e.m_type ];
     };
     walk( walk, *s.tree );
+    {
+        int pushed = 0, pushes = 0;   // ours, a log line
+        for ( const auto& f : s.forces )
+            if ( f->pushes )
+            {
+                ++pushed;
+                pushes += f->pushes;
+            }
+        if ( !s.forces.empty( ) )
+            LOG_INFO( "race: %d VuForceAffectorEntity, %d pushed a body (%d pushes)", static_cast< int >( s.forces.size( ) ), pushed, pushes );
+    }
     std::string by;
     for ( const auto& u : unknown )
         by += ( by.empty( ) ? "" : ", " ) + u.first + " x" + std::to_string( u.second );

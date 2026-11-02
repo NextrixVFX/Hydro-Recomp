@@ -2800,6 +2800,7 @@ inline bool verify_water_all( )
     ok = verify_voice_over( ) && ok;
     ok = verify_audio_emitter( ) && ok;
     ok = verify_force_affector( ) && ok;
+    ok = verify_ghost_overlap( ) && ok;
     ok = verify_settings_triggers( ) && ok;
     ok = verify_key_motion( ) && ok;
     ok = verify_key_curve( ) && ok;

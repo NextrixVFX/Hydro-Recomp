@@ -1112,6 +1112,45 @@ inline bool verify_settings_triggers( )
 // wrote - excepted).
 #include <workspace/core/world/force.hxx>
 
+// 0x548FE0 / 0x549120 against retail (case ghost_overlap): a random add / remove sequence, the whole array after each step and
+// whether the ghost's own cache was called (not modelled: it must be called exactly when the array changed).
+inline bool verify_ghost_overlap( )
+{
+    save_words_t c{ g_golden_ghost_overlap_words };
+    const unsigned n = c.next( );
+    collision_object_t clients[ 8 ];
+    broadphase_proxy_t proxies[ 8 ], self;
+    for ( int i = 0; i < 8; ++i )
+        proxies[ i ].client = &clients[ i ];
+    ghost_object_t ghost;
+    int bad = 0;
+    for ( unsigned s = 0; s < n; ++s )
+    {
+        const unsigned op = c.next( ), k = c.next( ), count = c.next( );
+        const std::size_t before = ghost.overlapping.size( );
+        void* g = static_cast< collision_object_t* >( &ghost );
+        if ( op == 0 )
+            collision_world_ghost_add( nullptr, g, &proxies[ k ], &self );
+        else
+            collision_world_ghost_remove( nullptr, g, &proxies[ k ], &self );
+        bool same = count == ghost.overlapping.size( );
+        for ( unsigned i = 0; i < count; ++i )
+        {
+            const unsigned want = c.next( );
+            same = same && i < ghost.overlapping.size( ) && ghost.overlapping[ i ] == &clients[ want ];
+        }
+        const unsigned calls = c.next( );
+        same = same && ( calls != 0u ) == ( before != ghost.overlapping.size( ) );
+        if ( !same && ++bad <= 4 )
+            LOG_ERROR( "ghost_overlap: step %u op %u client %u differs", s, op, k );
+    }
+    if ( bad )
+        LOG_ERROR( "ghost_overlap FAILED %d of %u", bad, n );
+    else
+        LOG_SUCCESS( "verify_ghost_overlap: %u add / remove steps match retail's 0x548FE0 / 0x549120", n );
+    return bad == 0;
+}
+
 inline bool verify_force_affector( )
 {
     logic_check_t c{ g_golden_fae_words };
