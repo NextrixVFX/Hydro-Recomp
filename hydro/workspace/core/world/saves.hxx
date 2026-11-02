@@ -99,7 +99,15 @@ inline void c_world::settings_start( )
             LOG_WARNING( "saves: VuDBAsset/UnlockDB not in the pack" );
     }
     m_unlock.store_beta = [ ] { return false; };
-    m_unlock.init( m_unlock_db.tag ? &m_unlock_db : nullptr, value_t{ }, m_cloud.data );   // getParam( "UnlockAll" ): 0x4FDB70 answers null
+    // g_vudevconfig's getParam( "UnlockAll" ): a shipped game has none; --unlock-all (ours, a test driver) answers true.
+    value_t dev_unlock_all;
+    if ( c_engine::option( "unlock-all" ) != nullptr )
+    {
+        dev_unlock_all.tag = 3;
+        dev_unlock_all.kind = value_t::kind_t::integer;
+        dev_unlock_all.integer = 1;
+    }
+    m_unlock.init( m_unlock_db.tag ? &m_unlock_db : nullptr, dev_unlock_all, m_cloud.data );
     unlock_bind( );
     {
         float fov = 0.0f;
@@ -111,7 +119,7 @@ inline void c_world::settings_start( )
 }
 
 // The award screen's and the championship's slots over the managers (ui/award.hxx, ui/standings.hxx). The unlock row (0x47F790's VuJsonContainer) reaches
-// the screen open at the time. g 0x758FE8's rewards slots 6 .. 11: boat's reward( ), not on this tree: see unlock_value (opening.hxx).
+// the screen open at the time. g 0x758FE8's rewards slots 6 .. 11: reward( ), through unlock_value (opening.hxx).
 inline void c_world::unlock_bind( )
 {
     static const auto queue = [ ]( race_session_t& race ) {
@@ -141,6 +149,7 @@ inline void c_world::unlock_bind( )
         ui_params_t p;
         ui_params_add_bool( p, busy );
         race_broadcast( "OnAwardScreenBusy", &p );
+        award_busy( p );
     };
     a.m_input = [ this ]( const char* name ) { return m_race.input && m_race.input->manager.pressed( 0, name ); };
     a.m_touches = [ ] { return 0x7FFF; };   // g 0x759070 +0x1C: no finger down
@@ -177,6 +186,10 @@ inline void c_world::unlock_bind( )
         walk( walk, *project.root );
     };
     c.m_names = [ this ]( std::int32_t value, std::vector< std::string >& names ) { return m_unlock.unlock_count_for( value, names ) != 0; };
+    c.m_value = [ this ]( const std::string& name, std::int32_t place ) { return m_unlock.reward( "Championship", name, place ); };   // vt+0x1C 0x4B6170
+    m_difficulty_env.m_boat_db = &m_boat_db;
+    m_difficulty_env.m_champ_db = &m_champ_db;
+    m_difficulty_env.m_round = [ this ]( ) -> const value_t& { return ui_progress_champ_state( m_cloud.data ); };   // vt+0x6C
     ui_champ_save_bind( c, m_cloud );
     ui_champ_award_bind( c, m_race.screens );
 }

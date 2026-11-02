@@ -398,10 +398,10 @@ inline bool race_session_start( race_session_t& s, const std::string& mode, cons
         if ( s.world.save_doc )
             ui_progress_boat_used( *s.world.save_doc, boat );
     };
-    // THE POINT FOR c_unlock_manager::reward( ) (slots 6 .. 11, agent/boat d5289ec, not on this tree): no credits until then.
-    s.rules.screen_hooks.award.unlock_value = [ &s ]( std::uint32_t, const std::string&, std::int32_t ) {
-        race_unwired( s, "the unlock manager's reward slot 0x4B60B0 .. - not on this tree: no credits (UNKNOWN)" );
-        return 0;
+    // Slot 9's call: vt+0x18 0x4B60B0 Race, +0x20 0x4B6230 Slalom, +0x24 0x4B62F0 TimeTrial, +0x2C 0x4B6440 Ghost.
+    s.rules.screen_hooks.award.unlock_value = [ &s ]( std::uint32_t slot, const std::string& boat_class, std::int32_t tier ) {
+        const char* mode = slot == 0x18u ? "Race" : slot == 0x20u ? "Slalom" : slot == 0x24u ? "TimeTrial" : "Ghost";
+        return s.world.unlock ? s.world.unlock->reward( mode, boat_class, tier ) : 0;
     };
     s.rules.screen_hooks.award.unlock_show = [ &s ]( std::int32_t value, const std::vector< std::string >& names ) {   // vt+0x58 0x4B66E0
         return s.world.unlock && s.world.unlock->unlock_count_for( value, names ) != 0;

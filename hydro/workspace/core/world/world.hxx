@@ -622,12 +622,39 @@ private:
     const std::string& menu_tick( float dt );
     void menu_any_key( );
     std::uint32_t m_menu_pad = 0;
-    ui_bind_hooks_t menu_hooks( );
+    ui_bind_hooks_t menu_hooks( int id );
+    struct screen_state_t   // world/external.hxx: what a screen's entities hold outside the UI's tree
+    {
+        std::map< const entity_t*, sound_event_t > sounds;     // VuAudioEventEntity +0x78
+        std::map< const entity_t*, logic_entity_t > logic;
+    };
+    screen_state_t m_game_screen_state;                 // the Results and Award projects
+    c_ui_binding* m_logic_binding = nullptr;            // the screen a logic handler runs on
     struct menu_project_t
     {
         std::unique_ptr< entity_t > root;
         std::unique_ptr< c_ui_binding > binding;
+        screen_state_t state;
     };
+    // World/external.hxx.
+    ui_profile_t menu_profile( );
+    const logic_services_t& logic_services( );
+    void logic_broadcast_event( const char* event, const ui_params_t& p );
+    logic_entity_t* screen_logic( screen_state_t& state, entity_t& e );
+    ui_ret_t screen_external( screen_state_t& state, c_ui_binding& binding, entity_t& e, const char* plug, const ui_params_t& p );
+    void award_busy( const ui_params_t& p );
+    bool menu_poster( std::uint32_t hash, const ui_params_t& p );
+    void ui_play( const char* name )
+    {
+        std::uint32_t event = 0;
+        if ( m_sound.get_event && m_sound.get_event( m_sound.user, name, 1u, &event, nullptr ) == 0 && m_sound.start )
+            m_sound.start( m_sound.user, event );
+    }
+    logic_services_t m_logic_services;
+    value_t m_profile_temp;                             // g 0x759084 +0x18
+    value_t m_option_db;                                // gameutil +0x34
+    float m_menu_dt = 0.0f;                             // the tick manager's delta the screen tick sees
+    ui_difficulty_env_t m_difficulty_env;
     mode_manager_t m_modes;
     front_end_engine_t m_menu_engine;
     std::unique_ptr< c_front_end > m_menu;
@@ -2201,6 +2228,7 @@ private:
 
 #include <workspace/core/world/graph.hxx>
 #include <workspace/core/world/menu.hxx>
+#include <workspace/core/world/external.hxx>
 #include <workspace/core/world/saves.hxx>
 #include <workspace/core/world/motion.hxx>
 #include <workspace/core/world/animate.hxx>

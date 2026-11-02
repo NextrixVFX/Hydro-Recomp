@@ -611,6 +611,7 @@ inline c_world::retval_t c_world::dispatch( const std::string& entity, const std
         hooks.user = &ctx;
         hooks.rand = &ctx.rand;
         hooks.game = &m_logic_game;
+        hooks.services = &logic_services( );
         hooks.fire = []( void* user, logic_entity_t&, const char* out_plug, const ui_params_t& p ) -> logic_retval_t {
             context_t& c = *static_cast< context_t* >( user );
             std::memcpy( &c.world->m_vurandom, &c.rand, sizeof( c.rand ) );

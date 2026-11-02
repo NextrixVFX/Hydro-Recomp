@@ -307,9 +307,10 @@ inline void c_world::bind_game_screens( )
     hooks.m_broadcast_out = [ this ]( std::uint32_t hash, const ui_params_t& p ) { race_broadcast_hash( hash, nullptr, p, -1 ); };
     string_db_ready( );
     hooks.m_string_db = [ this ]( const char* key ) { return string_db_get( m_string_db, key ? key : "" ); };
-    hooks.m_external = [ this ]( entity_t& e, const char* plug, const ui_params_t& ) {
-        race_unwired( m_race, std::string( "the Results screen's external input " ) + e.m_type + " . " + plug + " (a platform hook) - not run" );
-        return ui_ret_t{ };
+    hooks.m_external = [ this ]( entity_t& e, const char* plug, const ui_params_t& p ) {
+        ui_game_award_t* award = m_race.screens.m_award.get( );
+        c_ui_binding* binding = award && award->m_binding ? award->m_binding.get( ) : m_race.screens.m_binding.get( );
+        return binding ? screen_external( m_game_screen_state, *binding, e, plug, p ) : ui_ret_t{ };
     };
     // g 0x759038 slot 9( pad, name ): the manager's "pressed" (Results' Select).
     hooks.m_input = [ this ]( int pad, const char* name ) { return m_race.input && m_race.input->manager.pressed( pad, name ); };
@@ -463,7 +464,9 @@ inline ui_screen_env_t c_world::ui_screen_environment( )
 #if HYDRO_UI_TEXT
     env.m_font_asset = [ this ]( const std::string& asset ) { return m_ui_pass->font_asset( asset ); };
 #endif
-    env.m_root = &m_race.util;
+    env.m_root = m_menu ? &m_menu_util : &m_race.util;
+    m_difficulty_env.m_root = env.m_root;
+    env.m_difficulty = &m_difficulty_env;
     return env;
 }
 #endif
