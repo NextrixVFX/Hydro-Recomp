@@ -155,15 +155,15 @@ struct gfx_texture_object_t : gfx_texture_t
     gfx_handle_t m_texture = 0;                      // +0x1C (+0x20 the view, +0x24 the sampler: gfx_texture_t)
 };
 
-// 0x57C4B0 (the part after the fields): the sampler.
-inline void gfx_texture_sampler( gfx_api_t& api, gfx_texture_object_t& t, const gfx_texture_options_t& o )
+// 0x57C4B0 (the part after the fields): the sampler. `cube`: 0x609240's differs: MaxLOD 0 when the mip option is 0 (found by case gfx_cube_load).
+inline void gfx_texture_sampler( gfx_api_t& api, gfx_texture_object_t& t, const gfx_texture_options_t& o, bool cube = false )
 {
     std::uint32_t filter = o.m_min >= 2 ? 4u : 0u;
     if ( o.m_mag >= 2 )
         filter |= 0x10u;
     if ( o.m_mip >= 2 )
         filter |= 1u;
-    t.m_sampler = api.create_sampler( gfx_sampler_desc_t{ filter, k_gfx_address_map[ o.m_address_u ], k_gfx_address_map[ o.m_address_v ], 1u, 0.0f, 1u, 8u, { 0.0f, 0.0f, 0.0f, 0.0f }, 0.0f, 3.4028235e38f } );
+    t.m_sampler = api.create_sampler( gfx_sampler_desc_t{ filter, k_gfx_address_map[ o.m_address_u ], k_gfx_address_map[ o.m_address_v ], 1u, 0.0f, 1u, 8u, { 0.0f, 0.0f, 0.0f, 0.0f }, 0.0f, cube && o.m_mip == 0 ? 0.0f : 3.4028235e38f } );
 }
 
 // 0x57C9B0 (width, height, an unread word, format, options): an empty dynamic-by-update texture: the description, the view, the sampler.
@@ -266,7 +266,8 @@ inline gfx_texture_object_t* gfx_texture_load( gfx_api_t& api, const std::uint8_
 inline gfx_texture_object_t* gfx_cube_load( gfx_api_t& api, const std::uint8_t* bytes )
 {
     std::uint32_t head[ 8 ];
-    std::memcpy( head, bytes, sizeof( head ) );
+    for ( std::uint32_t i = 0; i < 8u; ++i )    // the reader's memcpy_s, word by word: the seam logs them
+        api.copy( &head[ i ], 4u, bytes + 4u * i, 4u );
     gfx_texture_options_t o;
     o.m_address_u = head[ 0 ];
     o.m_address_v = head[ 1 ];
@@ -277,11 +278,23 @@ inline gfx_texture_object_t* gfx_cube_load( gfx_api_t& api, const std::uint8_t* 
     const gfx_handle_t texture = api.create_texture( d );
     const gfx_handle_t view = api.create_view( texture );
     const std::uint8_t* at = bytes + sizeof( head );
+    std::vector< std::uint8_t > blob;
     for ( std::uint32_t face = 0; face < 6u; ++face )
     {
         std::uint32_t image[ 5 ];
-        std::memcpy( image, at, sizeof( image ) );
-        const std::uint8_t* data = at + sizeof( image );
+        for ( std::uint32_t i = 0; i < 5u; ++i )
+            api.copy( &image[ i ], 4u, at + 4u * i, 4u );
+        // 0x5AC7F0: the blob into the one local image: growing it copies what it held (nothing on the first face), the same size again does not.
+        if ( image[ 4 ] > blob.size( ) )
+        {
+            std::vector< std::uint8_t > grown( image[ 4 ] );
+            const std::uint32_t held = static_cast< std::uint32_t >( blob.size( ) );
+            std::uint8_t none = 0;
+            api.copy( held ? grown.data( ) : &none, held, held ? blob.data( ) : &none, held );
+            blob.swap( grown );
+        }
+        api.copy( blob.data( ), image[ 4 ], at + sizeof( image ), image[ 4 ] );
+        const std::uint8_t* data = blob.data( );
         for ( std::uint32_t level = 0; level < head[ 6 ]; ++level )
         {
             const std::int32_t lw = static_cast< std::int32_t >( image[ 1 ] ) >> level, lh = static_cast< std::int32_t >( image[ 2 ] ) >> level;
@@ -294,7 +307,7 @@ inline gfx_texture_object_t* gfx_cube_load( gfx_api_t& api, const std::uint8_t* 
     gfx_texture_object_t* t = new gfx_texture_object_t( );
     t->m_width = t->m_height = static_cast< std::int32_t >( head[ 5 ] );
     t->m_levels = head[ 6 ];
-    gfx_texture_sampler( api, *t, o );
+    gfx_texture_sampler( api, *t, o, true );
     t->m_format = head[ 7 ];
     t->m_texture = texture;
     t->m_view = view;
