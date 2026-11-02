@@ -206,6 +206,7 @@
     <ClInclude Include="workspace\core\world\collide.hxx" />
     <ClInclude Include="workspace\core\world\control.hxx" />
     <ClInclude Include="workspace\core\world\dbrt.hxx" />
+    <ClInclude Include="workspace\core\world\drawer.hxx" />
     <ClInclude Include="workspace\core\world\drive.hxx" />
     <ClInclude Include="workspace\core\world\dynamics.hxx" />
     <ClInclude Include="workspace\core\world\dynprop.hxx" />
@@ -221,13 +222,11 @@
     <ClInclude Include="workspace\core\world\graph.hxx" />
     <ClInclude Include="workspace\core\world\grid.hxx" />
     <ClInclude Include="workspace\core\world\huds.hxx" />
+    <ClInclude Include="workspace\core\world\instance.hxx" />
     <ClInclude Include="workspace\core\world\kernel.hxx" />
     <ClInclude Include="workspace\core\world\keyframe.hxx" />
     <ClInclude Include="workspace\core\world\keymotion.hxx" />
     <ClInclude Include="workspace\core\world\lens.hxx" />
-    <ClInclude Include="workspace\core\world\drawer.hxx" />
-    <ClInclude Include="workspace\core\world\primitive.hxx" />
-    <ClInclude Include="workspace\core\world\instance.hxx" />
     <ClInclude Include="workspace\core\world\lights.hxx" />
     <ClInclude Include="workspace\core\world\livery.hxx" />
     <ClInclude Include="workspace\core\world\logic.hxx" />
@@ -242,6 +241,7 @@
     <ClInclude Include="workspace\core\world\pfxmgr.hxx" />
     <ClInclude Include="workspace\core\world\pfxsim.hxx" />
     <ClInclude Include="workspace\core\world\pfxstatic.hxx" />
+    <ClInclude Include="workspace\core\world\primitive.hxx" />
     <ClInclude Include="workspace\core\world\query.hxx" />
     <ClInclude Include="workspace\core\world\race.hxx" />
     <ClInclude Include="workspace\core\world\rules.hxx" />
