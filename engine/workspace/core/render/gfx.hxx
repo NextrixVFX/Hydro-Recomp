@@ -76,6 +76,21 @@ struct gfx_rect_t   // D3D11_RECT
     std::int32_t m_left, m_top, m_right, m_bottom;
 };
 
+struct gfx_layout_element_t   // D3D11_INPUT_ELEMENT_DESC
+{
+    const char* m_name;
+    std::uint32_t m_index, m_format, m_slot, m_offset, m_class, m_step;
+};
+
+struct gfx_sampler_desc_t   // D3D11_SAMPLER_DESC
+{
+    std::uint32_t m_filter, m_u, m_v, m_w;
+    float m_bias;
+    std::uint32_t m_anisotropy, m_compare;
+    float m_border[ 4 ];
+    float m_min, m_max;
+};
+
 struct gfx_api_t
 {
     virtual ~gfx_api_t( ) = default;
@@ -83,10 +98,13 @@ struct gfx_api_t
     // ID3D11Device. A failure answers 0: retail tests none of the state calls and stores what it got.
     virtual gfx_handle_t create_buffer( const gfx_buffer_desc_t& d ) = 0;           // +0xC
     virtual gfx_handle_t create_texture( const gfx_texture_desc_t& d ) = 0;         // +0x14
+    virtual gfx_handle_t create_view( gfx_handle_t texture ) = 0;                   // +0x1C (null description)
     virtual gfx_handle_t create_target_view( gfx_handle_t texture ) = 0;            // +0x24 (null description)
     virtual gfx_handle_t create_depth_view( gfx_handle_t texture ) = 0;             // +0x28 (null description)
     virtual gfx_handle_t create_vertex_shader( const void* code, std::uint32_t size ) = 0;   // +0x30 (code, size, 0, &out)
     virtual gfx_handle_t create_pixel_shader( const void* code, std::uint32_t size ) = 0;    // +0x3C (code, size, 0, &out)
+    virtual gfx_handle_t create_layout( const gfx_layout_element_t* e, std::uint32_t count, const void* code, std::uint32_t size ) = 0;   // +0x2C
+    virtual gfx_handle_t create_sampler( const gfx_sampler_desc_t& d ) = 0;         // +0x5C
     virtual gfx_handle_t create_blend( const gfx_blend_desc_t& d ) = 0;             // +0x50
     virtual gfx_handle_t create_depth( const gfx_depth_desc_t& d ) = 0;             // +0x54
     virtual gfx_handle_t create_raster( const gfx_raster_desc_t& d ) = 0;           // +0x58
@@ -115,6 +133,7 @@ struct gfx_api_t
     virtual void set_raster( gfx_handle_t state ) = 0;                              // +0xAC
     virtual void set_viewport( const gfx_viewport_t& v ) = 0;                       // +0xB0 (1, &v)
     virtual void set_scissor( const gfx_rect_t& r ) = 0;                            // +0xB4 (1, &r)
+    virtual void update_texture( gfx_handle_t texture, std::uint32_t level, const void* data, std::uint32_t row, std::uint32_t depth ) = 0;   // +0xC0 (null box)
     virtual void clear_target( gfx_handle_t view, const float* rgba ) = 0;          // +0xC8
     virtual void clear_depth( gfx_handle_t view, std::uint32_t flags, float depth, std::uint8_t stencil ) = 0;   // +0xD4
     // +0x164 OMGetRenderTargets( 1, &view, &depth ). Retail never releases what it gets, and its resize answers that with the

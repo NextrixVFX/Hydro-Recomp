@@ -20,6 +20,8 @@ static_assert( sizeof( gfx_blend_desc_t ) == sizeof( D3D11_BLEND_DESC ) );
 static_assert( sizeof( gfx_raster_desc_t ) == sizeof( D3D11_RASTERIZER_DESC ) );
 static_assert( sizeof( gfx_viewport_t ) == sizeof( D3D11_VIEWPORT ) );
 static_assert( sizeof( gfx_rect_t ) == sizeof( D3D11_RECT ) );
+static_assert( sizeof( gfx_layout_element_t ) == sizeof( D3D11_INPUT_ELEMENT_DESC ) );
+static_assert( sizeof( gfx_sampler_desc_t ) == sizeof( D3D11_SAMPLER_DESC ) );
 
 struct gfx_direct_t final : gfx_api_t
 {
@@ -42,6 +44,24 @@ struct gfx_direct_t final : gfx_api_t
     {
         ID3D11Texture2D* o = nullptr;
         m_device->CreateTexture2D( reinterpret_cast< const D3D11_TEXTURE2D_DESC* >( &d ), nullptr, &o );
+        return out( o );
+    }
+    gfx_handle_t create_view( gfx_handle_t t ) override
+    {
+        ID3D11ShaderResourceView* o = nullptr;
+        m_device->CreateShaderResourceView( as< ID3D11Resource >( t ), nullptr, &o );
+        return out( o );
+    }
+    gfx_handle_t create_layout( const gfx_layout_element_t* e, std::uint32_t n, const void* code, std::uint32_t size ) override
+    {
+        ID3D11InputLayout* o = nullptr;
+        m_device->CreateInputLayout( reinterpret_cast< const D3D11_INPUT_ELEMENT_DESC* >( e ), n, code, size, &o );
+        return out( o );
+    }
+    gfx_handle_t create_sampler( const gfx_sampler_desc_t& d ) override
+    {
+        ID3D11SamplerState* o = nullptr;
+        m_device->CreateSamplerState( reinterpret_cast< const D3D11_SAMPLER_DESC* >( &d ), &o );
         return out( o );
     }
     gfx_handle_t create_target_view( gfx_handle_t t ) override
@@ -128,6 +148,7 @@ struct gfx_direct_t final : gfx_api_t
     void set_raster( gfx_handle_t s ) override { m_context->RSSetState( as< ID3D11RasterizerState >( s ) ); }
     void set_viewport( const gfx_viewport_t& v ) override { m_context->RSSetViewports( 1, reinterpret_cast< const D3D11_VIEWPORT* >( &v ) ); }
     void set_scissor( const gfx_rect_t& r ) override { m_context->RSSetScissorRects( 1, reinterpret_cast< const D3D11_RECT* >( &r ) ); }
+    void update_texture( gfx_handle_t t, std::uint32_t l, const void* d, std::uint32_t r, std::uint32_t s ) override { m_context->UpdateSubresource( as< ID3D11Resource >( t ), l, nullptr, d, r, s ); }
     void clear_target( gfx_handle_t v, const float* c ) override { m_context->ClearRenderTargetView( as< ID3D11RenderTargetView >( v ), c ); }
     void clear_depth( gfx_handle_t v, std::uint32_t f, float d, std::uint8_t s ) override { m_context->ClearDepthStencilView( as< ID3D11DepthStencilView >( v ), f, d, s ); }
     void get_targets( gfx_handle_t& v, gfx_handle_t& d ) override

@@ -178,6 +178,18 @@ struct gfx_programs_t
     static void set_matrices( gfx_api_t& api, const gfx_program_t& p, const gfx_constant_slot_t& c, const void* v, std::uint32_t n ) { store( api, p, c, v, n << 6 ); }
     static void set_vectors( gfx_api_t& api, const gfx_program_t& p, const gfx_constant_slot_t& c, const void* v, std::uint32_t n ) { store( api, p, c, v, n << 4 ); }
 
+    // A stage's reference: 0 runs 0x5AB890 / 0x5AB910 then 0x5AC380: the shader released, the constant buffer if any, the record removed.
+    void drop( gfx_stage_t* s )
+    {
+        if ( --s->m_refs != 0u )
+            return;
+        m_api.release( s->m_shader );
+        if ( s->m_constants )
+            m_api.release( s->m_constants );
+        m_stages.erase( std::find( m_stages.begin( ), m_stages.end( ), s ) );
+        delete s;
+    }
+
 private:
     static void store( gfx_api_t& api, const gfx_program_t& p, const gfx_constant_slot_t& c, const void* from, std::uint32_t bytes )
     {
@@ -219,18 +231,6 @@ private:
         s.m_data = s.m_memory.data( );
         s.m_size = size;
         s.m_constants = m_api.create_buffer( gfx_buffer_desc_t{ size, 2u, 4u, 0x10000u, 0u, 0u } );
-    }
-
-    // A stage's reference: 0 runs 0x5AB890 / 0x5AB910 then 0x5AC380: the shader released, the constant buffer if any, the record removed.
-    void drop( gfx_stage_t* s )
-    {
-        if ( --s->m_refs != 0u )
-            return;
-        m_api.release( s->m_shader );
-        if ( s->m_constants )
-            m_api.release( s->m_constants );
-        m_stages.erase( std::find( m_stages.begin( ), m_stages.end( ), s ) );
-        delete s;
     }
 
     // 0x5AC240.
