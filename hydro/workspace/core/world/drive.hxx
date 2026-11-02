@@ -1064,6 +1064,15 @@ inline bool race_drive_throttle( const race_drive_t& r, float& t )
     return true;
 }
 
+// The ghost recorder's throttle (0x4AFA30: the driver's vt+0x64).
+inline float race_ghost_throttle( race_session_t& s, std::size_t k )
+{
+    float t = 0.0f;
+    if ( k >= s.drives.size( ) || !s.drives[ k ] || !race_drive_throttle( *s.drives[ k ], t ) )
+        race_unwired( s, "the ghost recorder: the driver's vt+0x64 for this driver class - UNKNOWN, 0" );
+    return t;
+}
+
 // The Decision tick's animation tick 0x40FFF0 on the boat's rig (world/rig.hxx); the driver's vt+0x68 is slot 26 0x40EB20 in every class.
 inline void race_drive_animation( race_drive_t& r, float dt )
 {

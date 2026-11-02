@@ -401,6 +401,8 @@ struct race_rules_hooks_t
     std::function< void( int project, race_hud_verb_t verb, float dt ) > hud;
     std::function< void( const char* name, bool value ) > broadcast;
     std::function< void( const std::string& call ) > platform;
+    // The progress manager's record of the three games, the human's (0x48AB70 vt+0x34 "Race", 0x4909B0 vt+0x38 "TimeTrial", 0x48E090 vt+0x3C "Slalom").
+    std::function< void( const char* type, const std::string& course, std::int32_t place, float total, float lap ) > record;
     // VuSlalomGame's slot 7 0x48C8C0 only: the gates tick 0x48E6E0 after +0x71C += dt (world/slalom.hxx slalom_gates_tick).
     std::function< void( ) > gates;
 };
@@ -513,6 +515,8 @@ inline void race_rules_post_results( race_rules_t& r )
     char text[ 160 ];
     std::snprintf( text, sizeof( text ), "progress %s %d %08X %08X", r.track.c_str( ), place, rules_i32( h, 0x4B4 ), rules_i32( h, 0x4B8 ) );
     race_rules_platform( r, text );
+    if ( r.hooks.record )
+        r.hooks.record( "Race", "None", place, rules_f( h, 0x4B4 ), rules_f( h, 0x4B8 ) );
     if ( !h[ 0x334 ] )
     {
         const std::int32_t ms = _mm_cvtss_si32( _mm_set_ss( rules_f( h, 0x4B4 ) * 1000.0f ) );
@@ -1161,6 +1165,8 @@ inline void timetrial_rules_post_results( race_rules_t& r )
     char text[ 160 ];
     std::snprintf( text, sizeof( text ), "progress38 %s %d %08X %08X", r.track.c_str( ), place, rules_i32( h, 0x4B4 ), rules_i32( h, 0x4B8 ) );
     race_rules_platform( r, text );
+    if ( r.hooks.record )
+        r.hooks.record( "TimeTrial", "None", place, rules_f( h, 0x4B4 ), rules_f( h, 0x4B8 ) );
     if ( !h[ 0x334 ] )
     {
         const std::int32_t ms = _mm_cvtss_si32( _mm_set_ss( rules_f( h, 0x4B4 ) * 1000.0f ) );
@@ -1242,6 +1248,8 @@ inline void slalom_rules_post_results( race_rules_t& r )
     char text[ 200 ];
     std::snprintf( text, sizeof( text ), "progress3C %s %s %d %08X %08X", r.track.c_str( ), r.course.c_str( ), place, rules_i32( h, 0x4B4 ), rules_i32( h, 0x4B8 ) );
     race_rules_platform( r, text );
+    if ( r.hooks.record )
+        r.hooks.record( "Slalom", r.course, place, rules_f( h, 0x4B4 ), rules_f( h, 0x4B8 ) );
     if ( !h[ 0x334 ] )
     {
         const std::int32_t ms = _mm_cvtss_si32( _mm_set_ss( rules_f( h, 0x4B4 ) * 1000.0f ) );

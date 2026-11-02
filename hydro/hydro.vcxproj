@@ -272,6 +272,10 @@
     <ClInclude Include="workspace\core\world\pfxsim.hxx" />
     <ClInclude Include="workspace\core\world\pfxstatic.hxx" />
     <ClInclude Include="workspace\core\world\pickups.hxx" />
+    <ClInclude Include="workspace\core\world\title.hxx" />
+    <ClInclude Include="workspace\core\world\ghostplay.hxx" />
+    <ClInclude Include="workspace\core\world\saves.hxx" />
+    <ClInclude Include="workspace\core\world\records.hxx" />
     <ClInclude Include="workspace\core\world\primitive.hxx" />
     <ClInclude Include="workspace\core\world\query.hxx" />
     <ClInclude Include="workspace\core\world\race.hxx" />
@@ -322,6 +326,7 @@
     <ClInclude Include="workspace\utility\checks\results.hxx" />
     <ClInclude Include="workspace\utility\checks\rig.hxx" />
     <ClInclude Include="workspace\utility\checks\save.hxx" />
+    <ClInclude Include="workspace\utility\checks\records.hxx" />
     <ClInclude Include="workspace\utility\checks\session.hxx" />
     <ClInclude Include="workspace\utility\checks\ui.hxx" />
     <ClInclude Include="workspace\utility\checks\update.hxx" />

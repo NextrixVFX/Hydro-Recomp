@@ -117,6 +117,8 @@ inline bool race_session_start( race_session_t& s, const std::string& mode, cons
             s.input_db = c_reader( bytes ).parse( );
             s.input = std::make_shared< platform_input_t >( );
             platform_input_init( *s.input, s.input_db );
+            if ( s.world.input_profile )
+                s.world.input_profile( *s.input );   // 0x510E10: the manager's mappings from the profile
             tick_register( s.ticks, { s.input.get( ), race_input_tick, &s }, "Input" );
         }
         else
@@ -314,33 +316,7 @@ inline bool race_session_start( race_session_t& s, const std::string& mode, cons
             if ( s.rules.unrecreated )
                 s.rules.unrecreated( address, what );
         } );
-        // GetLeaderboard, read whole. Enter 0x485890: the tick manager's vt+0x2C, every game boat's +0x308 += 1, the leaderboard
-        // g 0x758FA8's vt+0x18 (the request: "Ghost" and the track), a "Ghost_Leaderboard" VuMessageBox +0x758 (UI: a hook). Exit
-        // 0x485AA0: vt+0x30, +0x308 -= 1, the box released. Tick 0x485AF0: vt+0x1C's status 0 waits, 1 "Success", else +0x740 =
-        // "Ghost_NotConnected" and the "Failure" pulse (ShowError).
-        // PLATFORM (a hook, FLAGGED): the online leaderboard is not in this build, so vt+0x1C answers 2 - retail's answer with no
-        // connection, the one path retail itself has for it. LoadGhosts 0x485B50 and on need the service: not reached.
-        for ( auto& st : s.rules.fsm.m_states )
-            if ( st->m_name == "GetLeaderboard" )
-            {
-                st->m_enter = [ &s ] {
-                    race_rules_hold( s.rules, 1 );
-                    race_unwired( s, "VuGhostGame GetLeaderboard: the tick manager's vt+0x2C and the \"Ghost_Leaderboard\" VuMessageBox +0x758 (UI, not recreated)" );
-                };
-                st->m_exit = [ &s ] { race_rules_hold( s.rules, -1 ); };
-                st->m_tick = [ &s ]( float ) {
-                    s.ghost_error = "Ghost_NotConnected";
-                    s.rules.fsm.pulse_condition( "Failure" );
-                };
-            }
-        // 0x485380 past the time: for i < the +0x75C list's count, the ghost manager g 0x758FC8's +0x64 record whose [0] == i:
-        // its +0x58 entity's +0x4DC = its transform's world (+0x50 +0x50, 16 words). The list is LoadGhosts' / PreGame's
-        // (0x485B50 / 0x486060, not recreated): empty here, so the loop runs over none - logged.
-        s.rules.hooks.gates = [ &s ] {
-            race_unwired( s, "VuGhostGame slot 7 0x485380: the +0x75C ghost list is empty (LoadGhosts 0x485B50 / PreGame 0x486060 not recreated) - "
-                             "the per-ghost +0x4DC copy ran over none (UNKNOWN)" );
-        };
-        LOG_WARNING( "race: VuGhostGame - GetLeaderboard's handlers run; LoadGhosts 0x485B50 and every state behind it are not recreated (UNKNOWN)" );
+        race_session_ghost_bind( s );   // world/ghostplay.hxx
     }
     else if ( s.start.timetrial )
     {
@@ -382,6 +358,20 @@ inline bool race_session_start( race_session_t& s, const std::string& mode, cons
         }
         race_unwired( s, "platform services: " + call + " (saves / online / achievements - hooks)" );
     };
+    s.rules.hooks.record = [ &s ]( const char* type, const std::string& course, std::int32_t place, float total, float lap ) {
+        if ( !s.world.save_doc )
+            return;
+        std::string boat_class;
+        for ( std::size_t k = 0; k < s.rules_boats.size( ) && k < s.boats.size( ); ++k )
+            if ( s.rules_boats[ k ].human )
+            {
+                const auto it = s.boats[ k ]->io.boat_strings.find( 0x160u );
+                boat_class = it == s.boats[ k ]->io.boat_strings.end( ) ? std::string( ) : it->second;
+                break;
+            }
+        record_put( *s.world.save_doc, type, s.game.track, course, boat_class, 0, place, total, lap );
+        LOG_INFO( "saves: %s record, %s class %s: place %d, %.3f, lap %.3f", type, s.game.track.c_str( ), boat_class.c_str( ), place, total, lap );
+    };
     s.rules.track = s.game.track;
     {
         // VuGame's ctor 0x481630: +0x674 = ConstantDB VuDBAsset / HUD / ChallengeTextDuration - an int (1, cvtdq2ps), a float (2), an int64
@@ -401,8 +391,13 @@ inline bool race_session_start( race_session_t& s, const std::string& mode, cons
     // Awards' enter 0x484320: the services are saves-side (the user's scope: re-made, not copied; none exists yet). No hidden package
     // found, no unlock (so no award screen and "AwardsDone" on the first tick) - logged once each state entry.
     s.rules.game_mode = s.start.slalom ? "Slalom" : s.start.timetrial ? "TimeTrial" : s.start.ghost ? "Ghost" : "Race";
-    s.rules.screen_hooks.award.hidden_found = [ ]( const std::string& ) { return false; };
-    s.rules.screen_hooks.award.progress = [ &s ]( const std::string& ) { race_unwired( s, "the progress manager g 0x758FD8 vt+0x80 (saves - a platform hook) - not run" ); };
+    s.rules.screen_hooks.award.hidden_found = [ &s ]( const std::string& track ) {
+        return s.world.save_doc && s.world.hidden_db && package_all_found( *s.world.save_doc, *s.world.hidden_db, track );
+    };
+    s.rules.screen_hooks.award.progress = [ &s ]( const std::string& boat ) {
+        if ( s.world.save_doc )
+            ui_progress_boat_used( *s.world.save_doc, boat );
+    };
     s.rules.screen_hooks.award.unlock_value = [ ]( std::uint32_t, const std::string&, std::int32_t ) { return 0; };
     s.rules.screen_hooks.award.unlock_show = [ ]( std::int32_t, const std::vector< std::string >& ) { return false; };
     s.rules.screen_hooks.award.award_open = [ &s ]( const char*, std::int32_t, const std::string&, std::int32_t, const std::vector< std::string >& ) {

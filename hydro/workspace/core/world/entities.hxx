@@ -365,6 +365,7 @@ inline void c_world::load_entity_tree( const char* asset, const value_t& project
             // The clip arrives from a VuPlayAnimationEntity; bind_animations
             // joins them.
             animated_t item{};
+            item.entity = &e;
             item.asset = m.model_asset;
             item.path = trail;
             std::memcpy( item.world, matrix, sizeof( item.world ) );

@@ -23,6 +23,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <workspace/utility/checks/records.hxx>
 
 // The boat area's race-time checks (the camera, the respawn, the animation tick, the drivers): included by
 // check.hxx after checks/boat.hxx. verify_race_all runs them all.
@@ -3243,6 +3244,7 @@ inline bool verify_race_all( )
     ok = verify_save_all( ) && ok;
     ok = verify_settings_profile( ) && ok;
     ok = verify_hidden_packages( ) && ok;
+    ok = verify_progress_race( ) && ok;
     ok = verify_subtitle( ) && ok;
     ok = verify_asset_xml_load( ) && ok;
     ok = verify_asset_loads( ) && ok;

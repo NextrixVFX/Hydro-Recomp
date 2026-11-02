@@ -1,6 +1,12 @@
 #pragma once
 
+#include <workspace/core/save/cloud.hxx>
+#include <workspace/core/save/profile.hxx>
+#include <workspace/core/ui/progress.hxx>
+#include <workspace/core/save/ghost.hxx>
 #include <workspace/core/world/ghost.hxx>
+#include <workspace/core/world/ghostgame.hxx>
+#include <workspace/core/world/records.hxx>
 #include <workspace/core/world/tiretrack.hxx>
 #include <workspace/core/world/pause.hxx>
 #include <workspace/core/boat/construct.hxx>
@@ -186,6 +192,11 @@ struct race_world_t
     std::function< bool( const entity_t& e ) > motion_release;
     // The audio platform (FMOD's imports - world/sound.hxx; c_world's). Null: no audio calls made (logged).
     const sound_hooks_t* sound = nullptr;
+    // The game save (VuCloudSaveManager +0x20, c_world's; null: saves off) and HiddenPackagesDB; 0x4ABD60; the input manager's profile load.
+    value_t* save_doc = nullptr;
+    const value_t* hidden_db = nullptr;
+    std::function< void( ) > save_game;
+    std::function< void( platform_input_t& ) > input_profile;
     std::uint32_t viewports = 1;
     std::int32_t control_method = 0;
     std::int32_t display_w = 1280;
@@ -223,7 +234,8 @@ struct race_session_t
     pause_menu_t pause;                 // the pause menu VuActionGameMode +0x60: its gate only (world/pause.hxx)
     ui_game_screens_t screens;          // VuGame +0x84 the Results VuCommonScreen 0x73F588 (ui/common.hxx; bound by c_world::bind_game_screens)
     tire_track_manager_t tire_tracks;   // VuTireTrackManager g 0x7590F4 (world/tiretrack.hxx; its lists stay empty in retail)
-    std::string ghost_error;            // VuGhostGame +0x740 (a string key, ShowError's message)
+    ghost_loads_t ghost_loads;          // VuGhostGame +0x75C .. and +0x740 (ShowError's message)
+    ghost_game_t ghost_game;            // the handlers' view of the game (world/ghostplay.hxx)
     std::vector< pfx_frame_boat_t > pfx_boats;
     std::vector< pfx_frame_fluids_t > pfx_fluids;
     std::vector< race_start_boat_t > start_boats;
@@ -291,6 +303,8 @@ struct race_session_t
         entity_t* entity = nullptr;
         powerup_t p;
         bool boost = false;
+        bool package = false;                 // VuPowerUpHiddenPackageEntity
+        std::string package_name;             // its +0x138
         std::uint8_t randomize = 1;           // +0x138
         std::vector< std::uint8_t > image;    // what 0x43DB40 reads: +0x13C the energy, +0x140 the multiplayer byte
         level_body_t* body = nullptr;         // +0x114
@@ -2700,4 +2714,5 @@ inline void race_session_boat_events( race_session_t& s )
     }
 }
 
+#include <workspace/core/world/ghostplay.hxx>
 #include <workspace/core/world/opening.hxx>

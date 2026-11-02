@@ -11,11 +11,11 @@
 
 // The level's power-ups made live (world batch 35): VuPowerUpEntity's gameInitialize 0x43B9D0, the body 0x43C700, the
 // Decision tick 0x43BDB0, the contact part +0x5C (0x43C8C0) and slots 12 / 13 / 15, all boat/powerup.hxx's on OUR session.
-// Boosts (37 on Hydroelectric) and triggers (3); VuPowerUpHiddenPackageEntity (10) is the saves-side package manager's
-// (not made live: logged). Hooks answered here:
+// Boosts (37 on Hydroelectric), triggers (3), hidden packages (10; slots 6 0x43DD20, 13 0x43DE20, 15 0x43DE80, on world/records.hxx's
+// manager: with the saves off no document answers, so they are not made live). Hooks answered here:
 //   an entity id (0x500D50, FNV-1a of the long name) is the boat's index + 1: SUBSTITUTION, the map's key only;
-//   the ApplyPfx (0x52BAC0 + the spring constraint), the sound, the voice and the StaticPfx's scale (vt+0x10: no slot in
-//   boat_pfx_ops_t) are logged, not run; gameRelease 0x43BCA0 is not run (the session's teardown drops the bodies).
+//   the ApplyPfx (0x52BAC0 + the spring constraint: read to 0x43C02D, tools tmp/b38/d_43BDB0.txt) and the StaticPfx's scale (vt+0x10: no slot
+//   in boat_pfx_ops_t) are logged, not run; gameRelease 0x43BCA0 is not run (the session's teardown drops the bodies).
 
 // 0x43C700: a btSphereShape (vtable 0x73ADD4: type 8, +0x10 scaling (1, 1, 1, 0), +0x20 and +0x30 the radius), mass 0, the
 // entity's world, group 0x20, mask 0x10 (the boats), +0xD8 |= 4, +0x2C4 the +0x5C part (a marker word here).
@@ -90,6 +90,35 @@ inline powerup_world_hooks_t race_powerup_world_hooks( race_session_t& s, race_s
     return h;
 }
 
+// 0x4D3410: the file name of GameData.Level (0x564AE0: past the last '/').
+inline std::string race_level_name( const race_session_t& s )
+{
+    const std::string level = race_game_data_text( s.util, nullptr, "Level" );
+    const std::size_t slash = level.rfind( '/' );
+    return slash == std::string::npos ? level : level.substr( slash + 1 );
+}
+
+// The manager's slots on the game save (world/records.hxx).
+inline powerup_package_hooks_t race_powerup_package_hooks( race_session_t& s, race_session_t::powerup_live_t& u )
+{
+    powerup_package_hooks_t p;
+    p.is_found = [ &s ]( const std::string& name ) { return package_is_found( *s.world.save_doc, name ); };
+    p.set_found = [ &s ]( const std::string& name ) {
+        package_set_found( *s.world.save_doc, name, s.world.save_game, [ &s ]( const char*, float ) { race_unwired( s, "the \"Collector\" achievement 0x4AA1A0 (a platform service) - not run" ); } );
+    };
+    p.level = [ &s ] { return race_level_name( s ); };
+    p.first = [ &s ]( const std::string& level, std::int32_t& value ) { return package_in_level( *s.world.hidden_db, level, value ); };
+    p.second = [ &s ]( const std::string& level, std::int32_t& value ) { package_found_in_level( *s.world.save_doc, level, value ); };
+    p.broadcast = [ &s ]( const std::vector< std::uint32_t >& w ) {
+        ui_params_t params;
+        ui_params_add( params, w[ 0 ], w[ 1 ] );
+        ui_params_add( params, w[ 2 ], w[ 3 ] );
+        race_session_post( s, "OnPackageFound", &params );
+    };
+    p.remove_from_world = [ &s, &u ] { powerup_remove_from_world( u.p, race_powerup_world_hooks( s, u ) ); };
+    return p;
+}
+
 // slot 13: the boost's 0x43D960 (the "MPBoost" entry with more than one human), every other type's 0x43BD40.
 inline void race_powerup_enable( race_session_t& s, race_session_t::powerup_live_t& u )
 {
@@ -97,6 +126,8 @@ inline void race_powerup_enable( race_session_t& s, race_session_t::powerup_live
     if ( u.boost )
         powerup_boost_enable( u.p, u.randomize, u.image[ 0x140 ], static_cast< std::int32_t >( s.manager.lists.humans.boats.size( ) ),
                               powerup_db_entry( s.powerup_db, "MPBoost" ), h );
+    else if ( u.package )
+        powerup_package_enable( u.p, u.package_name, race_powerup_package_hooks( s, u ), h );
     else
         powerup_add_to_world( u.p, h );
 }
@@ -134,6 +165,8 @@ inline void race_powerup_tick( void* user, float dt )
     h.apply = [ &s, &u ]( void* v ) -> bool {
         race_session_boat_t& b = *static_cast< race_session_boat_t* >( v );
         std::uint8_t* boat = b.graph.objects[ 0 ].image.data( );
+        if ( u.package )
+            return powerup_package_apply( true, race_session_is_human( s, boat ), u.package_name, race_powerup_package_hooks( s, u ) );
         if ( u.boost )
         {
             ++s.powerups_applied;
@@ -147,8 +180,20 @@ inline void race_powerup_tick( void* user, float dt )
     h.apply_pfx = [ &s ]( void* ) { race_unwired( s, "a power-up's ApplyPfx (0x52BAC0 + VuPfxBoatSpringConstraint) - not run" ); };
     h.driver_38 = [ ]( void* ) { return true; };   // 0x404BD0 in all five driver vtables
     h.driver_30 = [ &s ]( void* v ) { return race_session_is_human( s, static_cast< race_session_boat_t* >( v )->graph.objects[ 0 ].image.data( ) ); };
-    h.sound = [ &s ]( const float* ) { race_unwired( s, "audio: a power-up's AudioEvent (FMOD - platform)" ); };
-    h.voice = [ &s ]( void* ) { race_unwired( s, "a power-up's voice over (VuVoiceOverManager vt+0x1C) - not run" ); };
+    h.sound = [ &s, &u ]( const float* position ) {
+        // FMOD getEvent ( AudioEvent, 1 ); on success set3DAttributes ( the position, 0, 0 ) and start.
+        const sound_hooks_t* a = s.world.sound;
+        std::uint32_t event = 0;
+        if ( !a || !a->get_event || a->get_event( a->user, u.p.audio_event.c_str( ), 1u, &event, nullptr ) != 0 )
+            return;
+        if ( a->attributes )
+            a->attributes( a->user, event, position, nullptr, nullptr );
+        if ( a->start )
+            a->start( a->user, event );
+    };
+    h.voice = [ &s, &u ]( void* v ) {
+        race_session_vo_say( s, static_cast< race_session_boat_t* >( v )->graph.objects[ 0 ].image.data( ), u.p.voice_over.c_str( ), false );
+    };
     if ( !powerup_decision_tick( u.p, t->world + 12, dt, h ) )
         race_unwired( s, "a power-up's pickup named no boat - UNKNOWN" );
 }
@@ -157,12 +202,13 @@ inline void race_powerup_tick( void* user, float dt )
 inline bool race_session_powerup( race_session_t& s, entity_t& e, std::uint32_t& id, const c_archive& archive )
 {
     const bool boost = e.m_type == "VuPowerUpBoostEntity";
-    if ( e.m_type == "VuPowerUpHiddenPackageEntity" )
+    const bool package = e.m_type == "VuPowerUpHiddenPackageEntity";
+    if ( package && ( !s.world.save_doc || !s.world.hidden_db ) )
     {
-        race_unwired( s, "VuPowerUpHiddenPackageEntity's gameInitialize: the hidden package manager (saves side) - not made live" );
+        race_unwired( s, "VuPowerUpHiddenPackageEntity's gameInitialize with the saves off - not made live" );
         return true;
     }
-    if ( !boost && e.m_type != "VuPowerUpTriggerEntity" )
+    if ( !boost && !package && e.m_type != "VuPowerUpTriggerEntity" )
         return false;
     const auto* props = entity_action< powerup_properties_t >( e );
     if ( !props || !entity_transform( e ) )
@@ -180,6 +226,12 @@ inline bool race_session_powerup( race_session_t& s, entity_t& e, std::uint32_t&
     u->session = &s;
     u->entity = &e;
     u->boost = boost;
+    u->package = package;
+    if ( package )   // slot 6 0x43DD20: +0x138, before the base gameInitialize
+    {
+        u->package_name = race_entity_path( &e );   // 0x500BF0's long name holds the root's name first: powerup_package_name drops just that, which this never had
+        LOG_INFO( "saves: hidden package %s (%s)", u->package_name.c_str( ), package_is_found( *s.world.save_doc, u->package_name ) ? "found" : "not found" );
+    }
     u->randomize = props->randomize;
     u->image.assign( 0x144, 0 );
     powerup_t& p = u->p;

@@ -130,6 +130,28 @@ inline skel_instance_t* c_world::prop_instance( entity_t& e )
     return nullptr;
 }
 
+// The prop's pose at item.control.time: false with no instance / clip (UNKNOWN: the old path stands, counted).
+inline bool c_world::prop_pose( const animated_t& item, std::vector< float >& palette )
+{
+    entity_t* owner = item.entity;
+    skel_instance_t* instance = owner ? prop_instance( *owner ) : nullptr;
+    if ( !instance )
+        return false;
+    prop_skel_t& s = *m_prop_skels[ owner ];
+    if ( !s.has_clip )
+        return false;
+    if ( !s.added )
+    {
+        skel_animated_add( s.animated, &s.control );
+        s.added = true;
+    }
+    s.control.time = item.control.time;
+    if ( !skel_animated_build( s.animated ) || !skel_instance_set_pose( s.model.instance, &s.animated ) )
+        return false;
+    palette = s.model.instance.palette[ s.model.instance.current & 1 ];   // the one setPose wrote
+    return true;
+}
+
 // VuAnimatedPropEntity's tick 0x5ED030 as the attach records see it: the pose (0x5169E0's time: the old path's control; 0x516CF0,
 // 0x532720), then its attach component's slot 14 with the transform's world and zero velocities (0x5ED3BE), whether a clip plays or not.
 inline void c_world::animated_attach_tick( )

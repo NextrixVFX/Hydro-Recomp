@@ -566,8 +566,35 @@ private:
     void bind_game_screens( );   // huds.hxx: Results' VuCommonScreen into s.rules.screen_hooks
     void hud( int project, race_hud_verb_t verb, float dt );
     void ui_frame( );
+public:
+    ~c_world( ) { saves_exit( ); }   // 0x4DAA28
+
+private:
+    // The saves (world/saves.hxx).
+    void saves_exit( );
+    void saves_start( );
+    void saves_profile_listeners( );
+    void saves_commit( );
+    void saves_game( );
+    void saves_input( platform_input_t& in );
+    void saves_bind( );
+    bool m_saves_started = false;
+    bool m_saves_on = false;
+    c_profile_manager m_profile;                        // g 0x759084
+    c_cloud_save m_cloud;                               // g 0x758FA0
+    value_t m_hidden_db;                                // VuHiddenPackageManagerImpl +4's document
     // The game modes (world/mode.hxx, menu.hxx).
     friend class c_menu_mode;
+    friend class c_title_mode;
+    bool m_title = false;
+    void menu_bind( );
+    const value_t& title_db( );
+    void title_enter( );
+    void title_exit( );
+    void title_sound( );
+    void title_progress( int project, float value );
+    bool title_launch( ) const;
+    front_end_engine_t& title_engine( ) { return m_menu_engine; }
     friend class c_action_slot;
     void modes_bind( );
     void action_enter( );
@@ -943,7 +970,7 @@ private:
 public:
     bool loaded( ) const
     {
-        return m_loaded;
+        return m_loaded || m_title;
     }
 
     // VuActionGameMode's load 0x4BA060, in its order: the project by 0x4D3480 (race_project_name: GameData's Level,
@@ -1005,6 +1032,7 @@ public:
     {
         if ( !m_opened )
             load( );
+        saves_start( );
         if ( !m_sorted )
         {
             void* device = nullptr;
@@ -1025,8 +1053,14 @@ public:
         }
         if ( !m_modes.m_factory )
             modes_bind( );
-        // Ours (a test driver): `--menu` starts at the front end. A normal launch's TitleSequence (0x4CBD48's first mode, ctor 0x4C6AB0) is NOT
-        // recreated: without the option the scaffold's race still loads.
+        // 0x4CBD48: a normal launch's first mode (world/title.hxx). The command line's race stays for the tests.
+        if ( title_launch( ) )
+        {
+            m_modes.m_next = "TitleSequence";
+            m_modes.change( );
+            return;
+        }
+        // Ours (a test driver): `--menu` starts at the front end.
         if ( c_engine::option( "menu" ) != nullptr && !m_has_chosen )
         {
             if ( !m_opened )
@@ -1111,6 +1145,7 @@ public:
             LOG_WARNING( "0x4BA060: the %s game's ctor (0x48BEC0 / 0x48ED30 / 0x484A20) is NOT recreated - no game object", type.c_str( ) );
             break;
         }
+        saves_commit( );   // 0x4BA396 / 0x4BA3A7, at the load's end
         };
         m_action.reset( );
         if ( race && front_end )
@@ -1157,6 +1192,7 @@ public:
         };
         m_race.world.fire = [ this ]( const entity_t& owner, const char* plug ) { fire( entity_path( owner ), plug ); };
         m_race.world.sound = &m_sound;
+        saves_bind( );
         m_race.world.prop_moved = [ this ]( const entity_t& owner ) { prop_moved( owner ); };
         m_race.world.attach_update = [ this ]( const entity_t& parent, const float* m, const float* l, const float* a ) { m_joints.parent_moved( parent, m, l, a ); };
         m_race.world.motion_release = [ this ]( const entity_t& e ) { return motion_release( e ); };
@@ -1416,6 +1452,11 @@ public:
     }
     void scene_frame( float dt )
     {
+        if ( m_title )   // the title sequence runs no scene: the mode manager's tick alone
+        {
+            m_modes.tick( dt );
+            return;
+        }
         if ( !m_loaded )
             return;
 
@@ -1768,6 +1809,7 @@ private:
     // component, which names only the model.
     struct animated_t
     {
+        entity_t* entity = nullptr;
         std::string asset;
         std::string path;
         std::string clip;
@@ -1910,6 +1952,7 @@ private:
         bool has_clip = false, added = false;
     };
     std::map< entity_t*, std::unique_ptr< prop_skel_t > > m_prop_skels;
+    bool prop_pose( const animated_t& item, std::vector< float >& palette );
     int m_motion_unknown = 0;   // a motion child's IF slot 0 not read
     // (entity, refName) -> the full path the ref points at.
     std::map< std::pair< std::string, std::string >, std::string > m_refs;
@@ -2056,6 +2099,7 @@ private:
 
 #include <workspace/core/world/graph.hxx>
 #include <workspace/core/world/menu.hxx>
+#include <workspace/core/world/saves.hxx>
 #include <workspace/core/world/motion.hxx>
 #include <workspace/core/world/animate.hxx>
 #include <workspace/core/world/entities.hxx>
