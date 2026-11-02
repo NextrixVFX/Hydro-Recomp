@@ -161,6 +161,7 @@
     <ClInclude Include="workspace\core\ui\bind.hxx" />
     <ClInclude Include="workspace\core\ui\board.hxx" />
     <ClInclude Include="workspace\core\ui\button.hxx" />
+    <ClInclude Include="workspace\core\ui\champ.hxx" />
     <ClInclude Include="workspace\core\ui\chooser.hxx" />
     <ClInclude Include="workspace\core\ui\combo.hxx" />
     <ClInclude Include="workspace\core\ui\compose.hxx" />
@@ -184,6 +185,8 @@
     <ClInclude Include="workspace\core\ui\message.hxx" />
     <ClInclude Include="workspace\core\ui\navigate.hxx" />
     <ClInclude Include="workspace\core\ui\overlay.hxx" />
+    <ClInclude Include="workspace\core\ui\pages.hxx" />
+    <ClInclude Include="workspace\core\ui\remap.hxx" />
     <ClInclude Include="workspace\core\ui\results.hxx" />
     <ClInclude Include="workspace\core\ui\schema.hxx" />
     <ClInclude Include="workspace\core\ui\screen.hxx" />

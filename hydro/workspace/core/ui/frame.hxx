@@ -6,6 +6,7 @@
 #include <workspace/core/ui/image.hxx>
 #include <workspace/core/ui/leave.hxx>
 #include <workspace/core/ui/leaves.hxx>
+#include <workspace/core/ui/message.hxx>
 
 #include <array>
 #include <cstdint>
@@ -58,7 +59,8 @@ enum class ui_frame_kind_t
     difficulty_image,  // VuDifficultyImageEntity: 0x4077E3 -> slot 12 0x45AF40 (difficulty.hxx; needs m_difficulty)
     difficulty_text,   // VuDifficultyTextEntity: 0x4077E3 -> slot 12 0x45AA30 (difficulty.hxx; needs m_difficulty)
     board,             // VuUIMiniLeaderboardEntity: 0x47DB40 (board.hxx c_ui_mini_board::draw over its runtime FSM; needs m_board)
-    leaderboard        // VuUILeaderboardEntity: 0x47A360 (ladder.hxx ui_leaderboard_draw over its runtime state; needs m_leaderboard)
+    leaderboard,       // VuUILeaderboardEntity: 0x47A360 (ladder.hxx ui_leaderboard_draw over its runtime state; needs m_leaderboard)
+    message_box        // VuMessageBoxScreenEntity: 0x4675A0 (message.hxx: the box, then its children walked like a container's; needs m_message_box)
 };
 
 struct ui_draw_target_t
@@ -121,7 +123,7 @@ inline const ui_draw_target_t k_ui_draw_targets[ ] = {
     { 0x0073D45Cu, 0x0045FB90u, 0x0045FB90u, ui_frame_kind_t::other, 0x00000000u },   // Screens/ControlsGamepad (2 loaded)
     { 0x0073D4F4u, 0x0045FB90u, 0x0045FB90u, ui_frame_kind_t::other, 0x00000000u },   // Screens/ControlsGamepad (14 loaded)
     { 0x0073D724u, 0x004632E0u, 0x004632E0u, ui_frame_kind_t::bar, 0x00000000u },   // Screens/LoadingChamp (7 loaded)
-    { 0x0073D8E4u, 0x004675A0u, 0x004675A0u, ui_frame_kind_t::other, 0x00000000u },   // Screens/MessageBox (1 loaded)
+    { 0x0073D8E4u, 0x004675A0u, 0x004675A0u, ui_frame_kind_t::message_box, 0x00000000u },   // Screens/MessageBox (1 loaded)
     { 0x0073DA38u, 0x0046A500u, 0x0046A500u, ui_frame_kind_t::other, 0x00000000u },   // Screens/RaceResults (2 loaded)
     { 0x0073DE6Cu, 0x004390BEu, 0x00475B10u, ui_frame_kind_t::combo_box, 0x00000000u },   // Screens/SettingsGraphics (1 loaded)
     { 0x0073DED4u, 0x004390BEu, 0x00475B10u, ui_frame_kind_t::combo_box, 0x00000000u },   // Screens/Settings (2 loaded)
@@ -234,6 +236,9 @@ struct ui_frame_inputs_t
     // with the leaf's environment; false = it reached a path not recreated. Null: unrecreated.
     std::function< bool( const entity_t&, ui_gfx_sort_t&, const ui_font_draw_env_t& ) > m_board;
     std::function< bool( const entity_t&, ui_gfx_sort_t&, const ui_font_draw_env_t& ) > m_leaderboard;
+    // Batch 27: the message box's runtime state (message.hxx: the enabled bytes, texts, fonts, +0x528..+0x588) and its textures,
+    // over the fields the frame takes from the loaded properties (ui_message_box_of). false: unrecreated.
+    std::function< bool( const entity_t&, ui_message_box_t&, ui_message_box_inputs_t& ) > m_message_box;
 };
 
 // A loaded entity's own / its first UI draw component's property bits.
@@ -517,20 +522,82 @@ inline bool ui_frame_ready( ui_frame_kind_t kind, const ui_frame_inputs_t* in )
         return in && in->m_board;
     case ui_frame_kind_t::leaderboard:
         return in && in->m_leaderboard;
+    case ui_frame_kind_t::message_box:
+        return in && in->m_message_box;
     default:
         return true;
     }
 }
-// `sort` holds the key words before the frame (VuGfxSort +0x70 / +0x74);
-// `layer` = the screen's +0x5C (4 from its ctor). With `inputs`, the text /
-// image / button leaves emit their records into `sort` in walk order.
-inline ui_frame_t ui_screen_frame( const entity_t& screen, const ui_impl_t& impl, ui_gfx_sort_t& sort, float alpha, std::uint32_t layer = 4,
-                                   const ui_frame_inputs_t* inputs = nullptr )
+// The message box's fields from the loaded properties (the names verify_ui_
+// message_box_draw compares with retail's bytes): the screen scale, the image
+// rect, the five blocks' rects / alignments / flags and font params (bytes
+// 0..40 from OUR "<block> Font" over the FontDB; 41..59 left 0 - UNKNOWN), the
+// button / spinner / touch rects, flips, colours, Depth. The runtime fields are
+// the m_message_box input's.
+inline void ui_message_box_of( const entity_t& e, const ui_frame_inputs_t& in, ui_message_box_t& b )
 {
-    ui_frame_t frame;
-    ui_gfx_stacks_t stacks;
-    int depth = 0;
-    std::function< void( const entity_t&, int, float ) > draw = [ & ]( const entity_t& e, int component, float a )
+    static const char* const k_blocks[ 5 ] = { "Heading", "Body", "BodyImage", "ButtonA", "ButtonB" };
+    static const char* const k_xywh[ 4 ] = { " X", " Y", " Width", " Height" };
+    ui_frame_take( e, "Screen Scale", b.m_screen_scale, 8 );
+    for ( int j = 0; j < 4; ++j )
+    {
+        ui_frame_take( e, ( std::string( "Image" ) + k_xywh[ j ] ).c_str( ), &b.m_image[ j ], 4 );
+        ui_frame_take( e, ( std::string( "ButtonA Texture" ) + k_xywh[ j ] ).c_str( ), &b.m_button_rect[ 0 ][ j ], 4 );
+        ui_frame_take( e, ( std::string( "ButtonB Texture" ) + k_xywh[ j ] ).c_str( ), &b.m_button_rect[ 1 ][ j ], 4 );
+        ui_frame_take( e, ( std::string( "Animated Texture" ) + k_xywh[ j ] ).c_str( ), &b.m_spinner_rect[ j ], 4 );
+        ui_frame_take( e, ( std::string( "ButtonA Touch" ) + k_xywh[ j ] ).c_str( ), &b.m_touch[ 0 ][ j ], 4 );
+        ui_frame_take( e, ( std::string( "ButtonB Touch" ) + k_xywh[ j ] ).c_str( ), &b.m_touch[ 1 ][ j ], 4 );
+    }
+    for ( int k = 0; k < 5; ++k )
+    {
+        ui_message_block_t& t = b.m_blocks[ k ];
+        const std::string p = k_blocks[ k ];
+        for ( int c = 0; c < 4; ++c )
+            ui_frame_take( e, ( p + k_xywh[ c ] ).c_str( ), &t.m_rect[ c ], 4 );
+        ui_frame_take( e, ( p + " Horizontal Alignment" ).c_str( ), &t.m_h_align, 4 );
+        ui_frame_take( e, ( p + " Vertical Alignment" ).c_str( ), &t.m_v_align, 4 );
+        ui_frame_take( e, ( p + " No Clip" ).c_str( ), &t.m_no_clip, 1 );
+        ui_frame_take( e, ( p + " Single Line" ).c_str( ), &t.m_single_line, 1 );
+        ui_frame_take( e, ( p + " Wordbreak" ).c_str( ), &t.m_wordbreak, 1 );
+        std::memset( t.m_params, 0, 60 );
+        const ui_slot_t* font = ui_property_value( e, ( p + " Font" ).c_str( ) );
+        std::string asset;
+        if ( in.m_fontdb )
+            ui_font_params( *in.m_fontdb, font ? font->m_text : std::string( ), t.m_params, asset );
+    }
+    ui_frame_take( e, "ButtonA Texture FlipX", &b.m_button_flip[ 0 ], 1 );
+    ui_frame_take( e, "ButtonB Texture FlipX", &b.m_button_flip[ 1 ], 1 );
+    ui_frame_take( e, "Selected Text Color", &b.m_selected_colour, 4 );
+    ui_frame_take( e, "Animated Texture Color", &b.m_spinner_colour, 4 );
+    b.m_depth = ui_frame_depth( e );
+}
+
+// The walk both exports run: containers walked into; the message box (with its
+// input) drawn - its own records, a leaf entry - then its children walked; every
+// other draw a leaf (emitted when ready).
+struct ui_frame_walk_t
+{
+    ui_frame_t m_frame;
+    ui_gfx_stacks_t m_stacks;
+    int m_depth = 0;
+    std::function< void( const entity_t&, int, float ) > m_draw;
+
+    ui_frame_walk_t( const ui_impl_t& impl, ui_gfx_sort_t& sort, const ui_frame_inputs_t* inputs )
+    {
+        m_draw = [ this, &impl, &sort, inputs ]( const entity_t& e, int component, float a ) { visit( impl, sort, inputs, e, component, a ); };
+    }
+    ui_frame_walk_t( const ui_frame_walk_t& ) = delete;
+    ui_frame_walk_t& operator=( const ui_frame_walk_t& ) = delete;
+
+    void visit( const ui_impl_t& impl, ui_gfx_sort_t& sort, const ui_frame_inputs_t* inputs, const entity_t& e, int component, float a );
+};
+
+inline void ui_frame_walk_t::visit( const ui_impl_t& impl, ui_gfx_sort_t& sort, const ui_frame_inputs_t* inputs, const entity_t& e, int component, float a )
+{
+    ui_frame_t& frame = m_frame;
+    ui_gfx_stacks_t& stacks = m_stacks;
+    int& depth = m_depth;
+    const std::function< void( const entity_t&, int, float ) >& draw = m_draw;
     {
         const ui_draw_target_t* target = ui_draw_target_of( e );
         if ( target && target->m_kind == ui_frame_kind_t::container )
@@ -540,6 +607,41 @@ inline ui_frame_t ui_screen_frame( const entity_t& screen, const ui_impl_t& impl
             ui_container_draw( e, a, draw );
             --depth;
             return;
+        }
+        if ( target && target->m_kind == ui_frame_kind_t::message_box && ui_frame_ready( target->m_kind, inputs ) )
+        {
+            ui_message_box_t b;
+            ui_message_box_of( e, *inputs, b );
+            ui_message_box_inputs_t mi;
+            if ( inputs->m_message_box( e, b, mi ) )
+            {
+                // 0x4675A0: the box's leaf entry (the key / tops it sees after its own pushes), its records, then the children
+                const std::size_t at = frame.m_draws.size( );
+                ui_frame_draw_t d;
+                d.m_entity = &e;
+                d.m_component = component;
+                d.m_alpha = a;
+                d.m_key_lo = sort.m_key_lo;
+                d.m_key_hi = ui_message_box_key_hi( sort.m_key_hi );
+                std::memcpy( d.m_matrix.data( ), impl.m_crop.m_matrix, 64 );
+                d.m_top = impl.m_float;
+                d.m_depth = depth;
+                d.m_kind = ui_frame_kind_t::message_box;
+                d.m_target = target->m_target;
+                d.m_emitted = true;
+                const std::size_t before = sort.m_commands[ sort.m_index ].size( );
+                d.m_first = static_cast< int >( before );
+                frame.m_draws.push_back( d );
+                ++depth;
+                if ( !ui_message_box_draw( sort, stacks, impl, inputs->m_env, inputs->m_db, e, b, mi, a, draw ) )
+                    ++frame.m_unknown;
+                --depth;
+                int inner = 0;
+                for ( std::size_t k = at + 1; k < frame.m_draws.size( ); ++k )
+                    inner += frame.m_draws[ k ].m_commands;
+                frame.m_draws[ at ].m_commands = static_cast< int >( sort.m_commands[ sort.m_index ].size( ) - before ) - inner;
+                return;
+            }
         }
         ui_frame_draw_t d;
         d.m_entity = &e;
@@ -566,7 +668,32 @@ inline ui_frame_t ui_screen_frame( const entity_t& screen, const ui_impl_t& impl
             d.m_emitted = true;
         }
         frame.m_draws.push_back( d );
-    };
-    ui_screen_draw( sort, stacks, impl, screen, layer, alpha, draw );
-    return frame;
+    }
+}
+
+// `sort` holds the key words before the frame (VuGfxSort +0x70 / +0x74);
+// `layer` = the screen's +0x5C (4 from its ctor). With `inputs`, the text /
+// image / button leaves emit their records into `sort` in walk order.
+inline ui_frame_t ui_screen_frame( const entity_t& screen, const ui_impl_t& impl, ui_gfx_sort_t& sort, float alpha, std::uint32_t layer = 4,
+                                   const ui_frame_inputs_t* inputs = nullptr )
+{
+    ui_frame_walk_t walk( impl, sort, inputs );
+    ui_screen_draw( sort, walk.m_stacks, impl, screen, layer, alpha, walk.m_draw );
+    return walk.m_frame;
+}
+
+// Batch 27, THE EXPORT for a root that is not a VuUIScreenEntity (Screens/
+// MessageBox's root is the VuMessageBoxScreenEntity itself - its vtable 0x73D8E4
+// has no slot 13): its own first UI draw component's draw (+0x48 order) - for
+// the box 0x4675A0 - run as the walk runs every draw, stacks empty.
+inline ui_frame_t ui_root_frame( const entity_t& root, const ui_impl_t& impl, ui_gfx_sort_t& sort, float alpha, const ui_frame_inputs_t* inputs = nullptr )
+{
+    ui_frame_walk_t walk( impl, sort, inputs );
+    for ( std::size_t c = 0; c < root.m_components.size( ); ++c )
+        if ( root.m_components[ c ].m_vtable == k_ui_draw_component_vtable )
+        {
+            walk.m_draw( root, static_cast< int >( c ), alpha );
+            break;
+        }
+    return walk.m_frame;
 }
