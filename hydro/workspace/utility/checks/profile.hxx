@@ -3,6 +3,7 @@
 // Boat batch 33's save listeners against retail (case settings_profile, cases/profile.py): VuSettingsManager 0x4B4870 0x4B5240,
 // VuCloudManager's 0x5C62C0 0x5C63B0, VuUnlockManagerImpl's script on the real UnlockDB. Included after checks/save.hxx.
 
+#include <workspace/core/game/packages.hxx>
 #include <workspace/core/game/settings.hxx>
 
 #include <cstdint>
@@ -204,5 +205,67 @@ inline bool verify_settings_profile( )
                      "match retail: %u settings, %u cloud, %u unlock runs, %d steps, %d rows found", settings_count, cloud_count, unlock_runs, ops, founds );
     else
         LOG_ERROR( "settings_profile FAILED %d", bad );
+    return bad == 0;
+}
+
+// c_hidden_packages against retail's slots 6 - 12 (case hidden_packages): the real HiddenPackagesDB, a seeded script, per step the answer, the out word,
+// the hooks in order and the save's dump.
+inline bool verify_hidden_packages( )
+{
+    save_words_t c{ g_golden_hidden_packages_words };
+    const std::string dbbytes = c.str( );
+    value_t db;
+    c_reader::read_at_start( std::vector< std::uint8_t >( dbbytes.begin( ), dbbytes.end( ) ), db );
+    const unsigned runs = c.next( );
+    int bad = 0, steps = 0;
+    for ( unsigned v = 0; v < runs; ++v )
+    {
+        const std::string doc = c.str( );
+        value_t data;
+        c_reader::read_at_start( std::vector< std::uint8_t >( doc.begin( ), doc.end( ) ), data );
+        std::vector< std::string > log;
+        c_hidden_packages p;
+        p.init( &db );
+        p.save = [ & ] { log.push_back( "save" ); };
+        p.progress = [ & ]( const char* name, float percent ) {
+            std::uint32_t u;
+            std::memcpy( &u, &percent, 4 );
+            char line[ 64 ];
+            std::snprintf( line, sizeof( line ), "progress %s %08X", name, u );
+            log.push_back( line );
+        };
+        const unsigned n = c.next( );
+        for ( unsigned k = 0; k < n; ++k, ++steps )
+        {
+            const unsigned op = c.next( ), r = c.next( ), want_out = c.next( );
+            const std::string name = c.str( );
+            std::vector< std::string > want( c.next( ) );
+            for ( std::string& s : want )
+                s = c.str( );
+            const std::string dump = c.str( );
+            log.clear( );
+            unsigned got = 0xFFFFFFFFu;
+            std::int32_t out = 0x5A5A5A5A;
+            switch ( op )
+            {
+            case 0: p.set_found( data, name ); break;
+            case 1: got = c_hidden_packages::is_found( data, name ) ? 1u : 0u; break;
+            case 2: got = p.level_total( name, out ) ? 1u : 0u; break;
+            case 3: c_hidden_packages::level_found( data, name, out ); break;
+            case 4: out = c_hidden_packages::found_total( data ); break;
+            case 5: got = p.level_complete( data, name ) ? 1u : 0u; break;
+            case 6: c_hidden_packages::clear( data ); break;
+            default: break;
+            }
+            std::string got_dump;
+            vujb_dump( data, got_dump );
+            if ( ( got != r || static_cast< unsigned >( out ) != want_out || log != want || got_dump != dump ) && bad++ < 6 )
+                LOG_ERROR( "hidden_packages run %u step %u op %u: answer %u / %u, out %d / %u, log %d, dump %s", v, k, op, got, r, out, want_out, log == want ? 1 : 0, got_dump == dump ? "ok" : "differs" );
+        }
+    }
+    if ( bad == 0 )
+        LOG_SUCCESS( "VuHiddenPackageManagerImpl slots 6 - 12 (0x4AFEF0 .. 0x4B0250) match retail: %u runs, %d steps on the real HiddenPackagesDB", runs, steps );
+    else
+        LOG_ERROR( "hidden_packages FAILED %d", bad );
     return bad == 0;
 }
