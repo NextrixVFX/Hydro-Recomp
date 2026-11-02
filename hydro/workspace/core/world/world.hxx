@@ -566,6 +566,18 @@ private:
     void bind_game_screens( );   // huds.hxx: Results' VuCommonScreen into s.rules.screen_hooks
     void hud( int project, race_hud_verb_t verb, float dt );
     void ui_frame( );
+    // The saves (world/saves.hxx).
+    void saves_start( );
+    void saves_profile_listeners( );
+    void saves_commit( );
+    void saves_game( );
+    void saves_input( platform_input_t& in );
+    void saves_bind( );
+    bool m_saves_started = false;
+    bool m_saves_on = false;
+    c_profile_manager m_profile;                        // g 0x759084
+    c_cloud_save m_cloud;                               // g 0x758FA0
+    value_t m_hidden_db;                                // VuHiddenPackageManagerImpl +4's document
     // The game modes (world/mode.hxx, menu.hxx).
     friend class c_menu_mode;
     friend class c_action_slot;
@@ -1005,6 +1017,7 @@ public:
     {
         if ( !m_opened )
             load( );
+        saves_start( );
         if ( !m_sorted )
         {
             void* device = nullptr;
@@ -1111,6 +1124,7 @@ public:
             LOG_WARNING( "0x4BA060: the %s game's ctor (0x48BEC0 / 0x48ED30 / 0x484A20) is NOT recreated - no game object", type.c_str( ) );
             break;
         }
+        saves_commit( );   // 0x4BA396 / 0x4BA3A7, at the load's end
         };
         m_action.reset( );
         if ( race && front_end )
@@ -1157,6 +1171,7 @@ public:
         };
         m_race.world.fire = [ this ]( const entity_t& owner, const char* plug ) { fire( entity_path( owner ), plug ); };
         m_race.world.sound = &m_sound;
+        saves_bind( );
         m_race.world.prop_moved = [ this ]( const entity_t& owner ) { prop_moved( owner ); };
         m_race.world.attach_update = [ this ]( const entity_t& parent, const float* m, const float* l, const float* a ) { m_joints.parent_moved( parent, m, l, a ); };
         m_race.world.motion_release = [ this ]( const entity_t& e ) { return motion_release( e ); };
@@ -2056,6 +2071,7 @@ private:
 
 #include <workspace/core/world/graph.hxx>
 #include <workspace/core/world/menu.hxx>
+#include <workspace/core/world/saves.hxx>
 #include <workspace/core/world/motion.hxx>
 #include <workspace/core/world/animate.hxx>
 #include <workspace/core/world/entities.hxx>

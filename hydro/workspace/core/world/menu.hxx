@@ -147,8 +147,13 @@ inline void c_world::menu_enter( )
             m_menu_input_db = c_reader( bytes ).parse( );
             m_menu_input = std::make_shared< platform_input_t >( );
             platform_input_init( *m_menu_input, m_menu_input_db );
+            saves_input( *m_menu_input );
         }
     }
+    m_menu_engine.m_platform = [ this ]( const char* what, int ) {
+        if ( std::strcmp( what, "cloud" ) == 0 )   // 0x4BF96D 0x5547F0, 0x4BF978 0x4ABD60: the pair
+            saves_commit( );
+    };
     m_menu = std::make_unique< c_front_end >( m_menu_engine, m_constant_db );
     m_menu->enter( m_menu_util );
     LOG_SUCCESS( "front end: VuFrontEndGameMode, the first screen %s", m_menu->m_current.c_str( ) );
