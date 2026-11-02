@@ -40,6 +40,9 @@ private:
 
 c_swap& g_swap( );
 
+// The flip interval g 0x75907C vt+0x28 writes (retail's device +8, the Present's first argument). The bench's vsync off still answers 0.
+inline std::uint32_t g_swap_interval = 1u;
+
 #include <workspace/utility/logger.hxx>
 
 #if HYDRO_HOST_WINDOWS
@@ -197,7 +200,7 @@ void c_swap::present( )
     if ( m_swap )
     {
         const double present_start = trace::now( );
-        m_swap->Present( m_vsync ? 1u : 0u, 0 );
+        m_swap->Present( m_vsync ? g_swap_interval : 0u, 0 );
         trace::frame( ).present += trace::now( ) - present_start;
     }
     trace::report( );

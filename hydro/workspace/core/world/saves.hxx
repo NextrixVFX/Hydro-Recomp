@@ -10,8 +10,8 @@
 // up with the saves off: a test run reads ConstantDB's defaults, as a first launch does.
 //   Hooks, the platform's: the category volumes (no audio device), the tilt device g 0x759000 vt+0x54 / +0x58 (the bytes 0x758FCF, 0x758FFC:
 //   no sensor), "StoreBeta" 0x4D3170 (no), g_vudevconfig's "UnlockAll", "DeviceType", "DisplayScale" (a shipped game has no dev config).
-//   The flip interval is held in the settings; the swap chain does not take it yet: FLAGGED. VuWater's four fidelity fields and the lens are
-//   written into m_settings_platform only: FLAGGED, the water agent's.
+//   The flip interval reaches the swap chain. VuWater's four fidelity fields reach m_water (water_fidelity); their readers: the wake's rate here, the
+//   surface shader's gates 0x5DB800 in world/waterpass.hxx are still fixed at High's answers (the water agent's). The lens's hook: unset.
 
 inline void c_world::saves_start( )
 {
@@ -84,7 +84,11 @@ inline void c_world::settings_start( )
     settings_configure( m_settings, display, "High", flip );
     m_settings_platform.m_sys_54 = [ ] { return false; };
     m_settings_platform.m_sys_58 = [ ] { return false; };
-    m_settings_platform.m_flip = [ this ]( int v ) { m_settings.ui.m_flip_interval = v; };
+    m_settings_platform.m_flip = [ this ]( int v ) {
+        m_settings.ui.m_flip_interval = v;
+        c_engine::flip_interval( v );
+    };
+    m_settings_platform.m_broadcast = [ this ]( std::uint32_t, const ui_params_t& ) { water_fidelity( ); };   // "OnWaterSettingsChanged": 0x5DB3F0's rebuild is the renderer's
     m_settings_hooks.category = [ ]( const char*, float ) { };
     m_settings_hooks.flip_interval = m_settings_platform.m_flip;
     m_settings_hooks.has_accelerometer = m_settings_platform.m_sys_54;
@@ -116,6 +120,15 @@ inline void c_world::settings_start( )
     }
     LOG_INFO( "settings: fidelity %s, display %.2f, flip %d, auto throttle pad %d keys %d, steering %.2f, vibration %d; %d credits", m_settings.ui.m_fidelity.c_str( ), m_settings.ui.m_display,
               m_settings.ui.m_flip_interval, m_settings.auto_throttle_pad ? 1 : 0, m_settings.auto_throttle_keys ? 1 : 0, m_settings.ui.m_steering, m_settings.ui.m_vibration ? 1 : 0, m_unlock.total );
+}
+
+// VuSettingsManager 0x4B50A0's four VuWater fields (+0x40, +0x44 .. +0x46).
+inline void c_world::water_fidelity( )
+{
+    m_water.wake_rate = m_settings_platform.m_water_scale;
+    m_water.render_flags[ 0 ] = m_settings_platform.m_water_44;
+    m_water.render_flags[ 1 ] = m_settings_platform.m_water_45;
+    m_water.render_flags[ 2 ] = m_settings_platform.m_water_46;
 }
 
 // The award screen's and the championship's slots over the managers (ui/award.hxx, ui/standings.hxx). The unlock row (0x47F790's VuJsonContainer) reaches

@@ -264,6 +264,7 @@ struct gfx_sort_t : ui_gfx_sort_t
 
     // 0x423900 / 0x423920: the key's layer (bits 27..31 of +0x74) and screen (bits 18..21 of +0x74) fields.
     void set_layer( std::uint32_t v ) { m_key_hi = ( m_key_hi & 0x07FFFFFFu ) | ( v << 27 ); }
+    std::uint32_t& key_high( ) { return m_key_hi; }   // +0x74
     void set_screen( std::uint32_t v ) { m_key_hi = ( m_key_hi & 0xFFC3FFFFu ) | ( v << 18 ); }
 
     // submit 0x429010 on a material and an optional chunk, by their ids.

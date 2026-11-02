@@ -595,6 +595,7 @@ private:
     value_t m_champ_db;
     ui_champ_env_t m_champ_env;
     void settings_start( );
+    void water_fidelity( );
     void unlock_bind( );
     // VuActionGameMode +0x60 past its gate (ui/paused.hxx, world/huds.hxx pause_bind).
     void pause_bind( );

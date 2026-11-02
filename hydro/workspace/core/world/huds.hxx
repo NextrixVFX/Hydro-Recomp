@@ -372,6 +372,12 @@ inline void c_world::pause_bind( )
     h.m_screen = [ this ] { return m_pause_root && ui_common_is_screen( *m_pause_root ); };
     h.m_screen_tick = [ this ]( float dt, bool input ) { m_pause_binding->tick( dt, input ); };
 #if HYDRO_UI_PASS
+#if HYDRO_UI_PASS
+    h.m_sort_key = [ this ] {
+        if ( m_ui_pass )
+            m_ui_pass->m_sort.key_high( ) = ui_pause_key( m_ui_pass->m_sort.key_high( ) );
+    };
+#endif
     h.m_screen_draw = [ this ] {
         if ( m_ui_pass )
         {

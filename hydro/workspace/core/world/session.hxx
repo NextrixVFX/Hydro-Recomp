@@ -2406,10 +2406,13 @@ inline void race_session_game_release( race_session_t& s )
                      " components' vt+0x28 not run; the repository vt+0x24 / +0x1C (hooks)" );
 }
 
+inline void race_powerups_release( race_session_t& s );   // world/pickups.hxx
+
 inline void race_session_end( race_session_t& s )
 {
     if ( !s.active )
         return;
+    race_powerups_release( s );
     if ( s.world.pfx )   // the pfx frame's boats die with the session (world/drive.hxx race_drive_pfx_frame)
     {
         pfx_frame_t& pf = s.world.pfx->frame;
