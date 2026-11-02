@@ -229,6 +229,8 @@
     <ClInclude Include="workspace\core\world\awards.hxx" />
     <ClInclude Include="workspace\core\world\backend.hxx" />
     <ClInclude Include="workspace\core\world\background.hxx" />
+    <ClInclude Include="workspace\core\world\benchmark.hxx" />
+    <ClInclude Include="workspace\core\world\benchrun.hxx" />
     <ClInclude Include="workspace\core\world\blend.hxx" />
     <ClInclude Include="workspace\core\world\bodies.hxx" />
     <ClInclude Include="workspace\core\world\breakable.hxx" />

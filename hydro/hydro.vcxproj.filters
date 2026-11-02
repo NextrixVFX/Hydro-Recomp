@@ -411,6 +411,12 @@
     <ClInclude Include="workspace\core\world\background.hxx">
       <Filter>workspace\core\world</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\core\world\benchmark.hxx">
+      <Filter>workspace\core\world</Filter>
+    </ClInclude>
+    <ClInclude Include="workspace\core\world\benchrun.hxx">
+      <Filter>workspace\core\world</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\core\world\blend.hxx">
       <Filter>workspace\core\world</Filter>
     </ClInclude>
