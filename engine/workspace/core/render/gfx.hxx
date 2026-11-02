@@ -258,6 +258,8 @@ struct gfx_device_t
     void colour_write( std::uint8_t v ) { m_blend_dirty = true; m_colour_write = v; }
     // 0x5AD000 0x5AD020: vt +0xAC +0xB0.
     void cull( std::uint32_t v ) { m_raster_dirty = true; m_cull = v; }
+    // Another device object drew in between (the water stage inside the sort): the pipeline state is rebuilt on the next commit.
+    void invalidate( ) { m_depth_dirty = m_blend_dirty = m_raster_dirty = true; m_stream_stale = true; m_indices_stale = true; }
     void scissor_enable( std::uint8_t v ) { m_raster_dirty = true; m_scissor_enable = v; }
 
     void clip_plane( const float* v ) { std::memcpy( m_clip, v, 16 ); }

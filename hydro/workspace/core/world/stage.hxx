@@ -38,6 +38,8 @@
 #include <vector>
 
 #if HYDRO_HOST_WINDOWS
+constexpr std::uint32_t k_gfx_cb_water = 0x594D70u;
+
 struct gfx_retail_model_t
 {
     scene_t m_scene;
@@ -92,6 +94,8 @@ struct gfx_retail_t
             m_device.draw_indexed( 3u, part.m_start, part.m_triangles );
         };
         m_backend.m_callbacks[ k_gfx_cb_foliage ] = [ this ]( std::uint8_t* r ) { foliage_record( r ); };
+        // 0x595520's layer: VuWater draws here. One command (retail one per surface, depth keyed); material 0 makes the walk bind the next material whole.
+        m_backend.m_callbacks[ k_gfx_cb_water ] = [ this ]( std::uint8_t* ) { c_engine::water_now( ); m_device.invalidate( ); };
         m_backend.m_callbacks[ k_gfx_cb_sun ] = [ this ]( std::uint8_t* r ) { corona_record( r ); };
         m_backend.m_callbacks[ k_gfx_cb_pfx_quad ] = [ this ]( std::uint8_t* r ) { pfx_quad_record( r ); };
         m_backend.m_callbacks[ k_gfx_cb_pfx_trail ] = [ this ]( std::uint8_t* r ) { pfx_trail_record( r ); };
@@ -689,6 +693,8 @@ struct gfx_retail_t
         if ( m_sky != nullptr && ( !reflecting || m_sky_reflect ) )
             gfx_sky_draw( m_sort, m_eye, m_sky );
         m_draw( m_sort, p );
+        if ( !reflecting )
+            m_sort.command( m_sort.m_key_lo, ( 0xAu << 14 ) | m_sort.m_key_hi | 0x2000u, k_gfx_cb_water, 0u, 0u, 0xAu );
         m_sort.flip( );
         if ( ++m_passes == 300 )
         {
