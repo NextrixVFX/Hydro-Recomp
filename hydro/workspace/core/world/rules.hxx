@@ -380,7 +380,7 @@ inline void race_rules_hide_finished( const std::vector< std::uint8_t* >& ais, c
 //     <name> <value>", "vo <line>", "vo20 <line>", "achievement <name>").
 // All of it oracle-verified (case race_game_fsm: the ctor run whole, then the
 // machine driven through retail's own handlers).
-enum class race_hud_verb_t { initialize, release, tick };
+enum class race_hud_verb_t { initialize, release, tick, draw };
 
 // The ctor's project loads (0x4B4360, in order: +0x738 / +0x73C / +0x740) and
 // its two event methods (0x5156E0, VuMethod1<VuRaceGame, void, VuParams const&>
@@ -1014,6 +1014,21 @@ inline bool vugame_fsms_tick( race_rules_t& r, bool running, float dt )
     return !s || s->m_name != "Exit";
 }
 
+// The action mode's Run / Begin / End draw 0x4B9C10 with a game: the key bits, the +0x0C machine's current state's draw, the +0x67C
+// machine's when the boat manager's +0x2B8 is set, the game's vt+0x20. VuRaceGame's slot 8 0x489AD0: the +0x6F8 machine's, under the same
+// byte. +0x2B8: the manager's ctor stores 1 (0x4AAC81) and no code in the image clears it as a byte: 1 here. The pause menu's draw
+// 0x4BB5E0 follows in retail: not wired (session.hxx holds pause_menu_t only).
+inline void race_game_draw( race_rules_t& r )
+{
+    const auto draw = []( c_fsm& f ) {
+        if ( f.current( ) && f.current( )->m_draw )
+            f.current( )->m_draw( );
+    };
+    draw( r.event );
+    draw( r.split );
+    draw( r.fsm );
+}
+
 inline void race_rules_construct( race_rules_t& r )
 {
     vugame_fsms_construct( r );
@@ -1024,6 +1039,7 @@ inline void race_rules_construct( race_rules_t& r )
     pre.m_exit = [ &r ] { race_rules_hold( r, -1 ); race_rules_hud( r, 0, race_hud_verb_t::release ); };
     pre.m_tick = [ &r ]( float dt ) { race_rules_hud( r, 0, race_hud_verb_t::tick, dt ); };
     pre.m_address[ 0 ] = 0x48A7F0u, pre.m_address[ 1 ] = 0x48A860u, pre.m_address[ 2 ] = 0x48A8B0u, pre.m_address[ 3 ] = 0x486C00u;
+    pre.m_draw = [ &r ] { race_rules_hud( r, 0, race_hud_verb_t::draw ); };
     fsm_state_t& game = r.fsm.add_state( "Game" );
     game.m_enter = [ &r ] { race_rules_hud( r, 1, race_hud_verb_t::initialize ); };
     game.m_exit = [ &r ] { race_rules_hud( r, 1, race_hud_verb_t::release ); };
@@ -1042,6 +1058,7 @@ inline void race_rules_construct( race_rules_t& r )
         race_rules_hud( r, 1, race_hud_verb_t::tick, dt );
     };
     game.m_address[ 0 ] = 0x48A910u, game.m_address[ 1 ] = 0x4872A0u, game.m_address[ 2 ] = 0x48A970u, game.m_address[ 3 ] = 0x487370u;
+    game.m_draw = [ &r ] { race_rules_hud( r, 1, race_hud_verb_t::draw ); };
     fsm_state_t& post = r.fsm.add_state( "PostGame" );
     post.m_enter = [ &r ] {
         race_rules_hud( r, 2, race_hud_verb_t::initialize );
@@ -1060,6 +1077,7 @@ inline void race_rules_construct( race_rules_t& r )
         race_rules_hud( r, 2, race_hud_verb_t::tick, dt );
     };
     post.m_address[ 0 ] = 0x48AB70u, post.m_address[ 1 ] = 0x48ADE0u, post.m_address[ 2 ] = 0x48AE80u, post.m_address[ 3 ] = 0x48AF30u;
+    post.m_draw = [ &r ] { race_rules_hud( r, 2, race_hud_verb_t::draw ); };
     r.fsm.add_state( "Exit" );
     r.fsm.add_transition( "PreGame", "Game", "StartLightsOut" );
     r.fsm.add_transition( "Game", "PostGame", "HumanFinished" );
@@ -1164,6 +1182,7 @@ inline void timetrial_rules_construct( race_rules_t& r )
     pre.m_exit = [ &r ] { race_rules_hold( r, -1 ); race_rules_hud( r, 0, race_hud_verb_t::release ); };
     pre.m_tick = [ &r ]( float dt ) { race_rules_hud( r, 0, race_hud_verb_t::tick, dt ); };
     pre.m_address[ 0 ] = 0x490570u, pre.m_address[ 1 ] = 0x4905E0u, pre.m_address[ 2 ] = 0x490630u, pre.m_address[ 3 ] = 0x490690u;
+    pre.m_draw = [ &r ] { race_rules_hud( r, 0, race_hud_verb_t::draw ); };
     fsm_state_t& game = r.fsm.add_state( "Game" );
     game.m_enter = [ &r ] { race_rules_hud( r, 1, race_hud_verb_t::initialize ); };
     game.m_exit = [ &r ] { race_rules_hud( r, 1, race_hud_verb_t::release ); timetrial_rules_place( r ); };
@@ -1175,6 +1194,7 @@ inline void timetrial_rules_construct( race_rules_t& r )
         race_rules_hud( r, 1, race_hud_verb_t::tick, dt );
     };
     game.m_address[ 0 ] = 0x4906F0u, game.m_address[ 1 ] = 0x490750u, game.m_address[ 2 ] = 0x4908B0u, game.m_address[ 3 ] = 0x490950u;
+    game.m_draw = [ &r ] { race_rules_hud( r, 1, race_hud_verb_t::draw ); };
     fsm_state_t& post = r.fsm.add_state( "PostGame" );
     post.m_enter = [ &r ] {
         race_rules_hud( r, 2, race_hud_verb_t::initialize );
@@ -1188,6 +1208,7 @@ inline void timetrial_rules_construct( race_rules_t& r )
         race_rules_hud( r, 2, race_hud_verb_t::tick, dt );
     };
     post.m_address[ 0 ] = 0x4909B0u, post.m_address[ 1 ] = 0x490BD0u, post.m_address[ 2 ] = 0x490C00u, post.m_address[ 3 ] = 0x486720u;
+    post.m_draw = [ &r ] { race_rules_hud( r, 2, race_hud_verb_t::draw ); };
     r.fsm.add_state( "Exit" );
     r.fsm.add_transition( "PreGame", "Game", "StartLightsOut" );
     r.fsm.add_transition( "Game", "PostGame", "Finished" );
@@ -1237,9 +1258,11 @@ inline void slalom_rules_construct( race_rules_t& r )
     timetrial_rules_construct( r );
     fsm_state_t& pre = *r.fsm.m_states[ 0 ];
     pre.m_address[ 0 ] = 0x48DC30u, pre.m_address[ 1 ] = 0x48DCA0u, pre.m_address[ 2 ] = 0x48DCF0u, pre.m_address[ 3 ] = 0x48DD50u;
+    pre.m_draw = [ &r ] { race_rules_hud( r, 0, race_hud_verb_t::draw ); };
     fsm_state_t& game = *r.fsm.m_states[ 1 ];
     game.m_exit = [ &r ] { race_rules_hud( r, 1, race_hud_verb_t::release ); timetrial_rules_place( r, "Slalom", "Times", 0x48DE10u ); };
     game.m_address[ 0 ] = 0x48DDB0u, game.m_address[ 1 ] = 0x48DE10u, game.m_address[ 2 ] = 0x48DF90u, game.m_address[ 3 ] = 0x48E030u;
+    game.m_draw = [ &r ] { race_rules_hud( r, 1, race_hud_verb_t::draw ); };
     fsm_state_t& post = *r.fsm.m_states[ 2 ];
     post.m_enter = [ &r ] {
         race_rules_hud( r, 2, race_hud_verb_t::initialize );
@@ -1248,6 +1271,7 @@ inline void slalom_rules_construct( race_rules_t& r )
         slalom_rules_post_results( r );
     };
     post.m_address[ 0 ] = 0x48E090u, post.m_address[ 1 ] = 0x48E300u, post.m_address[ 2 ] = 0x48E330u, post.m_address[ 3 ] = 0x48E3D0u;
+    post.m_draw = [ &r ] { race_rules_hud( r, 2, race_hud_verb_t::draw ); };
 }
 
 // ---- The other game modes' ctors: VuSlalomGame 0x48BEC0, VuTimeTrialGame

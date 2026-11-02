@@ -564,6 +564,7 @@ private:
     void load_huds( const char* const* names = k_race_hud_projects );
     void bind_game_screens( );   // huds.hxx: Results' VuCommonScreen into s.rules.screen_hooks
     void hud( int project, race_hud_verb_t verb, float dt );
+    void ui_frame( );
     void race_broadcast( const char* name, const ui_params_t* params = nullptr, int origin = -1 );
     void race_broadcast_hash( std::uint32_t hash, const char* name, const ui_params_t& p, int origin );
     void hud_post( std::uint32_t hash, const ui_params_t& p, int origin );
@@ -987,6 +988,10 @@ public:
                     c_world& w = *static_cast< c_world* >( u );
                     w.m_sorted->run( pass, w.m_far );
                 }, this );
+#if HYDRO_UI_PASS
+                m_ui_pass = std::make_unique< gfx_ui_pass_t >( device, context, [ this ]( const std::string& asset, std::vector< std::uint8_t >& out ) { return m_archive.read( asset.c_str( ), out ); } );
+                c_engine::overlay( []( void* u ) { static_cast< c_world* >( u )->ui_frame( ); }, this );
+#endif
             }
         }
         if ( c_engine::option( "front-end" ) != nullptr )
@@ -1817,6 +1822,14 @@ private:
         std::vector< ui_hud_boat_t > boats;                  // ui_hud_env_fill's storage
     };
     hud_project_t m_huds[ 3 ];
+#if HYDRO_UI_PASS
+    std::unique_ptr< gfx_ui_pass_t > m_ui_pass;   // world/hudpass.hxx
+    int m_hud_unrecreated = 0;
+    ui_frame_inputs_t ui_inputs( );
+    ui_screen_env_t ui_screen_environment( );
+    value_t m_font_db;
+    bool m_font_db_ready = false;
+#endif
     void hud_env( hud_project_t& h );   // huds.hxx: ui_hud_env_fill before a HUD call
     struct multi_delay_node_t
     {

@@ -212,11 +212,24 @@ inline void c_world::hud( int project, race_hud_verb_t verb, float dt )
         LOG_INFO( "race HUD: %s released", h.name.c_str( ) );
         return;
     }
+    if ( verb == race_hud_verb_t::draw )   // the states' draws 0x486C00 ..: the root is a VuHUDEntity -> its vt+0x34( 1.0 )
+    {
+#if HYDRO_UI_PASS
+        if ( h.ui && m_ui_pass )
+        {
+            hud_env( h );
+            const ui_frame_t frame = h.ui->draw( m_ui_pass->m_sort, m_ui_pass->m_impl, ui_inputs( ), 1.0f );
+            m_hud_unrecreated = frame.m_unrecreated;
+        }
+#else
+        race_unwired( m_race, "the race HUD's draw 0x423A70: compiled out until agent/water's render/program.hxx + resource.hxx are on the tree (world/hudpass.hxx)" );
+#endif
+        return;
+    }
     if ( h.ui )
     {
         hud_env( h );
         h.ui->tick( dt );   // VuHUDEntity slot 12 0x423A20
-        race_unwired( m_race, "the race HUD's draw (VuHUDEntity slot 13 0x423A70: c_ui_race_hud::draw) - no HUD render pass in the race yet" );
         return;
     }
     race_unwired( m_race, "the race HUD's VuHUDEntity tick vt+0x30 / draw vt+0x34 (the HUD's update and drawing - the UI agent's) - not run here" );
@@ -305,6 +318,94 @@ inline void c_world::bind_game_screens( )
             m_race.screens.screen( verb, dt );
     };
     m_race.rules.screen_hooks.paused = [ ] { return false; };
+#if HYDRO_UI_PASS
+    g.m_frame = [ this ]( const entity_t& root, c_ui_binding& binding ) {
+        if ( !m_ui_pass )
+            return;
+        const ui_frame_inputs_t in = ui_screen_inputs( binding, ui_screen_environment( ) );
+        ui_screen_frame( root, m_ui_pass->m_impl, m_ui_pass->m_sort, 1.0f, 4, &in );
+    };
+#endif
+}
+
+#if HYDRO_UI_PASS
+// The render pass's answers to the frame's inputs (world/hudpass.hxx): the materials, FontDB (g VuUIFont's document), VuStringDB, the
+// assets by the loaded property's name. 0x626B80's default font (VuUIImpl +0x94 "Dev").
+inline ui_frame_inputs_t c_world::ui_inputs( )
+{
+    if ( !m_font_db_ready )
+    {
+        m_font_db_ready = true;
+        std::vector< std::uint8_t > bytes;
+        if ( m_archive.read( "VuDBAsset/FontDB", bytes ) )
+            m_font_db = c_reader( bytes ).parse( );
+    }
+    ui_frame_inputs_t in;
+    in.m_env = m_ui_pass->env( );
+    in.m_fontdb = &m_font_db;
+    in.m_string = [ this ]( const std::string& id ) { return string_db_get( m_string_db, id ); };
+    in.m_texture = [ this ]( const entity_t& e, int which ) -> const ui_texture_t* {
+        static const char* const names[ 3 ] = { "Texture Asset", "Selected Texture Asset", "Pressed Texture Asset" };
+        const ui_slot_t* s = ui_property_value( e, names[ which < 3 ? which : 0 ] );
+        return s && !s->m_text.empty( ) ? m_ui_pass->texture_asset( s->m_text ) : nullptr;
+    };
+    in.m_control_texture = [ this ]( const entity_t& e, int which ) -> const ui_texture_t* {
+        const ui_slot_t* s = ui_property_value( e, which == 0 ? "Texture Asset" : "Pressed Texture Asset" );
+        return s && !s->m_text.empty( ) ? m_ui_pass->texture_asset( s->m_text ) : nullptr;
+    };
+#if HYDRO_UI_TEXT
+    in.m_font = [ this ]( const entity_t& e ) {
+        ui_text_font_t f;
+        const ui_slot_t* font = ui_property_value( e, "Font" );
+        std::uint8_t params[ 60 ] = { };
+        std::string asset;
+        ui_font_params( m_font_db, font ? font->m_text : std::string( ), params, asset );
+        f.m_asset_font = asset.empty( ) ? 0u : m_ui_pass->font_asset( asset );
+        f.m_asset = f.m_asset_font != 0u;
+        f.m_default_font = m_ui_pass->font_asset( "Dev" );
+        f.m_default = f.m_default_font != 0u;
+        return f;
+    };
+#endif
+    return in;
+}
+
+inline ui_screen_env_t c_world::ui_screen_environment( )
+{
+    const ui_frame_inputs_t in = ui_inputs( );
+    ui_screen_env_t env;
+    env.m_draw = in.m_env;
+    env.m_fontdb = in.m_fontdb;
+    env.m_crop = &m_ui_pass->m_impl.m_crop;
+    env.m_string6 = [ this ]( const std::string& id ) { return string_db_get( m_string_db, id ); };
+    env.m_string7 = env.m_string6;
+    env.m_font = in.m_font;
+    // A text leaf's slot 12: VuUITextEntity's 0x446DE0 is VuStringDB slot 7 on its String ID; the screen's bound text has no runtime
+    // String ID object here, so the loaded one (SUBSTITUTION until a screen's SetText path needs it).
+    env.m_text = [ this ]( const entity_t& e ) {
+        const ui_slot_t* id = ui_property_value( e, "String ID" );
+        return id && !id->m_text.empty( ) ? string_db_get( m_string_db, id->m_text ) : std::string( );
+    };
+    env.m_texture = in.m_texture;
+#if HYDRO_UI_TEXT
+    env.m_font_asset = [ this ]( const std::string& asset ) { return m_ui_pass->font_asset( asset ); };
+#endif
+    env.m_root = &m_race.util;
+    return env;
+}
+#endif
+
+// The frame's UI (world/hudpass.hxx): after the composer, before the present. The action mode's draw slot 5 0x4B9B60: its current state's
+// draw, which for Begin / Run / End is 0x4B9C10 (hook `draw`), then the sort's flip.
+inline void c_world::ui_frame( )
+{
+#if HYDRO_UI_PASS
+    if ( !m_ui_pass || !m_action || !m_race.active )
+        return;
+    m_ui_pass->begin( m_race.world.display_w, m_race.world.display_h );
+    m_action->draw_state( );
+    m_ui_pass->end( );
+#endif
 }
 
 // ui_hud_env_fill before each HUD call: the rules' boats (their 0x520 images), the human's index, the count, the
@@ -341,6 +442,22 @@ inline void c_world::hud_env( hud_project_t& h )
     // HUD render pass (not scheduled).
     ui_hud_gauges_t& g = h.ui->gauges( );
     g.m_live = true;
+#if HYDRO_UI_PASS
+    // The speedometer ctor 0x42AB60's textures by name (the asset factory 0x426A90). The boost record's material stays 0: its callback
+    // 0x42C290 is not recreated.
+    if ( m_ui_pass && !g.m_speedometer )
+        g.m_speedometer = [ this ]( const entity_t&, ui_speedometer_t& s ) {
+            const auto at = [ this ]( const std::string& name ) {
+                const ui_texture_t* t = m_ui_pass->texture_asset( name );
+                return t ? *t : ui_texture_t{ };
+            };
+            s.m_back_imperial = at( "UI/HUD_Speed_Back_Imperial" );
+            s.m_back_metric = at( "UI/HUD_Speed_Back_Metric" );
+            s.m_needle = at( "UI/HUD_Speed_Needle" );
+            for ( int k = 0; k < 8; ++k )
+                s.m_boost[ k ] = at( "UI/HUD_Boost" + std::to_string( k + 1 ) + "x" );
+        };
+#endif
     g.m_display[ 0 ] = m_race.world.display_w;
     g.m_display[ 1 ] = m_race.world.display_h;
     g.m_boat = ui_speedometer_boat_t{ };

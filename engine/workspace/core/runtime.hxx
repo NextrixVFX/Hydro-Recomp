@@ -108,6 +108,18 @@ void c_engine::screen( const unsigned char* rgba, int width, int height )
     g_screen( ).height = height;
 }
 
+namespace
+{
+    void ( *g_overlay_pass )( void* ) = nullptr;
+    void* g_overlay_user = nullptr;
+}
+
+void c_engine::overlay( void ( *pass )( void* ), void* user )
+{
+    g_overlay_pass = pass;
+    g_overlay_user = user;
+}
+
 int c_engine::run( const char* title )
 {
     c_engine::guard( );
@@ -148,6 +160,8 @@ int c_engine::run( const char* title )
     while ( window.pump( ) )
     {
         g_draw( ).tick( );
+        if ( g_overlay_pass )
+            g_overlay_pass( g_overlay_user );
         swap.present( );
         if ( !g_bench( ).step( ) )
             break;

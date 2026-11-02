@@ -63,6 +63,8 @@ public:
     static void api( void*& device, void*& context );
     // Installs the game's sorted pass, called once per c_geometry::draw in place of the blend passes.
     static void sorted( void ( *pass )( void* user, const sorted_pass_t& pass_data ), void* user );
+    // Runs after the frame's draw handlers, before the present: the game's UI pass.
+    static void overlay( void ( *pass )( void* user ), void* user );
     // Retail's sort type of a placement's material, its shading (0 lit, 1 the vertex colour, unlit), the shader's DiffuseAlpha
     // and the mesh's aabb (8 floats, or null).
     static bool layer( int placement, int type, int shading, float diffuse_alpha, const float* box );

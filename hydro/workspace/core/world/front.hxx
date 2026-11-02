@@ -142,6 +142,10 @@ inline void c_world::action_start( value_t& game_data, const race_session_dbs_t&
         w = m_race.world.display_w;
         hh = m_race.world.display_h;
     };
+    h.draw = [ this ]( const char* which ) {
+        if ( std::strcmp( which, "0x4B9C10" ) == 0 && m_race.active )
+            race_game_draw( m_race.rules );
+    };
     h.broadcast_float = [ ]( const char* name, float v ) { LOG_VERBOSE( "action mode: %s %.3f (no subscriber: the loading screen is not loaded)", name, v ); };
     m_action = std::make_unique< c_action_mode >( m_fade, dev.tag == 3 && dev.integer != 0, h );
     m_action->enter( );
