@@ -7,6 +7,7 @@
 #include <workspace/core/ui/results.hxx>
 #include <workspace/core/ui/standings.hxx>
 #include <workspace/core/ui/typeset.hxx>
+#include <workspace/core/ui/savefile.hxx>
 #include <workspace/core/assets/archive.hxx>
 
 #include <cstdio>
@@ -1927,6 +1928,132 @@ inline bool verify_ui_font_draw( )
     return failed == 0;
 }
 
+// core/ui/savefile.hxx against retail's save (oracle case save_file): the VUJB writer's size and every byte (hash, the reference is
+// retail's file inflated), the encoded file's bytes with the stored-deflate SUBSTITUTION (the case had retail's 0x4AC930 load exactly
+// those bytes and dumped the container), ui_save_decode on retail's own files (zlib 1.2.7's output) and on eight refusals, and
+// c_save_manager's flow against VuCloudSaveManager's. Files go to a temp folder through c_save_files::set_root, never %APPDATA%.
+inline bool verify_ui_save_file( )
+{
+    int failed = 0, bytes_total = 0;
+    const auto dump_hash = [ ]( const value_t& v ) { std::string d; vujb_dump( v, d ); return ui_chl_hash( d ); };
+    for ( std::size_t k = 0; k < g_golden_svf_docs_count; ++k )
+    {
+        const golden_svf_doc_t& g = g_golden_svf_docs[ k ];
+        value_t doc;
+        if ( g.m_blob[ 0 ] )
+            doc = c_reader( ui_fnd_bytes( g.m_blob ) ).parse( );
+        else
+        {
+            ui_json_set_string( ui_json_child( doc, "blob" ), std::string( 70000, 'x' ).c_str( ) );
+            ui_json_set_string( ui_json_child( doc, "more" ), std::string( 66000, 'y' ).c_str( ) );
+        }
+        std::vector< std::uint8_t > raw = { 'V', 'U', 'J', 'B', 0, 0, 0, 1 };
+        ui_vujb_write( raw, doc );
+        const std::string text( raw.begin( ), raw.end( ) );
+        bool same = static_cast< int >( ui_vujb_size( doc ) ) == g.m_size && static_cast< int >( raw.size( ) ) == g.m_raw_size && ui_chl_hash( text ) == g.m_raw;
+        const std::vector< std::uint8_t > file = ui_save_encode( doc );
+        same = same && static_cast< int >( file.size( ) ) == g.m_stored_size && ui_chl_hash( std::string( file.begin( ), file.end( ) ) ) == g.m_stored;
+        value_t back;
+        same = same && ui_save_decode( file, back ) == ( g.m_stored_ok != 0 ) && dump_hash( back ) == g.m_stored_dump;
+        if ( g.m_file[ 0 ] )
+        {
+            value_t retail;
+            same = same && ui_save_decode( ui_fnd_bytes( g.m_file ), retail ) == ( g.m_ok != 0 ) && dump_hash( retail ) == g.m_dump;
+        }
+        bytes_total += g.m_raw_size;
+        if ( !same && ++failed <= 6 )
+            LOG_ERROR( "ui save: document %d differs", static_cast< int >( k ) );
+    }
+    for ( std::size_t k = 0; k < g_golden_svf_refusals_count; ++k )
+    {
+        const golden_svf_refusal_t& g = g_golden_svf_refusals[ k ];
+        std::vector< std::uint8_t > file = ui_fnd_bytes( g.m_file );
+        if ( !g.m_file[ 0 ] )   // "too large": a whole document past the 0x40000 bytes
+        {
+            value_t doc;
+            ui_json_set_string( ui_json_child( doc, "s" ), std::string( 0x40100u, 'a' ).c_str( ) );
+            file = ui_save_encode( doc );
+        }
+        value_t out;
+        if ( ui_save_decode( file, out ) != ( g.m_ok != 0 ) && ++failed <= 6 )
+            LOG_ERROR( "ui save: refusal %s differs", g.m_label );
+    }
+    std::filesystem::path folder = std::filesystem::temp_directory_path( ) / "hydro-selftest-saves";
+    std::error_code ignored;
+    std::filesystem::remove_all( folder, ignored );
+    c_save_files files( folder );
+    std::string log;
+    ui_save_hooks_t hooks;
+    const auto add = [ &log ]( const std::string& line )
+    {
+        if ( !log.empty( ) )
+            log += '\n';
+        log += line;
+    };
+    hooks.m_broadcast = [ & ]( const char* e ) { add( std::string( "event:" ) + e ); };
+    hooks.m_message = [ & ]( const char* a, const char* b, const char* c ) { add( std::string( "box:" ) + a + ":" + b + ":" + c ); };
+    c_save_manager manager( files, hooks );
+    const auto put = [ & ]( int index ) { manager.document( ) = c_reader( ui_fnd_bytes( g_golden_svf_flow_docs[ index ] ) ).parse( ); };
+    const auto saved = [ & ]
+    {
+        // the seam has no log: a write is seen as the file coming back after its removal
+        std::vector< std::uint8_t > held;
+        const bool had = files.read( "cloudsave", held );
+        std::filesystem::remove( folder / "cloudsave", ignored );
+        manager.request( );
+        std::vector< std::uint8_t > now;
+        if ( files.read( "cloudsave", now ) )
+            add( "write:cloudsave" );
+        else if ( had )
+            files.write( "cloudsave", held );
+    };
+    for ( std::size_t k = 0; k < g_golden_svf_flow_count; ++k )
+    {
+        const golden_svf_step_t& g = g_golden_svf_flow[ k ];
+        log.clear( );
+        const std::string op = g.m_op;
+        if ( op == "open missing" || op == "open good" )
+            manager.open( "cloudsave" );
+        else if ( op == "open corrupt" )
+        {
+            const char junk[ ] = "junk file that is not a save";
+            files.write( "cloudsave", std::vector< std::uint8_t >( junk, junk + sizeof( junk ) - 1 ) );
+            manager.open( "cloudsave" );
+        }
+        else
+        {
+            if ( op == "save" )
+                put( 0 );
+            if ( op == "save changed" )
+                put( 1 );
+            saved( );
+        }
+        // retail's log also holds the host's open: only events, boxes and writes are compared
+        std::string want;
+        for ( const char* p = g.m_log; *p; )
+        {
+            const char* end = std::strchr( p, '\n' );
+            const std::string line = end ? std::string( p, end ) : std::string( p );
+            p = end ? end + 1 : p + line.size( );
+            if ( line.rfind( "open:", 0 ) == 0 )
+                continue;
+            if ( !want.empty( ) )
+                want += '\n';
+            want += line;
+        }
+        // retail logs the host's write before nothing else; ours is appended after the event: the same order here
+        if ( ( log != want || manager.status( ) != g.m_status || dump_hash( manager.document( ) ) != g.m_doc ) && ++failed <= 6 )
+            LOG_ERROR( "ui save: flow step %s differs\n  ours   %s\n  retail %s (status %d, %d)", g.m_op, log.c_str( ), want.c_str( ), manager.status( ), g.m_status );
+    }
+    std::filesystem::remove_all( folder, ignored );
+    if ( failed == 0 )
+        LOG_SUCCESS( "ui_vujb_write / ui_save_encode / _decode / c_save_manager match retail's 0x55BDA0 0x55BEA0 0x4ACAB0 0x4AC930 0x4AC480 0x4AC5C0 0x4AC6C0 0x4ABD60 on %d documents (%d bytes), %d refusals, %d flow steps; retail's loader reads ours",
+                     static_cast< int >( g_golden_svf_docs_count ), bytes_total, static_cast< int >( g_golden_svf_refusals_count ), static_cast< int >( g_golden_svf_flow_count ) );
+    else
+        LOG_ERROR( "ui save: %d differ from retail", failed );
+    return failed == 0;
+}
+
 inline bool verify_ui_results_all( )
 {
     bool ok = true;
@@ -1941,5 +2068,6 @@ inline bool verify_ui_results_all( )
     ok = verify_ui_mini_board( ) && ok;
     ok = verify_ui_championship_load( ) && ok;
     ok = verify_ui_font_draw( ) && ok;
+    ok = verify_ui_save_file( ) && ok;
     return ok;
 }
