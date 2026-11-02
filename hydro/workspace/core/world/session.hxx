@@ -274,6 +274,7 @@ struct race_session_t
     // The lens-water manager g 0x759048's emitter list (VuLensWaterManagerImpl vt+0x38 / +0x3C, render side - a
     // hook): what each VuLensWaterEmitterEntity's slot 6 0x5E6720 handed it (world/lens.hxx). Nothing reads it yet.
     std::vector< const void* > lens_emitters;
+    float viewport_blur = 0.0f;          // the viewport's +0x278 (boat manager 0.25, or boat +0x3F8 x 0.25): 0x5588B0's radial amount
     // VuLensWaterManagerImpl g 0x759048's drops (world/lens.hxx): slot 10 / 11 from the explosions / the boat manager,
     // its tick 0x514500 in "Build". Its +0x10 half width is written outside what was read (the render side) - 0 here.
     lens_water_manager_t lens;

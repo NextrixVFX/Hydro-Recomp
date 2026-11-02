@@ -1517,7 +1517,10 @@ public:
         water_reflection_plane_tick( m_reflection_plane, &m_water, m_eye );
         c_engine::reflection_plane( m_reflection_plane.m_plane );
         if ( m_retail )
+        {
             m_retail->m_plane = m_reflection_plane.m_plane;
+            m_retail->m_blur = m_race.active ? m_race.viewport_blur : 0.0f;
+        }
         if ( m_retail )
             m_retail->frame( dt, record, m_far, m_lights );
     }
@@ -1620,6 +1623,7 @@ public:
             m_retail_coronas.push_back( c );
         };
         c_engine::stage_pass( &gfx_retail_t::engine_pass, m_retail.get( ) );
+        c_engine::post_pass( &gfx_retail_t::engine_post, m_retail.get( ) );
     }
     const track_manager_t* track( ) const
     {

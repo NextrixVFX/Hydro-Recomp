@@ -7,13 +7,16 @@
 // - The engine still owns the frame: engine_pass runs inside c_geometry::draw's opaque stage, one flip per engine pass (main, mirror); retail has one flip a frame with the passes in the key's screen field.
 // - The reflection's camera and clip plane take the viewport's plane (0x530F10, surface.hxx water_reflection_plane_tick).
 // - The six planes come from the engine's view-projection, normalised, not from the camera's 0x57CBA0: inward and unit length as retail's, order near / far / sides differs (only a sign OR reads them).
-// - m_depth_material and m_shadow_material hold the colour material: VuGfxUtil's depth and shadow programs (g 0x75902C +8 / +0xC) are not made; nothing submits those passes yet (no depth pre-pass, no shadow pass).
+// - m_depth_material and m_shadow_material hold the colour material: VuGfxUtil's depth program (g 0x75902C +8) is not made and nothing submits a depth pre-pass.
+// NO SHADOW PASS, AS RETAIL (water batch 41, tools tmp/b41 vc.py ds.py gm.py dx.py): the draw manager's slot 7 0x5A7730 has no caller, the binder 0x53B0F0 never reads the shadow handles +0x738 .. +0x74C (only 0x541680 writes them), and 0 of the pack's 8,812 programs
+// name gShadow*, gSplitPlanes, gDynamicLight* or gSSAO* (controls: gDirLightWorld in 4,246, gFogColor in 4,013): nothing could receive a shadow map or a dynamic light. The BlobShadow asset is not in the pack (0x57BCC0 skips it); its object has no reader. Shadow/* load and stay unused.
 // NOT RECREATED: retain / release never free: the models live as long as the stage.
 
 #include <impl/engine/engine.hxx>
 #include <workspace/core/assets/scene.hxx>
 #include <workspace/core/render/direct.hxx>
 #include <workspace/core/render/gfx.hxx>
+#include <workspace/core/render/post.hxx>
 #include <workspace/core/render/program.hxx>
 #include <workspace/core/render/resource.hxx>
 #include <workspace/core/world/backend.hxx>
@@ -725,5 +728,51 @@ struct gfx_retail_t
     }
 
     static void engine_pass( void* self, bool reflecting ) { static_cast< gfx_retail_t* >( self )->pass( reflecting ); }
+
+    // 0x5588B0's radial step: +0xD ("GfxComposer/Enable Radial Blur", 1 from the ctor 0x5585F0) and the viewport's +0x278 above 0 (0x6F7570 holds 0): 0x5BC730's record -> 0x57C2D0 on the scene's texture. Target and viewport: the chain the engine bound.
+    // SUBSTITUTION until the composer owns the frame: the scene's texture is the engine's target, sampled with 0x57F7D0's options (clamp, linear).
+    float m_blur = 0.0f;                  // viewport +0x278
+    static bool engine_post( void* self, void* view, int width, int height ) { return static_cast< gfx_retail_t* >( self )->post( view, width, height ); }
+    bool post( void* view, int width, int height )
+    {
+        if ( !( m_blur > 0.0f ) )
+            return false;
+        if ( !m_post_tried )
+        {
+            m_post_tried = true;
+            bool found = true;
+            m_post.create( m_declarations, [ & ]( const std::string& name ) -> const gfx_program_t*
+            {
+                std::vector< std::uint8_t > blob;
+                if ( !m_read( "VuCompiledShaderAsset/" + name, blob ) )
+                {
+                    found = false;
+                    LOG_ERROR( "post: %s did not load", name.c_str( ) );
+                    return nullptr;
+                }
+                return m_programs.load( blob.data( ) );
+            } );
+            gfx_texture_options_t o;
+            o.m_address_u = o.m_address_v = 1u;
+            o.m_min = o.m_mag = 2;
+            gfx_texture_sampler( m_api, m_post_scene, o );
+            m_post_ready = found;
+        }
+        if ( !m_post_ready )
+            return false;
+        m_post_scene.m_view = reinterpret_cast< gfx_handle_t >( view );
+        m_post_scene.m_width = width;
+        m_post_scene.m_height = height;
+        // The command's type is 0 (0x5BC730's 0x429010): the walk would apply k_gfx_layers[ 0 ] here; this step runs outside the walk, and the last pfx's additive state is still set.
+        m_device.blend_enable( k_gfx_layers[ 0 ].blend );
+        m_device.blend_func( k_gfx_layers[ 0 ].src, k_gfx_layers[ 0 ].dst );
+        m_device.invalidate( );
+        m_post.radial( m_device, m_post_scene, m_blur );
+        m_device.invalidate( );
+        return true;
+    }
+    gfx_post_t m_post;
+    gfx_texture_object_t m_post_scene;
+    bool m_post_tried = false, m_post_ready = false;
 };
 #endif
