@@ -4,6 +4,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <functional>
 #include <cstring>
 #include <vector>
 
@@ -135,4 +136,20 @@ inline bool ui_minimap_draw( ui_gfx_sort_t& sort, const ui_font_draw_env_t& env,
     std::memcpy( r + 0x68 + 24 * ( count - 1 ), first, 24 );
     sort.submit( 17, env.m_texture_material, env.m_texture_material_key, 0, 0, k_ui_icons_callback, depth );
     return true;
+}
+
+// 0x427FB0 (the Vu2dLayoutComponent draw; byte; ret 4): with the byte the rect
+// over the screen scale, white (0x507A00, NOT anchored); then the draw (slot 13
+// vt+0x34) at 1.0 - `draw`.
+inline void ui_minimap_layout_draw( ui_gfx_sort_t& sort, const ui_font_draw_env_t& env, const ui_minimap_t& m, std::uint8_t layout, const std::function< void( float ) >& draw )
+{
+    if ( layout )
+    {
+        const float one = 1.0f;
+        const float ix = one / m.m_screen_scale[ 0 ];
+        const float iy = one / m.m_screen_scale[ 1 ];
+        const float rect[ 4 ] = { m.m_rect[ 0 ] * ix, m.m_rect[ 1 ] * iy, m.m_rect[ 2 ] * ix, m.m_rect[ 3 ] * iy };
+        ui_rect_draw( sort, env, 0xFFFFFFFFu, rect, m.m_depth * 0.005f + 0.5f );
+    }
+    draw( 1.0f );
 }

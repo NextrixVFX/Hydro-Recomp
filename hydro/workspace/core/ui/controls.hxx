@@ -329,6 +329,96 @@ inline void ui_touch_remove( ui_touch_device_t& d, const void* callback )
         d.m_priority = c.second > d.m_priority ? c.second : d.m_priority;
 }
 
+// The Vu2dLayoutComponent draws (batch 27): 0x4258E0 (buttons: slot 16 at 1.0,
+// through vt+0x40) / 0x42A240 (on-screen: 0x42A0C0 at 1.0). With the byte the
+// touch rect (Touch X, Y, Width, Height: +0x7C / +0x78) then the image rect, each
+// over the scale through the anchor, white (0x507A00); then the draw.
+inline void ui_hud_layout_draw( ui_gfx_sort_t& sort, const ui_font_draw_env_t& env, const ui_crop_t& crop, const ui_hud_control_t& c, const float touch[ 4 ],
+                                const ui_hud_control_inputs_t& in, int kind, std::uint8_t layout )
+{
+    if ( layout )
+    {
+        const float one = 1.0f;
+        const float ix = one / c.m_scale[ 0 ];
+        const float iy = one / c.m_scale[ 1 ];
+        const float depth = c.m_depth * 0.005f + 0.5f;
+        const float* const rects[ 2 ] = { touch, c.m_image };
+        for ( const float* r : rects )
+        {
+            const float src[ 4 ] = { r[ 0 ] * ix, r[ 1 ] * iy, r[ 2 ] * ix, r[ 3 ] * iy };
+            float out[ 4 ];
+            ui_anchor_transform( c.m_anchor, crop, src, out );
+            ui_rect_draw( sort, env, 0xFFFFFFFFu, out, depth );
+        }
+    }
+    if ( kind == 2 )
+        ui_hud_onscreen_draw( sort, env, crop, c, in, 1.0f );
+    else
+        ui_hud_button_draw( sort, env, crop, c, in, kind == 1, 1.0f );
+}
+
+// Batch 27: VuControlMethodManager (vtable 0x745538) - the filler of the touch
+// device's SECOND list and the keyboard device's callback list (disassembled).
+// g 0x75906C (the key device): +4 a std::list of { callback, priority } (head
+// node; each node +8 / +0xC), +8 its size, +0x150 the largest priority.
+struct ui_key_device_t
+{
+    std::vector< std::pair< const void*, std::uint32_t > > m_callbacks;   // the +4 list in order
+    std::uint32_t m_priority = 0;                                         // +0x150
+};
+
+// The platform half both slots reach: the tick manager g 0x759008 slot 8 (vt+0x20:
+// register the method 0x4AEC40 - VuMethod1 vtable 0x7454F0 - in the phase "Input"
+// 0x6AA2AC) and slot 10 (vt+0x28: unregister every tick of the manager), the
+// input manager g 0x759038 slot 19 (vt+0x4C) with 1. HOOKS (null: skipped).
+struct ui_control_methods_hooks_t
+{
+    std::function< void( ) > m_tick_add;
+    std::function< void( ) > m_tick_remove;
+    std::function< void( std::uint8_t ) > m_input;
+};
+
+// Slot 5 0x4AE890 (init; returns 1): 0x53FB90 { this + 4 (0 for a null this),
+// 0 } onto the touch device's second list (+0x10); { this + 8, 0 } appended to
+// the key device's list (size + 1; its +0x150 untouched); the tick; the input.
+inline bool ui_control_methods_init( ui_touch_device_t& touch, ui_key_device_t& keys, const void* touch_callback, const void* key_callback,
+                                     const ui_control_methods_hooks_t& h )
+{
+    touch.m_low_level.push_back( { touch_callback, 0u } );
+    keys.m_callbacks.push_back( { key_callback, 0u } );
+    if ( h.m_tick_add )
+        h.m_tick_add( );
+    if ( h.m_input )
+        h.m_input( 1 );
+    return true;
+}
+
+// Slot 3 0x4AE980 (release): the FIRST second-list entry holding this + 4 erased
+// (the rest moved down; +0x1C untouched); 0x539020 on the key device: its first
+// node holding this + 8 unlinked (size - 1), then +0x150 = the largest (unsigned,
+// cmova) priority left, 0 when empty; the tick manager's unregister.
+inline void ui_control_methods_release( ui_touch_device_t& touch, ui_key_device_t& keys, const void* touch_callback, const void* key_callback,
+                                        const ui_control_methods_hooks_t& h )
+{
+    for ( auto it = touch.m_low_level.begin( ); it != touch.m_low_level.end( ); ++it )
+        if ( it->first == touch_callback )
+        {
+            touch.m_low_level.erase( it );
+            break;
+        }
+    for ( auto it = keys.m_callbacks.begin( ); it != keys.m_callbacks.end( ); ++it )
+        if ( it->first == key_callback )
+        {
+            keys.m_callbacks.erase( it );
+            break;
+        }
+    keys.m_priority = 0;
+    for ( const auto& c : keys.m_callbacks )
+        keys.m_priority = c.second > keys.m_priority ? c.second : keys.m_priority;
+    if ( h.m_tick_remove )
+        h.m_tick_remove( );
+}
+
 // 0x53FAE0 (thiscall device, callback, priority; ret 8 - disassembled, batch 21):
 // EVERY entry holding the callback takes the priority, then +0x1C = the largest
 // (unsigned, cmova) priority in the list, 0 for an empty list.

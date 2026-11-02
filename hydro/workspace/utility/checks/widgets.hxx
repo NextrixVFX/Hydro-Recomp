@@ -1,8 +1,11 @@
 #pragma once
 
 #include <workspace/core/ui/bind.hxx>
+#include <workspace/core/ui/champ.hxx>
 #include <workspace/core/ui/controls.hxx>
 #include <workspace/core/ui/message.hxx>
+#include <workspace/core/ui/pages.hxx>
+#include <workspace/core/ui/remap.hxx>
 #include <workspace/core/ui/slider.hxx>
 
 #include <cstdio>
@@ -183,7 +186,7 @@ inline bool verify_ui_slider_draw( )
 // bytes first); the textures, the touch state, the boing scale and the two
 // globals are the run's (inputs). Commands and records byte for byte, one sort
 // per buffer through all runs.
-inline bool verify_ui_hud_controls( )
+inline bool ui_hud_controls_check( const golden_hc_entity_t* entities, std::size_t count, const golden_hc_run_t* all_runs, const golden_txt_command_t* all_commands, bool layout )
 {
     ui_gfx_sort_t sort;
     sort.m_buffers[ 0 ].m_capacity = 0x300000;
@@ -192,13 +195,14 @@ inline bool verify_ui_hud_controls( )
     for ( auto& b : sort.m_buffers )
         b.m_memory.resize( static_cast< std::size_t >( b.m_capacity ) );
     int failed = 0, runs = 0, commands = 0, fields = 0;
-    for ( std::size_t k = 0; k < g_golden_hc_entities_count; ++k )
+    for ( std::size_t k = 0; k < count; ++k )
     {
-        const golden_hc_entity_t& ge = g_golden_hc_entities[ k ];
+        const golden_hc_entity_t& ge = entities[ k ];
         const entity_t* e = ui_lv_entity( ge.m_project, ge.m_index );
         const std::vector< std::uint8_t > raw = ui_unhex( ge.m_fields );
         bool same = e && e->m_ctor && e->m_ctor->m_vtable == ge.m_vtable && raw.size( ) == 0x9C;
         ui_hud_control_t c;
+        float touch[ 4 ] = { };
         if ( same )
         {
             const bool onscreen = ge.m_kind == 2;
@@ -223,6 +227,14 @@ inline bool verify_ui_hud_controls( )
                 for ( int f = 0; f < 4; ++f )
                     take( names[ f ], &c.m_enable[ f ], 1, 0xC8 + f );
             }
+            if ( layout )
+            {
+                const int at = onscreen ? 0x78 : 0x7C;
+                take( "Touch X", &touch[ 0 ], 4, at );
+                take( "Touch Y", &touch[ 1 ], 4, at + 4 );
+                take( "Touch Width", &touch[ 2 ], 4, at + 8 );
+                take( "Touch Height", &touch[ 3 ], 4, at + 12 );
+            }
             c.m_depth = ui_frame_depth( *e );
             same = same && ui_lv_bits( c.m_depth ) == ge.m_depth;
         }
@@ -238,13 +250,18 @@ inline bool verify_ui_hud_controls( )
         const ui_texture_t* by[ 4 ] = { &textures[ 0 ], &textures[ 1 ], nullptr, nullptr };   // 2: an asset without a texture, 3: none
         for ( int r = 0; r < ge.m_runs; ++r )
         {
-            const golden_hc_run_t& run = g_golden_hc_runs[ ge.m_first + r ];
+            const golden_hc_run_t& run = all_runs[ ge.m_first + r ];
             const golden_txt_env_t& te = g_golden_txt_envs[ run.m_env ];
             ui_font_draw_env_t env;
             const std::vector< std::uint8_t > matrix = ui_unhex( run.m_matrix );
             std::memcpy( env.m_matrix, matrix.data( ), 64 );
             env.m_texture_material = g_golden_hc_material[ 0 ];
             env.m_texture_material_key = g_golden_hc_material[ 1 ];
+            if ( layout )
+            {
+                env.m_rect_material = g_golden_hld_rect_material[ 0 ];
+                env.m_rect_material_key = g_golden_hld_rect_material[ 1 ];
+            }
             ui_crop_t crop;
             std::memcpy( &crop.m_matrix[ 0 ], &te.m_crop[ 0 ], 4 );
             std::memcpy( &crop.m_matrix[ 5 ], &te.m_crop[ 1 ], 4 );
@@ -266,14 +283,16 @@ inline bool verify_ui_hud_controls( )
             sort.m_key_hi = te.m_key_hi;
             std::vector< ui_gfx_command_t >& list = sort.m_commands[ te.m_index ];
             const std::size_t before = list.size( );
-            if ( ge.m_kind == 2 )
+            if ( layout )
+                ui_hud_layout_draw( sort, env, crop, c, touch, in, ge.m_kind, static_cast< std::uint8_t >( run.m_alpha ) );
+            else if ( ge.m_kind == 2 )
                 ui_hud_onscreen_draw( sort, env, crop, c, in, alpha );
             else
                 ui_hud_button_draw( sort, env, crop, c, in, ge.m_kind == 1, alpha );
             bool ok = list.size( ) - before == static_cast< std::size_t >( run.m_commands );
             for ( int q = 0; ok && q < run.m_commands; ++q )
             {
-                const golden_txt_command_t& want = g_golden_hc_commands[ run.m_first + q ];
+                const golden_txt_command_t& want = all_commands[ run.m_first + q ];
                 const ui_gfx_command_t& h = list[ before + static_cast< std::size_t >( q ) ];
                 const std::vector< std::uint8_t > record = ui_unhex( want.m_record );
                 const auto& memory = sort.m_buffers[ te.m_index ].m_memory;
@@ -290,11 +309,16 @@ inline bool verify_ui_hud_controls( )
     if ( failed == 0 )
         LOG_SUCCESS( "ui_hud_button_draw / ui_hud_onscreen_draw match retail's HUD control draws (pause 0x4257A0 / 0x426330, recover 0x425F70 / "
                      "0x425F50, on-screen 0x42A0C0) on %d entities x the runs (%d runs; %d of OUR loaded fields): %d commands byte for byte",
-            static_cast< int >( g_golden_hc_entities_count ), runs, fields, commands );
+            static_cast< int >( count ), runs, fields, commands );
     else
         LOG_ERROR( "the UI HUD control draws FAILED %d checks against retail's", failed );
     return failed == 0;
 }
+
+inline bool verify_ui_hud_controls( ) { return ui_hud_controls_check( g_golden_hc_entities, g_golden_hc_entities_count, g_golden_hc_runs, g_golden_hc_commands, false ); }
+
+// verify_ui_hud_layout_draw: the same entities through the layout draws 0x4258E0 / 0x42A240 (oracle case hud_layout_draw).
+inline bool verify_ui_hud_layout_draw( ) { return ui_hud_controls_check( g_golden_hld_entities, g_golden_hld_entities_count, g_golden_hld_runs, g_golden_hld_commands, true ); }
 
 // verify_ui_hud_toast: retail's VuHUDHiddenPackageToastEntity OnPackageFound
 // 0x424600 / OnUITick 0x4248E0 through the scripted sequence on every toast of the
@@ -762,14 +786,1289 @@ inline bool verify_ui_text_layout_draw( )
     return failed == 0;
 }
 
+// The page layout's fields from retail's bytes +0x60..+0xF8 (the case's "fields").
+inline ui_page_layout_t ui_pl_of( const std::vector< std::uint8_t >& raw, std::uint32_t depth )
+{
+    ui_page_layout_t p;
+    const auto at = [ &raw ]( int offset ) { return raw.data( ) + ( offset - 0x60 ); };
+    if ( raw.size( ) < 0x98 )
+        return p;
+    p.m_visible = *at( 0x68 );
+    std::memcpy( p.m_screen_scale, at( 0x6C ), 8 );
+    std::memcpy( p.m_rect, at( 0x74 ), 16 );
+    std::memcpy( &p.m_anchor.m_horizontal, at( 0x84 ), 4 );
+    std::memcpy( &p.m_anchor.m_vertical, at( 0x88 ), 4 );
+    std::memcpy( &p.m_anchor.m_h_ratio, at( 0x8C ), 4 );
+    std::memcpy( &p.m_anchor.m_v_ratio, at( 0x90 ), 4 );
+    p.m_scroll_at_start = *at( 0xAC );
+    std::memcpy( &p.m_scroll_speed, at( 0xB0 ), 4 );
+    std::memcpy( &p.m_scroll_lag, at( 0xB4 ), 4 );
+    std::memcpy( &p.m_damping, at( 0xB8 ), 4 );
+    p.m_touchable = *at( 0xBC );
+    p.m_scrolling = *at( 0xBD );
+    std::memcpy( &p.m_total, at( 0xD0 ), 4 );
+    std::memcpy( &p.m_scroll, at( 0xE4 ), 4 );
+    std::memcpy( &p.m_depth, &depth, 4 );
+    return p;
+}
+
+// One element against retail's dump (params bytes 0..40 only: 41..59 UNKNOWN).
+inline bool ui_pl_same( const ui_page_element_t& el, const golden_pl_element_t& g )
+{
+    const int kind = el.m_kind == ui_page_kind_t::text ? 0 : el.m_kind == ui_page_kind_t::image ? 1 : 2;
+    if ( kind != g.m_kind )
+        return false;
+    const auto text = []( const char* hexed ) { const std::vector< std::uint8_t > r = ui_unhex( hexed ); return std::string( r.begin( ), r.end( ) ); };
+    if ( kind == 0 )
+    {
+        const std::vector< std::uint8_t > params = ui_unhex( g.m_params );
+        return el.m_font == text( g.m_font ) && params.size( ) == 60 && std::memcmp( el.m_params, params.data( ), 41 ) == 0 &&
+               ( el.m_has_asset ? 1u : 0u ) == ( g.m_asset ? 1u : 0u ) && el.m_string_id == text( g.m_id ) && el.m_flags == g.m_flags;
+    }
+    if ( kind == 1 )
+        return ( el.m_texture ? 1u : 0u ) == ( g.m_asset ? 1u : 0u ) && el.m_align == text( g.m_align );
+    std::uint32_t bits;
+    std::memcpy( &bits, &el.m_amount, 4 );
+    return bits == g.m_amount;
+}
+
+// ui_page_layout_* (core/ui pages.hxx) against retail's VuUIPageLayoutEntity
+// (oracle case page_layout) on Screens/Credits: OUR loaded properties against
+// retail's bytes; OUR load of the real PageLayoutDB entry against the list the
+// project load built; the draws 0x62E120 / 0x62E140 (-> 0x62E210 -> 0x62FED0 over
+// the three element types) on that list and on written lists - every command's
+// words and record byte for byte in ONE sort, each measure / StringDB call's
+// inputs (the HOOKS replayed with retail's answers); then the loads 0x62E3B0 on
+// the real entry and hand-built documents: elements, +0xD0, the hook calls, the
+// factory's exists names.
+inline bool verify_ui_page_layout( )
+{
+    const ui_loaded_t& loaded = ui_loaded( );
+    ui_gfx_sort_t sort;
+    sort.m_buffers[ 0 ].m_capacity = 0x300000;
+    sort.m_buffers[ 1 ].m_used = 0x35;
+    sort.m_buffers[ 1 ].m_capacity = 0x100000;
+    for ( auto& b : sort.m_buffers )
+        b.m_memory.resize( static_cast< std::size_t >( b.m_capacity ) );
+    static const value_t pagedb = c_reader( std::vector< std::uint8_t >( reinterpret_cast< const std::uint8_t* >( g_golden_pl_pagedb ),
+                                                                        reinterpret_cast< const std::uint8_t* >( g_golden_pl_pagedb ) + g_golden_pl_pagedb_bytes ) ).parse( );
+    int failed = 0, commands = 0, measures = 0, strings = 0, runs = 0, loads = 0, elements = 0;
+    // the hooks replay retail's recorded calls in order; a differing input fails the run
+    struct replay_t
+    {
+        int m_first_measure = 0, m_measures = 0, m_first_string = 0, m_strings = 0, m_m = 0, m_s = 0;
+        bool m_same = true;
+    } rp;
+    std::string exists;
+    ui_page_hooks_t hooks;
+    hooks.m_string = [ & ]( const std::string& id )
+    {
+        if ( rp.m_s >= rp.m_strings )
+        {
+            rp.m_same = false;
+            return std::string( );
+        }
+        const golden_pl_string_t& g = g_golden_pl_strings[ rp.m_first_string + rp.m_s++ ];
+        const std::vector< std::uint8_t > want = ui_unhex( g.m_id ), text = ui_unhex( g.m_text );
+        if ( std::string( want.begin( ), want.end( ) ) != id )
+            rp.m_same = false;
+        ++strings;
+        return std::string( text.begin( ), text.end( ) );
+    };
+    hooks.m_measure = [ & ]( std::uint32_t font, const std::string& text, const std::uint8_t params[ 60 ], float width, std::uint32_t flags,
+                             const float scale[ 2 ], float out[ 2 ] )
+    {
+        if ( rp.m_m >= rp.m_measures )
+        {
+            rp.m_same = false;
+            return false;
+        }
+        const golden_pl_measure_t& g = g_golden_pl_measures[ rp.m_first_measure + rp.m_m++ ];
+        const std::vector< std::uint8_t > t = ui_unhex( g.m_text ), p = ui_unhex( g.m_params );
+        std::uint32_t w, s[ 2 ];
+        std::memcpy( &w, &width, 4 );
+        std::memcpy( s, scale, 8 );
+        if ( font != g.m_font || std::string( t.begin( ), t.end( ) ) != text || p.size( ) != 60 || std::memcmp( p.data( ), params, 41 ) != 0 /* 41..59 UNKNOWN */ || w != g.m_width ||
+             flags != g.m_flags || s[ 0 ] != g.m_scale[ 0 ] || s[ 1 ] != g.m_scale[ 1 ] )
+            rp.m_same = false;
+        out[ 0 ] = 0.25f;
+        std::memcpy( &out[ 1 ], &g.m_answer, 4 );
+        ++measures;
+        return true;
+    };
+    static const ui_texture_t k_load_texture = { 1u, 256, 128 };
+    hooks.m_texture = [ & ]( const std::string& name ) -> const ui_texture_t*
+    {
+        exists += ( exists.empty( ) ? "" : ";" ) + std::string( "VuTextureAsset/" ) + name;
+        return &k_load_texture;   // the case's fake asset (a real name, 256 x 128)
+    };
+    hooks.m_font_asset = [ & ]( const std::string& asset, std::uint32_t& )
+    {
+        exists += ( exists.empty( ) ? "" : ";" ) + std::string( "VuFontAsset/" ) + asset;
+        return false;
+    };
+    const auto env_of = [ & ]( const char* matrix, const char* block_hex, unsigned top, int default_font ) -> ui_page_env_t
+    {
+        ui_page_env_t env;
+        const std::vector< std::uint8_t > m = ui_unhex( matrix ), block = ui_unhex( block_hex );
+        std::memcpy( env.m_draw.m_matrix, m.data( ), 64 );
+        std::memcpy( &env.m_draw.m_top, &top, 4 );
+        for ( int k = 0; k < 2; ++k )
+        {
+            env.m_draw.m_material[ k ] = g_golden_pl_font_materials[ k ];
+            env.m_draw.m_material_key[ k ] = g_golden_pl_font_materials[ 2 + k ];
+        }
+        env.m_draw.m_texture_material = g_golden_pl_materials[ 0 ];
+        env.m_draw.m_texture_material_key = g_golden_pl_materials[ 1 ];
+        env.m_draw.m_rect_material = g_golden_pl_materials[ 2 ];
+        env.m_draw.m_rect_material_key = g_golden_pl_materials[ 3 ];
+        if ( block.size( ) >= 0xA0 )
+        {
+            std::memcpy( env.m_crop.m_matrix, block.data( ) + 0x14, 64 );
+            std::uint32_t def;
+            std::memcpy( &def, block.data( ) + 0x9C, 4 );
+            env.m_default = def != 0;
+        }
+        if ( default_font >= 0 )
+            env.m_default = default_font != 0;
+        env.m_default_font = g_golden_pl_fonts[ 1 ];
+        return env;
+    };
+    std::vector< ui_texture_t > textures( 16 );
+    for ( std::size_t k = 0; k < g_golden_pl_pages_count; ++k )
+    {
+        const golden_pl_page_t& gp = g_golden_pl_pages[ k ];
+        const entity_t* have = nullptr;
+        for ( std::size_t p = 0; p < g_golden_ui_projects_count; ++p )
+            if ( std::strcmp( g_golden_ui_projects[ p ].m_asset, gp.m_project ) == 0 && gp.m_index >= 0 && static_cast< std::size_t >( gp.m_index ) < loaded.trees[ p ].size( ) )
+                have = loaded.trees[ p ][ static_cast< std::size_t >( gp.m_index ) ].second;
+        if ( !have || have->m_type != "VuUIPageLayoutEntity" )
+        {
+            if ( ++failed <= 8 )
+                LOG_ERROR( "ui page layout: %s entity %d is not loaded", gp.m_project, gp.m_index );
+            continue;
+        }
+        // OUR loaded properties against retail's bytes
+        const ui_page_layout_t retail = ui_pl_of( ui_unhex( gp.m_fields ), gp.m_depth );
+        ui_page_layout_t ours = retail;
+        bool same = true;
+        const auto take = [ & ]( const char* name, void* target, std::size_t bytes )
+        {
+            std::uint8_t was[ 16 ];
+            std::memcpy( was, target, bytes );
+            if ( !ui_frame_take( *have, name, target, bytes ) || std::memcmp( was, target, bytes ) != 0 )
+                same = false;
+        };
+        take( "Visible", &ours.m_visible, 1 );
+        take( "Screen Scale", ours.m_screen_scale, 8 );
+        take( "X", &ours.m_rect[ 0 ], 4 );
+        take( "Y", &ours.m_rect[ 1 ], 4 );
+        take( "Width", &ours.m_rect[ 2 ], 4 );
+        take( "Height", &ours.m_rect[ 3 ], 4 );
+        take( "Horizontal Anchor", &ours.m_anchor.m_horizontal, 4 );
+        take( "Vertical Anchor", &ours.m_anchor.m_vertical, 4 );
+        take( "Horizontal Ratio", &ours.m_anchor.m_h_ratio, 4 );
+        take( "Vertical Ratio", &ours.m_anchor.m_v_ratio, 4 );
+        take( "Scroll at Start", &ours.m_scroll_at_start, 1 );
+        take( "Scroll Speed", &ours.m_scroll_speed, 4 );
+        take( "Scroll Lag", &ours.m_scroll_lag, 4 );
+        take( "Scroll Residual Damping", &ours.m_damping, 4 );
+        take( "Touchable", &ours.m_touchable, 1 );
+        take( "Scrolling", &ours.m_scrolling, 1 );
+        ours.m_depth = ui_frame_depth( *have );
+        same = same && std::memcmp( &ours.m_depth, &gp.m_depth, 4 ) == 0;
+        if ( const ui_slot_t* page = ui_property_value( *have, "Page Layout" ) )
+            ours.m_page = page->m_text;
+        same = same && ours.m_page == gp.m_page;
+        // OUR load of the real entry (the project load's environment: no StringDB, no default font, null assets)
+        ui_page_env_t none;
+        rp = replay_t( );
+        exists.clear( );
+        same = ui_page_layout_load( ours, &pagedb, ui_font_db( 0 ), none, hooks ) && same && ours.m_elements.size( ) == static_cast< std::size_t >( gp.m_elements );
+        for ( int j = 0; same && j < gp.m_elements; ++j )
+            same = ui_pl_same( ours.m_elements[ static_cast< std::size_t >( j ) ], g_golden_pl_elements[ gp.m_first_element + j ] );
+        same = same && std::memcmp( &ours.m_total, &gp.m_total, 4 ) == 0;
+        elements += gp.m_elements;
+        if ( !same )
+        {
+            if ( ++failed <= 8 )
+                LOG_ERROR( "ui page layout: %s entity %d: OUR loaded fields / elements (%d, retail %d) differ from retail's", gp.m_project, gp.m_index,
+                           static_cast< int >( ours.m_elements.size( ) ), gp.m_elements );
+            continue;
+        }
+        for ( int r = 0; r < gp.m_runs; ++r )
+        {
+            const golden_pl_run_t& v = g_golden_pl_runs[ gp.m_first_run + r ];
+            ui_page_layout_t p = ui_pl_of( ui_unhex( v.m_fields ), v.m_depth );
+            ui_page_env_t env = env_of( v.m_matrix, v.m_block, v.m_top, -1 );
+            if ( v.m_sweep == 0 )
+            {
+                // the loaded list and properties; the run's runtime bytes (Visible, Scrolling, +0xD0, +0xE4) and fonts
+                const ui_page_layout_t run = p;
+                p = ours;
+                // params bytes 41..59: retail's indeterminate stack (UNKNOWN); 0..40 were compared with OUR load above
+                for ( int e = 0; e < gp.m_elements; ++e )
+                    if ( p.m_elements[ static_cast< std::size_t >( e ) ].m_kind == ui_page_kind_t::text )
+                    {
+                        const std::vector< std::uint8_t > params = ui_unhex( g_golden_pl_elements[ gp.m_first_element + e ].m_params );
+                        if ( params.size( ) == 60 )
+                            std::memcpy( p.m_elements[ static_cast< std::size_t >( e ) ].m_params, params.data( ), 60 );
+                    }
+                p.m_visible = run.m_visible;
+                p.m_scrolling = run.m_scrolling;
+                p.m_total = run.m_total;
+                p.m_scroll = run.m_scroll;
+                int j = 0;
+                for ( ui_page_element_t& el : p.m_elements )
+                    if ( el.m_kind == ui_page_kind_t::text )
+                    {
+                        const char mode = v.m_fonts[ 0 ] == 'm' ? ( j % 2 == 0 ? 'a' : 'd' ) : v.m_fonts[ 0 ];
+                        el.m_has_asset = mode == 'a';
+                        el.m_asset_font = el.m_has_asset ? g_golden_pl_fonts[ 0 ] : 0u;
+                        ++j;
+                    }
+            }
+            else
+            {
+                for ( int j = 0; j < v.m_elements; ++j )
+                {
+                    const golden_pl_element_t& g = g_golden_pl_elements[ v.m_first_element + j ];
+                    ui_page_element_t el;
+                    const std::vector< std::uint8_t > id = ui_unhex( g.m_id ), align = ui_unhex( g.m_align ), params = ui_unhex( g.m_params );
+                    if ( g.m_kind == 0 )
+                    {
+                        el.m_kind = ui_page_kind_t::text;
+                        if ( params.size( ) == 60 )
+                            std::memcpy( el.m_params, params.data( ), 60 );
+                        el.m_has_asset = g.m_asset != 0;
+                        el.m_asset_font = el.m_has_asset ? g_golden_pl_fonts[ 0 ] : 0u;
+                        el.m_string_id.assign( id.begin( ), id.end( ) );
+                        el.m_flags = g.m_flags;
+                    }
+                    else if ( g.m_kind == 1 )
+                    {
+                        el.m_kind = ui_page_kind_t::image;
+                        el.m_align.assign( align.begin( ), align.end( ) );
+                        if ( g.m_width >= 0 )
+                        {
+                            ui_texture_t& t = textures[ static_cast< std::size_t >( j % 16 ) ];
+                            t.m_handle = g_golden_pl_textures + 0x20u * static_cast< unsigned >( j % 16 );
+                            t.m_width = g.m_width;
+                            t.m_height = g.m_height;
+                            el.m_texture = &t;
+                        }
+                    }
+                    else
+                    {
+                        el.m_kind = ui_page_kind_t::space;
+                        std::memcpy( &el.m_amount, &g.m_amount, 4 );
+                    }
+                    p.m_elements.push_back( el );
+                }
+                env.m_default = v.m_default != 0;
+            }
+            rp = replay_t( );
+            rp.m_first_measure = v.m_first_measure;
+            rp.m_measures = v.m_measures;
+            rp.m_first_string = v.m_first_string;
+            rp.m_strings = v.m_strings;
+            hooks.m_db = ui_string_db_t( );
+            sort.m_index = v.m_buffer;
+            sort.m_key_lo = v.m_key_in[ 0 ];
+            sort.m_key_hi = v.m_key_in[ 1 ];
+            std::vector< ui_gfx_command_t >& list = sort.m_commands[ v.m_buffer ];
+            const std::size_t before = list.size( );
+            float alpha;
+            std::memcpy( &alpha, &v.m_alpha, 4 );
+            bool known;
+            if ( v.m_layout )
+                known = ui_page_layout_layout_draw( sort, env, hooks, p, static_cast< std::uint8_t >( v.m_arg ) );
+            else
+                known = ui_page_layout_draw( sort, env, hooks, p, alpha );
+            bool ok = known && rp.m_same && rp.m_m == rp.m_measures && rp.m_s == rp.m_strings && list.size( ) - before == static_cast< std::size_t >( v.m_commands ) &&
+                      sort.m_key_lo == v.m_key[ 0 ] && sort.m_key_hi == v.m_key[ 1 ];
+            for ( int c = 0; ok && c < v.m_commands; ++c )
+            {
+                const golden_txt_command_t& want = g_golden_pl_commands[ v.m_first + c ];
+                const ui_gfx_command_t& got = list[ before + static_cast< std::size_t >( c ) ];
+                const std::vector< std::uint8_t > record = ui_unhex( want.m_record );
+                const auto& memory = sort.m_buffers[ v.m_buffer ].m_memory;
+                ok = std::memcmp( got.m_words, want.m_words, sizeof( got.m_words ) ) == 0 && got.m_words[ 3 ] + record.size( ) <= memory.size( ) &&
+                     std::memcmp( memory.data( ) + got.m_words[ 3 ], record.data( ), record.size( ) ) == 0;
+                ++commands;
+            }
+            ++runs;
+            if ( !ok && ++failed <= 8 )
+                LOG_ERROR( "ui page layout: run %d (sweep %d, %s) gave %d commands / %d measures / %d strings, retail %d / %d / %d - or a word, record "
+                           "byte or hook input differs", r, v.m_sweep, v.m_layout ? "layout" : "draw", static_cast< int >( list.size( ) - before ), rp.m_m,
+                           rp.m_s, v.m_commands, v.m_measures, v.m_strings );
+        }
+        for ( int l = 0; l < gp.m_loads; ++l )
+        {
+            const golden_pl_load_t& g = g_golden_pl_loads[ gp.m_first_load + l ];
+            ui_page_layout_t p = ours;
+            value_t doc;
+            const value_t* db = &pagedb;
+            if ( g.m_doc )
+            {
+                doc = c_reader( std::vector< std::uint8_t >( reinterpret_cast< const std::uint8_t* >( g.m_doc ),
+                                                             reinterpret_cast< const std::uint8_t* >( g.m_doc ) + g.m_doc_bytes ) ).parse( );
+                db = &doc;
+                p.m_page = g.m_page;
+            }
+            ui_page_env_t env;
+            env.m_default = g.m_default != 0;
+            env.m_default_font = g_golden_pl_fonts[ 1 ];
+            rp = replay_t( );
+            rp.m_first_measure = g.m_first_measure;
+            rp.m_measures = g.m_measures;
+            rp.m_first_string = g.m_first_string;
+            rp.m_strings = g.m_strings;
+            hooks.m_db.m_present = g.m_sdb >= 0;
+            hooks.m_db.m_slot12 = g.m_sdb == 1;
+            exists.clear( );
+            bool ok = ui_page_layout_load( p, db, ui_font_db( 0 ), env, hooks ) && rp.m_same && rp.m_m == rp.m_measures && rp.m_s == rp.m_strings &&
+                      p.m_elements.size( ) == static_cast< std::size_t >( g.m_elements ) && std::memcmp( &p.m_total, &g.m_total, 4 ) == 0 && exists == g.m_exists;
+            for ( int j = 0; ok && j < g.m_elements; ++j )
+                ok = ui_pl_same( p.m_elements[ static_cast< std::size_t >( j ) ], g_golden_pl_elements[ g.m_first_element + j ] );
+            elements += g.m_elements;
+            ++loads;
+            if ( !ok && ++failed <= 8 )
+                LOG_ERROR( "ui page layout: load %d (%s) gave %d elements / %d measures / %d strings, exists %s (retail %d / %d / %d, %s) - or an element "
+                           "or +0xD0 differs", l, g.m_page, static_cast< int >( p.m_elements.size( ) ), rp.m_m, rp.m_s, exists.c_str( ), g.m_elements,
+                           g.m_measures, g.m_strings, g.m_exists );
+        }
+    }
+    hooks.m_db = ui_string_db_t( );
+    if ( failed == 0 )
+        LOG_SUCCESS( "ui_page_layout_* match retail's VuUIPageLayoutEntity (draw 0x62E120, layout draw 0x62E140, 0x62E210, list 0x62FED0, the Text / "
+                     "Image / Space heights and draws, load 0x62E3B0 -> 0x62FA90) on %d entity: %d draw runs, %d loads, %d elements, %d commands and "
+                     "records byte for byte, %d measure / %d StringDB hook calls",
+            static_cast< int >( g_golden_pl_pages_count ), runs, loads, elements, commands, measures, strings );
+    else
+        LOG_ERROR( "the UI page layout FAILED %d checks against retail's", failed );
+    return failed == 0;
+}
+
+// The page layout's runtime bytes +0xD0..+0xF4 (byte +0xD7 carried from `pad`).
+inline std::string ui_plt_state( const ui_page_layout_t& p, std::uint8_t pad )
+{
+    std::uint8_t b[ 0x24 ];
+    std::memcpy( b + 0x00, &p.m_total, 4 );
+    b[ 4 ] = p.m_active;
+    b[ 5 ] = p.m_ended;
+    b[ 6 ] = p.m_held;
+    b[ 7 ] = pad;
+    std::memcpy( b + 0x08, p.m_touch, 8 );
+    std::memcpy( b + 0x10, &p.m_grab, 4 );
+    std::memcpy( b + 0x14, &p.m_scroll, 4 );
+    std::memcpy( b + 0x18, &p.m_target, 4 );
+    std::memcpy( b + 0x1C, &p.m_velocity, 4 );
+    std::memcpy( b + 0x20, &p.m_residual, 4 );
+    std::string out;
+    char h[ 3 ];
+    for ( std::uint8_t c : b )
+    {
+        std::snprintf( h, sizeof( h ), "%02x", c );
+        out += h;
+    }
+    return out;
+}
+
+// ui_page_layout_initialize / _tick / _start / _stop / _reset / _touch_* /
+// _release (core/ui pages.hxx) against retail's VuUIPageLayoutEntity 0x62D9A0 /
+// 0x62DA30 / 0x62E0A0 / 0x62E0C0 / 0x62E0E0 / 0x62DD20 / 0x62DED0 / 0x62DEF0 /
+// 0x62DA10 (oracle case page_layout_tick) on Screens/Credits' page through a
+// scripted sequence under three crops: after each step the bytes +0xD0..+0xF4,
+// the touch device's entries and +0x1C, the hook calls (the device position,
+// OnReachedEnd's findPlug + execute). Starts from retail's bytes; the property
+// fields are the ones verify_ui_page_layout compares with OUR loaded entity.
+inline bool verify_ui_page_layout_tick( )
+{
+    int failed = 0, steps = 0, ends = 0;
+    for ( std::size_t k = 0; k < g_golden_plt_runs_count; ++k )
+    {
+        const golden_plt_run_t& run = g_golden_plt_runs[ k ];
+        const std::vector< std::uint8_t > raw = ui_unhex( run.m_fields ), block = ui_unhex( run.m_block );
+        if ( raw.size( ) < 0x98 || block.size( ) < 0xA0 )
+        {
+            ++failed;
+            continue;
+        }
+        ui_page_layout_t p = ui_pl_of( raw, 0u );
+        const auto at = [ &raw ]( int offset ) { return raw.data( ) + ( offset - 0x60 ); };
+        p.m_active = *at( 0xD4 );
+        p.m_ended = *at( 0xD5 );
+        p.m_held = *at( 0xD6 );
+        const std::uint8_t pad = *at( 0xD7 );
+        std::memcpy( p.m_touch, at( 0xD8 ), 8 );
+        std::memcpy( &p.m_grab, at( 0xE0 ), 4 );
+        std::memcpy( &p.m_target, at( 0xE8 ), 4 );
+        std::memcpy( &p.m_velocity, at( 0xEC ), 4 );
+        std::memcpy( &p.m_residual, at( 0xF0 ), 4 );
+        ui_crop_t crop;
+        std::memcpy( crop.m_matrix, block.data( ) + 0x14, 64 );
+        float inverse[ 16 ];
+        std::memcpy( inverse, block.data( ) + 0x54, 64 );
+        ui_touch_device_t device;
+        const int self = 0;
+        for ( int s = 0; s < run.m_steps; ++s )
+        {
+            const golden_plt_step_t& g = g_golden_plt_steps[ run.m_first + s ];
+            float a[ 2 ];
+            std::memcpy( a, g.m_arg, 8 );
+            std::string fired;
+            switch ( g.m_op )
+            {
+            case 0: ui_page_layout_initialize( p, [ & ] { ui_touch_add( device, &self, 0u ); } ); break;
+            case 1: ui_page_layout_release( p, [ & ] { ui_touch_remove( device, &self ); } ); break;
+            case 2: ui_page_layout_start( p ); break;
+            case 3: ui_page_layout_stop( p ); break;
+            case 4: ui_page_layout_reset( p ); break;
+            case 5:
+                ui_page_layout_tick( p, crop, a[ 0 ], [ & ]
+                {
+                    fired = "find OnReachedEnd;execute 0";
+                    ++ends;
+                } );
+                break;
+            case 6: ui_page_layout_touch_down( p, crop, inverse, a ); break;
+            case 7: ui_page_layout_touch_up( p ); break;
+            case 8:
+                if ( p.m_held )
+                    fired = "position 0";
+                ui_page_layout_touch_move( p, crop, inverse, a );
+                break;
+            default:
+                if ( g.m_at == 0xD0 )
+                    p.m_total = a[ 0 ];
+                else if ( g.m_at == 0xB0 )
+                    p.m_scroll_speed = a[ 0 ];
+                else if ( g.m_at == 0xB4 )
+                    p.m_scroll_lag = a[ 0 ];
+                else if ( g.m_at == 0xB8 )
+                    p.m_damping = a[ 0 ];
+                else if ( g.m_at == 0xE4 )
+                    p.m_scroll = a[ 0 ];
+                break;
+            }
+            std::string entries;
+            for ( const auto& c : device.m_callbacks )
+                entries += ( c.first == &self ? std::string( "self" ) : std::string( "other" ) ) + "," + std::to_string( c.second ) + ";";
+            ++steps;
+            const std::string state = ui_plt_state( p, pad );
+            if ( ( state != g.m_state || entries != g.m_entries || fired != g.m_fired ) && ++failed <= 8 )
+                LOG_ERROR( "ui page layout tick: run %d (env %d) step %d (op %d): %s [%s] {%s} (retail %s [%s] {%s})", static_cast< int >( k ), run.m_env, s, g.m_op,
+                           state.c_str( ), entries.c_str( ), fired.c_str( ), g.m_state, g.m_entries, g.m_fired );
+        }
+    }
+    if ( failed == 0 )
+        LOG_SUCCESS( "ui_page_layout_tick / _initialize / plugs / touch callbacks / _release match retail's VuUIPageLayoutEntity 0x62DA30 / 0x62D9A0 / "
+                     "0x62E0A0 0x62E0C0 0x62E0E0 / 0x62DD20 0x62DED0 0x62DEF0 / 0x62DA10 on %d runs: %d steps (+0xD0..+0xF4, the touch entries, the hook "
+                     "calls; %d OnReachedEnd fires)", static_cast< int >( g_golden_plt_runs_count ), steps, ends );
+    else
+        LOG_ERROR( "the UI page layout tick FAILED %d checks against retail's", failed );
+    return failed == 0;
+}
+
+// ui_control_methods_init / _release (core/ui controls.hxx) against retail's
+// VuControlMethodManager slot 5 0x4AE890 / slot 3 0x4AE980 (oracle case
+// control_methods: 0x53FB90 / 0x4F6700 / 0x539020 live on fake devices): per
+// seeded run init, release, release - both lists, the key size and +0x150, the
+// touch +0x1C, the platform hooks' log.
+inline bool verify_ui_control_methods( )
+{
+    int failed = 0, steps = 0;
+    const int self4 = 0, self8 = 0, o1 = 0, o2 = 0;
+    const auto parse = [ & ]( const char* text, const void* self, std::vector< std::pair< const void*, std::uint32_t > >& out )
+    {
+        for ( const char* at = text; *at; )
+        {
+            const char* comma = std::strchr( at, ',' );
+            const char* semi = comma ? std::strchr( comma, ';' ) : nullptr;
+            if ( !semi )
+                break;
+            const std::string t( at, comma );
+            out.push_back( { t == "self" ? self : t == "o1" ? static_cast< const void* >( &o1 ) : static_cast< const void* >( &o2 ),
+                             static_cast< std::uint32_t >( std::strtoul( comma + 1, nullptr, 10 ) ) } );
+            at = semi + 1;
+        }
+    };
+    const auto print = [ & ]( const std::vector< std::pair< const void*, std::uint32_t > >& list, const void* self )
+    {
+        std::string s;
+        for ( const auto& c : list )
+            s += std::string( c.first == self ? "self" : c.first == &o1 ? "o1" : "o2" ) + "," + std::to_string( c.second ) + ";";
+        return s;
+    };
+    for ( std::size_t k = 0; k < g_golden_cmm_runs_count; ++k )
+    {
+        const golden_cmm_run_t& run = g_golden_cmm_runs[ k ];
+        ui_touch_device_t touch;
+        touch.m_priority = 3u;
+        ui_key_device_t keys;
+        parse( run.m_touch, &self4, touch.m_low_level );
+        parse( run.m_keys, &self8, keys.m_callbacks );
+        keys.m_priority = run.m_top;
+        for ( int s = 0; s < run.m_steps; ++s )
+        {
+            const golden_cmm_step_t& g = g_golden_cmm_steps[ run.m_first + s ];
+            std::string log;
+            ui_control_methods_hooks_t h;
+            h.m_tick_add = [ & ] { log += std::string( log.empty( ) ? "" : ";" ) + "tick_add 0x7454F0 0x4AEC40 self Input"; };
+            h.m_tick_remove = [ & ] { log += std::string( log.empty( ) ? "" : ";" ) + "tick_remove self"; };
+            h.m_input = [ & ]( std::uint8_t v ) { log += std::string( log.empty( ) ? "" : ";" ) + "input " + std::to_string( v ); };
+            int result = -1;
+            if ( g.m_op == 0 )
+                result = ui_control_methods_init( touch, keys, &self4, &self8, h ) ? 1 : 0;
+            else
+                ui_control_methods_release( touch, keys, &self4, &self8, h );
+            ++steps;
+            if ( ( result != g.m_result || print( touch.m_low_level, &self4 ) != g.m_second || print( keys.m_callbacks, &self8 ) != g.m_keys ||
+                   static_cast< int >( keys.m_callbacks.size( ) ) != g.m_size || keys.m_priority != g.m_top || touch.m_priority != g.m_priority || log != g.m_log ) &&
+                 ++failed <= 8 )
+                LOG_ERROR( "ui control methods: run %d step %d: %s | %s | %u | %s (retail %s | %s | %u | %s)", static_cast< int >( k ), s,
+                           print( touch.m_low_level, &self4 ).c_str( ), print( keys.m_callbacks, &self8 ).c_str( ), keys.m_priority, log.c_str( ), g.m_second,
+                           g.m_keys, g.m_top, g.m_log );
+        }
+    }
+    if ( failed == 0 )
+        LOG_SUCCESS( "ui_control_methods_init / _release match retail's VuControlMethodManager slot 5 0x4AE890 / slot 3 0x4AE980 on %d runs: %d steps "
+                     "(the touch device's second list, the key device's list / size / +0x150, the tick / input hooks)",
+            static_cast< int >( g_golden_cmm_runs_count ), steps );
+    else
+        LOG_ERROR( "the UI control methods FAILED %d checks against retail's", failed );
+    return failed == 0;
+}
+
+// THE FRAME WIRING of the message box: ui_root_frame (core/ui frame.hxx) on OUR
+// loaded Screens/MessageBox root with the m_message_box input against retail's
+// 0x4675A0 with its children's draws LIVE (oracle case message_box_frame): the
+// box's records (fields from OUR properties via ui_message_box_of, the runtime
+// state from the run) and the two image children's (their textures null), every
+// command byte for byte in one sort.
+inline bool verify_ui_message_box_frame( )
+{
+    const ui_loaded_t& loaded = ui_loaded( );
+    ui_gfx_sort_t sort;
+    sort.m_buffers[ 0 ].m_capacity = 0x300000;
+    sort.m_buffers[ 1 ].m_used = 0x35;
+    sort.m_buffers[ 1 ].m_capacity = 0x100000;
+    for ( auto& b : sort.m_buffers )
+        b.m_memory.resize( static_cast< std::size_t >( b.m_capacity ) );
+    int failed = 0, commands = 0, leaves = 0;
+    for ( std::size_t k = 0; k < g_golden_mbf_runs_count; ++k )
+    {
+        const golden_mbf_run_t& v = g_golden_mbf_runs[ k ];
+        const entity_t* root = nullptr;
+        for ( std::size_t p = 0; p < g_golden_ui_projects_count && !root; ++p )
+            if ( std::strcmp( g_golden_ui_projects[ p ].m_asset, v.m_project ) == 0 && !loaded.trees[ p ].empty( ) )
+                root = loaded.trees[ p ][ 0 ].second;
+        if ( !root )
+        {
+            ++failed;
+            continue;
+        }
+        const std::vector< std::uint8_t > raw = ui_unhex( v.m_fields ), block = ui_unhex( v.m_block ), matrix = ui_unhex( v.m_matrix );
+        const auto at = [ &raw ]( int offset ) { return raw.data( ) + ( offset - 0x60 ); };
+        std::uint32_t def;
+        std::memcpy( &def, block.data( ) + 0x9C, 4 );
+        bool params_same = true;
+        ui_frame_inputs_t in;
+        for ( int m = 0; m < 2; ++m )
+        {
+            in.m_env.m_material[ m ] = g_golden_mbx_font_materials[ m ];
+            in.m_env.m_material_key[ m ] = g_golden_mbx_font_materials[ 2 + m ];
+        }
+        in.m_env.m_texture_material = g_golden_mbx_materials[ 0 ];
+        in.m_env.m_texture_material_key = g_golden_mbx_materials[ 1 ];
+        in.m_env.m_rect_material = g_golden_mbx_materials[ 2 ];
+        in.m_env.m_rect_material_key = g_golden_mbx_materials[ 3 ];
+        std::memcpy( in.m_env.m_matrix, matrix.data( ), 64 );
+        in.m_db.m_present = v.m_sdb >= 0;
+        in.m_db.m_slot12 = v.m_sdb == 1;
+        in.m_fontdb = &ui_font_db( 0 );
+        in.m_message_box = [ & ]( const entity_t&, ui_message_box_t& b, ui_message_box_inputs_t& mi )
+        {
+            for ( int j = 0; j < 5; ++j )
+            {
+                ui_message_block_t& t = b.m_blocks[ j ];
+                const int o = 0x78 + 0x9C * j;
+                if ( std::memcmp( t.m_params, at( o + 0x30 ), 41 ) != 0 )
+                    params_same = false;
+                std::memcpy( t.m_params, at( o + 0x30 ), 60 );   // 41..59: retail's indeterminate stack (UNKNOWN)
+                t.m_enabled = static_cast< std::uint8_t >( ( v.m_mask >> j ) & 1 );
+                const std::vector< std::uint8_t > text = ui_unhex( v.m_texts[ j ] );
+                t.m_text.assign( text.begin( ), text.end( ) );
+                t.m_font.m_asset = v.m_fonts[ j ] == 0;
+                t.m_font.m_asset_font = g_golden_mbx_fonts[ 0 ];
+                t.m_font.m_default = def != 0;
+                t.m_font.m_default_font = g_golden_mbx_fonts[ 1 ];
+            }
+            b.m_image_flip = *at( 0x528 );
+            std::memcpy( b.m_progress, at( 0x52C ), 8 );
+            std::memcpy( &b.m_rotation, at( 0x578 ), 4 );
+            std::memcpy( &b.m_button, at( 0x588 ), 4 );
+            for ( int j = 0; j < 6; ++j )
+                mi.m_buttons[ j ] = ( v.m_textures >> j ) & 1u ? g_golden_mbx_textures + 0x20u * static_cast< unsigned >( j ) : 0u;
+            mi.m_spinner = ( v.m_textures >> 6 ) & 1u ? g_golden_mbx_textures + 0xC0u : 0u;
+            mi.m_image = ( v.m_textures >> 7 ) & 1u ? g_golden_mbx_textures + 0xE0u : 0u;
+            return true;
+        };
+        ui_impl_t impl;
+        std::memcpy( impl.m_crop.m_matrix, block.data( ) + 0x14, 64 );
+        std::memcpy( &impl.m_float, block.data( ) + 0x94, 4 );
+        std::memcpy( &impl.m_aspect, block.data( ) + 0x98, 4 );
+        sort.m_index = v.m_buffer;
+        sort.m_key_lo = v.m_key_in[ 0 ];
+        sort.m_key_hi = v.m_key_in[ 1 ];
+        std::vector< ui_gfx_command_t >& list = sort.m_commands[ v.m_buffer ];
+        const std::size_t before = list.size( );
+        float alpha;
+        std::memcpy( &alpha, &v.m_alpha, 4 );
+        const ui_frame_t frame = ui_root_frame( *root, impl, sort, alpha, &in );
+        bool same = params_same && frame.m_unknown == 0 && frame.m_unrecreated == 0 && list.size( ) - before == static_cast< std::size_t >( v.m_commands ) &&
+                    sort.m_key_lo == v.m_key[ 0 ] && sort.m_key_hi == v.m_key[ 1 ];
+        for ( int c = 0; same && c < v.m_commands; ++c )
+        {
+            const golden_txt_command_t& want = g_golden_mbf_commands[ v.m_first + c ];
+            const ui_gfx_command_t& got = list[ before + static_cast< std::size_t >( c ) ];
+            const std::vector< std::uint8_t > record = ui_unhex( want.m_record );
+            const auto& memory = sort.m_buffers[ v.m_buffer ].m_memory;
+            same = std::memcmp( got.m_words, want.m_words, sizeof( got.m_words ) ) == 0 && got.m_words[ 3 ] + record.size( ) <= memory.size( ) &&
+                   std::memcmp( memory.data( ) + got.m_words[ 3 ], record.data( ), record.size( ) ) == 0;
+            ++commands;
+        }
+        leaves += static_cast< int >( frame.m_draws.size( ) );
+        if ( !same && ++failed <= 8 )
+            LOG_ERROR( "ui message box frame: run %d gave %d commands (%d leaves, %d unrecreated, %d unknown), retail %d - or a word / record byte / key differs",
+                       static_cast< int >( k ), static_cast< int >( list.size( ) - before ), static_cast< int >( frame.m_draws.size( ) ), frame.m_unrecreated,
+                       frame.m_unknown, v.m_commands );
+    }
+    if ( failed == 0 )
+        LOG_SUCCESS( "ui_root_frame with the message box kind matches retail's VuMessageBoxScreenEntity 0x4675A0 with its children's draws live on %d runs: "
+                     "%d leaves, %d commands and records byte for byte", static_cast< int >( g_golden_mbf_runs_count ), leaves, commands );
+    else
+        LOG_ERROR( "the UI message box frame FAILED %d checks against retail's", failed );
+    return failed == 0;
+}
+
+// The row's fields from retail's bytes +0x60..+0x230, its Type / Channel / Label and Depth.
+inline ui_remap_t ui_rm_of( const std::vector< std::uint8_t >& raw, const golden_rm_row_t& row, std::uint32_t depth )
+{
+    ui_remap_t r;
+    const auto at = [ &raw ]( int offset ) { return raw.data( ) + ( offset - 0x60 ); };
+    r.m_visible = *at( 0x6C );
+    std::memcpy( r.m_scale, at( 0x70 ), 8 );
+    std::memcpy( r.m_pos, at( 0x78 ), 8 );
+    std::memcpy( r.m_label_offset, at( 0x80 ), 8 );
+    std::memcpy( r.m_label_params, at( 0xA8 ), 60 );
+    std::memcpy( r.m_control_offset, at( 0x104 ), 8 );
+    std::memcpy( r.m_control_image, at( 0x10C ), 16 );
+    std::memcpy( r.m_control_params, at( 0x13C ), 60 );
+    std::memcpy( &r.m_selected_colour, at( 0x180 ), 4 );
+    std::memcpy( r.m_touch, at( 0x184 ), 16 );
+    std::memcpy( r.m_image, at( 0x194 ), 16 );
+    r.m_label = row.m_label;
+    r.m_type = row.m_type;
+    r.m_channel = row.m_channel;
+    r.m_config = row.m_config;
+    std::memcpy( &r.m_depth, &depth, 4 );
+    return r;
+}
+
+// ui_remap_draw / ui_remap_layout_draw (core/ui remap.hxx) against retail's
+// 0x45FB90 / 0x461A30 -> 0x461B00 (oracle case remap_draw) on every remapping row
+// of Screens/ControlsGamepad: OUR loaded properties against retail's bytes; the
+// runs (every binding type, auto, no input manager, selected, hover, no textures
+// / fonts, Visible off, a sweep of the fields): every command's words and record
+// byte for byte in ONE sort, every input-manager / StringDB hook call's inputs
+// (answered with retail's).
+inline bool verify_ui_remap_draw( )
+{
+    const ui_loaded_t& loaded = ui_loaded( );
+    ui_gfx_sort_t sort;
+    sort.m_buffers[ 0 ].m_capacity = 0x300000;
+    sort.m_buffers[ 1 ].m_used = 0x35;
+    sort.m_buffers[ 1 ].m_capacity = 0x100000;
+    for ( auto& b : sort.m_buffers )
+        b.m_memory.resize( static_cast< std::size_t >( b.m_capacity ) );
+    const auto text = []( const char* hexed ) { const std::vector< std::uint8_t > v = ui_unhex( hexed ); return std::string( v.begin( ), v.end( ) ); };
+    int failed = 0, commands = 0, calls = 0, runs = 0;
+    for ( std::size_t k = 0; k < g_golden_rm_rows_count; ++k )
+    {
+        const golden_rm_row_t& row = g_golden_rm_rows[ k ];
+        const std::vector< std::uint8_t > raw = ui_unhex( row.m_fields );
+        const entity_t* have = nullptr;
+        for ( std::size_t p = 0; p < g_golden_ui_projects_count; ++p )
+            if ( std::strcmp( g_golden_ui_projects[ p ].m_asset, row.m_project ) == 0 && row.m_index >= 0 && static_cast< std::size_t >( row.m_index ) < loaded.trees[ p ].size( ) )
+                have = loaded.trees[ p ][ static_cast< std::size_t >( row.m_index ) ].second;
+        const ui_remap_t retail = ui_rm_of( raw, row, row.m_depth );
+        ui_remap_t ours = retail;
+        bool same = have != nullptr;
+        if ( have )
+        {
+            const auto take = [ & ]( const char* name, void* target, std::size_t bytes )
+            {
+                std::uint8_t was[ 16 ];
+                std::memcpy( was, target, bytes );
+                ui_frame_take( *have, name, target, bytes );
+                if ( std::memcmp( was, target, bytes ) != 0 )
+                    same = false;
+            };
+            static const char* const k_rects[ 3 ] = { "Control Image", "Touch", "Image" };
+            float* const rects[ 3 ] = { ours.m_control_image, ours.m_touch, ours.m_image };
+            static const char* const k_xywh[ 4 ] = { " X", " Y", " Width", " Height" };
+            take( "Visible", &ours.m_visible, 1 );
+            take( "Screen Scale", ours.m_scale, 8 );
+            take( "Pos", ours.m_pos, 8 );
+            take( "Label Offset", ours.m_label_offset, 8 );
+            take( "Control Offset", ours.m_control_offset, 8 );
+            take( "Control Selected Text Color", &ours.m_selected_colour, 4 );
+            take( "Config", &ours.m_config, 4 );
+            for ( int r = 0; r < 3; ++r )
+                for ( int c = 0; c < 4; ++c )
+                    take( ( std::string( k_rects[ r ] ) + k_xywh[ c ] ).c_str( ), &rects[ r ][ c ], 4 );
+            const auto slot_text = [ & ]( const char* name ) { const ui_slot_t* s = ui_property_value( *have, name ); return s ? s->m_text : std::string( ); };
+            same = same && slot_text( "Type" ) == row.m_type && slot_text( "Channel Name" ) == row.m_channel && slot_text( "Label String ID" ) == row.m_label;
+            std::uint8_t params[ 60 ] = { };
+            std::string asset;
+            ui_font_params( ui_font_db( 0 ), slot_text( "Label Font" ), params, asset );
+            same = same && std::memcmp( params, retail.m_label_params, 41 ) == 0;
+            ui_font_params( ui_font_db( 0 ), slot_text( "Control Font" ), params, asset );
+            same = same && std::memcmp( params, retail.m_control_params, 41 ) == 0;
+            const float depth = ui_frame_depth( *have );
+            same = same && std::memcmp( &depth, &row.m_depth, 4 ) == 0;
+        }
+        if ( !same )
+        {
+            if ( ++failed <= 8 )
+                LOG_ERROR( "ui remap: row %d (%s %s): OUR loaded properties differ from retail's", row.m_index, row.m_type, row.m_channel );
+            continue;
+        }
+        for ( int r = 0; r < row.m_runs; ++r )
+        {
+            const golden_rm_run_t& v = g_golden_rm_runs[ row.m_first + r ];
+            ui_remap_t p = ui_rm_of( ui_unhex( v.m_fields ), row, v.m_depth );
+            p.m_selected = static_cast< std::uint8_t >( v.m_selected );
+            p.m_hover = v.m_hover;
+            for ( int j = 0; j < 6; ++j )
+                p.m_textures[ j ] = ( v.m_textures >> j ) & 1u ? g_golden_rm_textures + 0x20u * static_cast< unsigned >( j ) : 0u;
+            const std::vector< std::uint8_t > block = ui_unhex( v.m_block ), matrix = ui_unhex( v.m_matrix );
+            std::uint32_t def;
+            std::memcpy( &def, block.data( ) + 0x9C, 4 );
+            for ( ui_text_font_t* f : { &p.m_label_font, &p.m_control_font } )
+            {
+                const int which = f == &p.m_label_font ? v.m_fonts[ 0 ] : v.m_fonts[ 1 ];
+                f->m_asset = which == 0;
+                f->m_asset_font = g_golden_rm_fonts[ 0 ];
+                f->m_default = def != 0;
+                f->m_default_font = g_golden_rm_fonts[ 1 ];
+            }
+            ui_font_draw_env_t env;
+            std::memcpy( env.m_matrix, matrix.data( ), 64 );
+            std::memcpy( &env.m_top, &v.m_top, 4 );
+            for ( int m = 0; m < 2; ++m )
+            {
+                env.m_material[ m ] = g_golden_rm_font_materials[ m ];
+                env.m_material_key[ m ] = g_golden_rm_font_materials[ 2 + m ];
+            }
+            env.m_texture_material = g_golden_rm_materials[ 0 ];
+            env.m_texture_material_key = g_golden_rm_materials[ 1 ];
+            env.m_rect_material = g_golden_rm_materials[ 2 ];
+            env.m_rect_material_key = g_golden_rm_materials[ 3 ];
+            ui_string_db_t db;
+            db.m_present = true;
+            db.m_slot12 = v.m_sdb == 1;
+            int at = 0;
+            bool hooks_same = true;
+            const auto next = [ & ]( int kind ) -> const golden_rm_call_t*
+            {
+                if ( at >= v.m_calls || g_golden_rm_calls[ v.m_first_call + at ].m_kind != kind )
+                {
+                    hooks_same = false;
+                    return nullptr;
+                }
+                ++calls;
+                return &g_golden_rm_calls[ v.m_first_call + at++ ];
+            };
+            ui_remap_inputs_t in;
+            in.m_input = v.m_input != 0;
+            in.m_throttle = row.m_vtable == 0x73D45Cu;
+            in.m_auto[ 0 ] = static_cast< std::uint8_t >( v.m_auto[ 0 ] );
+            in.m_auto[ 1 ] = static_cast< std::uint8_t >( v.m_auto[ 1 ] );
+            in.m_lookup = [ & ]( int slot, std::int32_t config, const std::string& channel, std::int32_t& type, std::int32_t& index )
+            {
+                const golden_rm_call_t* c = next( slot );
+                if ( !c || text( c->m_id ) != channel || c->m_a != 0u || c->m_b != static_cast< unsigned >( config ) )
+                    hooks_same = false;
+                type = v.m_type;
+                index = v.m_index;
+            };
+            in.m_axis_name = []( std::int32_t index ) { return std::string( g_golden_rm_axes[ index ] ); };
+            in.m_button_name = []( std::int32_t index ) { return std::string( g_golden_rm_buttons[ index ] ); };
+            in.m_string = [ & ]( const std::string& id )
+            {
+                const golden_rm_call_t* c = next( 7 );
+                if ( !c || text( c->m_id ) != id )
+                    hooks_same = false;
+                return c ? text( c->m_text ) : std::string( );
+            };
+            in.m_string_literal = [ & ]( const char* id )
+            {
+                const golden_rm_call_t* c = next( 6 );
+                if ( !c || text( c->m_id ) != id )
+                    hooks_same = false;
+                return c ? text( c->m_text ) : std::string( );
+            };
+            in.m_missing = [ & ]
+            {
+                const golden_rm_call_t* c = next( 9 );
+                return c ? text( c->m_text ) : std::string( );
+            };
+            sort.m_index = v.m_buffer;
+            sort.m_key_lo = v.m_key_in[ 0 ];
+            sort.m_key_hi = v.m_key_in[ 1 ];
+            std::vector< ui_gfx_command_t >& list = sort.m_commands[ v.m_buffer ];
+            const std::size_t before = list.size( );
+            float alpha;
+            std::memcpy( &alpha, &v.m_alpha, 4 );
+            const bool known = v.m_layout ? ui_remap_layout_draw( sort, env, db, p, in, static_cast< std::uint8_t >( v.m_arg ) ) : ui_remap_draw( sort, env, db, p, in, alpha );
+            bool ok = known && hooks_same && at == v.m_calls && list.size( ) - before == static_cast< std::size_t >( v.m_commands ) && sort.m_key_lo == v.m_key[ 0 ] && sort.m_key_hi == v.m_key[ 1 ];
+            for ( int c = 0; ok && c < v.m_commands; ++c )
+            {
+                const golden_txt_command_t& want = g_golden_rm_commands[ v.m_first + c ];
+                const ui_gfx_command_t& got = list[ before + static_cast< std::size_t >( c ) ];
+                const std::vector< std::uint8_t > record = ui_unhex( want.m_record );
+                const auto& memory = sort.m_buffers[ v.m_buffer ].m_memory;
+                ok = std::memcmp( got.m_words, want.m_words, sizeof( got.m_words ) ) == 0 && got.m_words[ 3 ] + record.size( ) <= memory.size( ) &&
+                     std::memcmp( memory.data( ) + got.m_words[ 3 ], record.data( ), record.size( ) ) == 0;
+                ++commands;
+            }
+            ++runs;
+            if ( !ok && ++failed <= 8 )
+                LOG_ERROR( "ui remap: row %d run %d (type %d index %d, %s) gave %d commands / %d hook calls, retail %d / %d - or a word, record byte or hook input differs",
+                           row.m_index, r, v.m_type, v.m_index, v.m_layout ? "layout" : "draw", static_cast< int >( list.size( ) - before ), at, v.m_commands, v.m_calls );
+        }
+    }
+    if ( failed == 0 )
+        LOG_SUCCESS( "ui_remap_draw / _layout_draw match retail's remapping rows 0x45FB90 / 0x461A30 -> 0x461B00 (0x4626D0, 0x4629A0) on %d rows: %d runs, %d commands and "
+                     "records byte for byte, %d hook calls", static_cast< int >( g_golden_rm_rows_count ), runs, commands, calls );
+    else
+        LOG_ERROR( "the UI remapping row FAILED %d checks against retail's", failed );
+    return failed == 0;
+}
+
+// ui_champ_draw (core/ui champ.hxx) against retail's VuChampionshipEntity 0x451CA0
+// (oracle case championship_draw) on Screens/Championship: OUR loaded properties
+// against retail's bytes, then hand-built standings through the real entity: every
+// command's words and record byte for byte in ONE sort, the block's array after,
+// each StringDB call's id.
+inline bool verify_ui_championship_draw( )
+{
+    const ui_loaded_t& loaded = ui_loaded( );
+    ui_gfx_sort_t sort;
+    sort.m_buffers[ 0 ].m_capacity = 0x300000;
+    sort.m_buffers[ 1 ].m_used = 0x35;
+    sort.m_buffers[ 1 ].m_capacity = 0x100000;
+    for ( auto& b : sort.m_buffers )
+        b.m_memory.resize( static_cast< std::size_t >( b.m_capacity ) );
+    const auto parse = []( const unsigned* words, int bytes )
+    {
+        return c_reader( std::vector< std::uint8_t >( reinterpret_cast< const std::uint8_t* >( words ), reinterpret_cast< const std::uint8_t* >( words ) + bytes ) ).parse( );
+    };
+    const auto text = []( const char* hexed ) { const std::vector< std::uint8_t > v = ui_unhex( hexed ); return std::string( v.begin( ), v.end( ) ); };
+    int failed = 0, commands = 0, calls = 0, runs = 0;
+    for ( std::size_t k = 0; k < g_golden_ch_tables_count; ++k )
+    {
+        const golden_ch_table_t& g = g_golden_ch_tables[ k ];
+        const std::vector< std::uint8_t > raw = ui_unhex( g.m_fields );
+        const auto at = [ &raw ]( int offset ) { return raw.data( ) + ( offset - 0x60 ); };
+        const entity_t* have = nullptr;
+        for ( std::size_t p = 0; p < g_golden_ui_projects_count; ++p )
+            if ( std::strcmp( g_golden_ui_projects[ p ].m_asset, g.m_project ) == 0 && g.m_index >= 0 && static_cast< std::size_t >( g.m_index ) < loaded.trees[ p ].size( ) )
+                have = loaded.trees[ p ][ static_cast< std::size_t >( g.m_index ) ].second;
+        ui_champ_t base;
+        ui_results_table_t& t = base.m_table;
+        std::memcpy( t.m_scale, at( 0x64 ), 8 );
+        std::memcpy( t.m_pos, at( 0x6C ), 8 );
+        std::memcpy( &t.m_highlight, at( 0x74 ), 4 );
+        std::memcpy( base.m_place, at( 0x78 ), 16 );
+        std::memcpy( base.m_place_font.m_params, at( 0xA8 ), 60 );
+        std::memcpy( base.m_points, at( 0xEC ), 16 );
+        std::memcpy( base.m_points_font.m_params, at( 0x11C ), 60 );
+        std::memcpy( base.m_name, at( 0x160 ), 16 );
+        std::memcpy( base.m_name_font.m_params, at( 0x190 ), 60 );
+        std::memcpy( base.m_boat, at( 0x1D4 ), 16 );
+        std::memcpy( base.m_boat_font.m_params, at( 0x204 ), 60 );
+        std::memcpy( &t.m_width, at( 0x248 ), 4 );
+        std::memcpy( &t.m_spacing, at( 0x24C ), 4 );
+        std::memcpy( &t.m_header, at( 0x250 ), 4 );
+        std::memcpy( &t.m_inactive, at( 0x254 ), 4 );
+        std::memcpy( &t.m_active, at( 0x258 ), 4 );
+        std::memcpy( &t.m_player, at( 0x25C ), 4 );
+        std::memcpy( &t.m_depth, &g.m_depth, 4 );
+        ui_champ_t ours = base;
+        bool same = have != nullptr;
+        if ( have )
+        {
+            const auto take = [ & ]( const char* name, void* target, std::size_t bytes )
+            {
+                std::uint8_t was[ 16 ];
+                std::memcpy( was, target, bytes );
+                ui_frame_take( *have, name, target, bytes );
+                if ( std::memcmp( was, target, bytes ) != 0 )
+                    same = false;
+            };
+            ui_results_table_t& o = ours.m_table;
+            take( "Screen Scale", o.m_scale, 8 );
+            take( "Position X", &o.m_pos[ 0 ], 4 );
+            take( "Position Y", &o.m_pos[ 1 ], 4 );
+            take( "Text Highlight Color", &o.m_highlight, 4 );
+            static const char* const k_cells[ 4 ] = { "PlaceText", "PointsText", "NameText", "BoatText" };
+            static const char* const k_fonts[ 4 ] = { "PlaceFont", "PointsFont", "NameFont", "BoatFont" };
+            float* const cells[ 4 ] = { ours.m_place, ours.m_points, ours.m_name, ours.m_boat };
+            const ui_results_font_t* const fonts[ 4 ] = { &base.m_place_font, &base.m_points_font, &base.m_name_font, &base.m_boat_font };
+            static const char* const k_xywh[ 4 ] = { "X", "Y", "Width", "Height" };
+            for ( int c = 0; c < 4; ++c )
+            {
+                for ( int j = 0; j < 4; ++j )
+                    take( ( std::string( k_cells[ c ] ) + k_xywh[ j ] ).c_str( ), &cells[ c ][ j ], 4 );
+                std::uint8_t params[ 60 ] = { };
+                std::string asset;
+                const ui_slot_t* s = ui_property_value( *have, k_fonts[ c ] );
+                ui_font_params( ui_font_db( 0 ), s ? s->m_text : std::string( ), params, asset );
+                same = same && std::memcmp( params, fonts[ c ]->m_params, 41 ) == 0;
+            }
+            take( "Width", &o.m_width, 4 );
+            take( "VerticalSpacing", &o.m_spacing, 4 );
+            take( "HeaderColor", &o.m_header, 4 );
+            take( "InactiveColor", &o.m_inactive, 4 );
+            take( "ActiveColor", &o.m_active, 4 );
+            take( "PlayerColor", &o.m_player, 4 );
+            const float depth = ui_frame_depth( *have );
+            same = same && std::memcmp( &depth, &g.m_depth, 4 ) == 0;
+        }
+        if ( !same )
+        {
+            if ( ++failed <= 8 )
+                LOG_ERROR( "ui championship: entity %d: OUR loaded properties differ from retail's", g.m_index );
+            continue;
+        }
+        const value_t boatdb = parse( g.m_boatdb, g.m_boatdb_bytes );
+        for ( int r = 0; r < g.m_runs; ++r )
+        {
+            const golden_ch_run_t& v = g_golden_ch_runs[ g.m_first + r ];
+            const value_t doc = parse( v.m_doc, v.m_doc_bytes );
+            ui_champ_t c = base;
+            ui_results_table_t& o = c.m_table;
+            o.m_active_rows = v.m_active;
+            o.m_size = v.m_size;
+            o.m_capacity = 16;
+            o.m_pads.assign( 16, v.m_seed );
+            const std::vector< std::uint8_t > block = ui_unhex( v.m_block ), matrix = ui_unhex( v.m_matrix );
+            std::uint32_t def;
+            std::memcpy( &def, block.data( ) + 0x9C, 4 );
+            ui_results_font_t* const fonts[ 4 ] = { &c.m_place_font, &c.m_points_font, &c.m_name_font, &c.m_boat_font };
+            for ( int j = 0; j < 4; ++j )
+                fonts[ j ]->m_font = v.m_fonts[ j ] == 'a' ? g_golden_ch_fonts[ 0 ] : def ? g_golden_ch_fonts[ 1 ] : 0u;
+            ui_font_draw_env_t env;
+            std::memcpy( env.m_matrix, matrix.data( ), 64 );
+            std::memcpy( &env.m_top, &v.m_top, 4 );
+            for ( int m = 0; m < 2; ++m )
+            {
+                env.m_material[ m ] = g_golden_ch_font_materials[ m ];
+                env.m_material_key[ m ] = g_golden_ch_font_materials[ 2 + m ];
+            }
+            env.m_texture_material = g_golden_ch_materials[ 0 ];
+            env.m_texture_material_key = g_golden_ch_materials[ 1 ];
+            env.m_rect_material = g_golden_ch_materials[ 2 ];
+            env.m_rect_material_key = g_golden_ch_materials[ 3 ];
+            int at_call = 0;
+            bool hooks_same = true;
+            ui_champ_inputs_t in;
+            in.m_rows = &member( doc, "rows" );
+            in.m_boatdb = &boatdb;
+            in.m_string = [ & ]( const std::string& id )
+            {
+                if ( at_call >= v.m_calls )
+                {
+                    hooks_same = false;
+                    return std::string( );
+                }
+                const golden_ch_call_t& call = g_golden_ch_calls[ v.m_first_call + at_call++ ];
+                ++calls;
+                if ( text( call.m_id ) != id )
+                    hooks_same = false;
+                return text( call.m_text );
+            };
+            sort.m_index = v.m_buffer;
+            sort.m_key_lo = v.m_key_in[ 0 ];
+            sort.m_key_hi = v.m_key_in[ 1 ];
+            std::vector< ui_gfx_command_t >& list = sort.m_commands[ v.m_buffer ];
+            const std::size_t before = list.size( );
+            const bool known = ui_champ_draw( sort, env, c, in );
+            bool ok = known && hooks_same && at_call == v.m_calls && list.size( ) - before == static_cast< std::size_t >( v.m_commands ) && sort.m_key_lo == v.m_key[ 0 ] &&
+                      sort.m_key_hi == v.m_key[ 1 ];
+            for ( int j = 0; ok && j < 16; ++j )
+                ok = static_cast< unsigned >( o.m_pads[ static_cast< std::size_t >( j ) ] ) == v.m_pads[ j ];
+            for ( int n = 0; ok && n < v.m_commands; ++n )
+            {
+                const golden_txt_command_t& want = g_golden_ch_commands[ v.m_first + n ];
+                const ui_gfx_command_t& got = list[ before + static_cast< std::size_t >( n ) ];
+                const std::vector< std::uint8_t > record = ui_unhex( want.m_record );
+                const auto& memory = sort.m_buffers[ v.m_buffer ].m_memory;
+                ok = std::memcmp( got.m_words, want.m_words, sizeof( got.m_words ) ) == 0 && got.m_words[ 3 ] + record.size( ) <= memory.size( ) &&
+                     std::memcmp( memory.data( ) + got.m_words[ 3 ], record.data( ), record.size( ) ) == 0;
+                ++commands;
+            }
+            ++runs;
+            if ( !ok && ++failed <= 8 )
+                LOG_ERROR( "ui championship: run %d gave %d commands / %d string calls, retail %d / %d - or a word, record byte, array entry or id differs", r,
+                           static_cast< int >( list.size( ) - before ), at_call, v.m_commands, v.m_calls );
+        }
+    }
+    if ( failed == 0 )
+        LOG_SUCCESS( "ui_champ_draw matches retail's VuChampionshipEntity 0x451CA0 (0x4527A0, 0x443C90) on %d table: %d runs, %d commands and records byte for byte, %d StringDB calls",
+                     static_cast< int >( g_golden_ch_tables_count ), runs, commands, calls );
+    else
+        LOG_ERROR( "the UI championship table FAILED %d checks against retail's", failed );
+    return failed == 0;
+}
+
+// ui_minimap_layout_draw (core/ui map.hxx) against retail's 0x427FB0 (oracle case
+// minimap_layout): OUR loaded scale / rect against retail's bytes, the rect's
+// command and record, the alpha the draw is run at.
+inline bool verify_ui_minimap_layout( )
+{
+    ui_gfx_sort_t sort;
+    sort.m_buffers[ 0 ].m_capacity = 0x300000;
+    sort.m_buffers[ 1 ].m_used = 0x35;
+    sort.m_buffers[ 1 ].m_capacity = 0x100000;
+    for ( auto& b : sort.m_buffers )
+        b.m_memory.resize( static_cast< std::size_t >( b.m_capacity ) );
+    int failed = 0, runs = 0, commands = 0;
+    for ( std::size_t k = 0; k < g_golden_mlo_entities_count; ++k )
+    {
+        const golden_mlo_entity_t& g = g_golden_mlo_entities[ k ];
+        const entity_t* e = ui_lv_entity( g.m_project, g.m_index );
+        const std::vector< std::uint8_t > raw = ui_unhex( g.m_fields );
+        ui_minimap_t loaded;
+        bool same = e && raw.size( ) == 0x18;
+        if ( same )
+        {
+            same = ui_frame_take( *e, "Screen Scale", loaded.m_screen_scale, 8 ) && same;
+            static const char* const k_names[ 4 ] = { "X", "Y", "Width", "Height" };
+            for ( int j = 0; j < 4; ++j )
+                ui_frame_take( *e, k_names[ j ], &loaded.m_rect[ j ], 4 );
+            same = same && std::memcmp( loaded.m_screen_scale, raw.data( ), 8 ) == 0 && std::memcmp( loaded.m_rect, raw.data( ) + 8, 16 ) == 0;
+            loaded.m_depth = ui_frame_depth( *e );
+            same = same && ui_lv_bits( loaded.m_depth ) == g.m_depth;
+        }
+        if ( !same )
+        {
+            if ( ++failed <= 8 )
+                LOG_ERROR( "ui minimap layout: %s entity %d: OUR loaded fields differ from retail's", g.m_project, g.m_index );
+            continue;
+        }
+        for ( int r = 0; r < g.m_runs; ++r )
+        {
+            const golden_mlo_run_t& v = g_golden_mlo_runs[ g.m_first + r ];
+            const std::vector< std::uint8_t > fields = ui_unhex( v.m_fields ), matrix = ui_unhex( v.m_matrix );
+            ui_minimap_t m;
+            std::memcpy( m.m_screen_scale, fields.data( ), 8 );
+            std::memcpy( m.m_rect, fields.data( ) + 8, 16 );
+            std::memcpy( &m.m_depth, &v.m_depth, 4 );
+            ui_font_draw_env_t env;
+            std::memcpy( env.m_matrix, matrix.data( ), 64 );
+            env.m_rect_material = g_golden_mlo_rect_material[ 0 ];
+            env.m_rect_material_key = g_golden_mlo_rect_material[ 1 ];
+            sort.m_index = v.m_buffer;
+            sort.m_key_lo = v.m_key_lo;
+            sort.m_key_hi = v.m_key_hi;
+            std::vector< ui_gfx_command_t >& list = sort.m_commands[ v.m_buffer ];
+            const std::size_t before = list.size( );
+            std::string calls;
+            ui_minimap_layout_draw( sort, env, m, static_cast< std::uint8_t >( v.m_byte ), [ & ]( float a )
+            {
+                char t[ 16 ];
+                std::snprintf( t, sizeof t, "0x%08X", ui_lv_bits( a ) );
+                calls += t;
+            } );
+            bool ok = calls == v.m_calls && list.size( ) - before == static_cast< std::size_t >( v.m_commands );
+            for ( int c = 0; ok && c < v.m_commands; ++c )
+            {
+                const golden_txt_command_t& want = g_golden_mlo_commands[ v.m_first + c ];
+                const ui_gfx_command_t& got = list[ before + static_cast< std::size_t >( c ) ];
+                const std::vector< std::uint8_t > record = ui_unhex( want.m_record );
+                const auto& memory = sort.m_buffers[ v.m_buffer ].m_memory;
+                ok = std::memcmp( got.m_words, want.m_words, sizeof( got.m_words ) ) == 0 && got.m_words[ 3 ] + record.size( ) <= memory.size( ) &&
+                     std::memcmp( memory.data( ) + got.m_words[ 3 ], record.data( ), record.size( ) ) == 0;
+                ++commands;
+            }
+            ++runs;
+            if ( !ok && ++failed <= 8 )
+                LOG_ERROR( "ui minimap layout: entity %d run %d: %d commands (retail %d), draw alpha %s (retail %s)", g.m_index, r, static_cast< int >( list.size( ) - before ), v.m_commands,
+                           calls.c_str( ), v.m_calls );
+        }
+    }
+    if ( failed == 0 )
+        LOG_SUCCESS( "ui_minimap_layout_draw matches retail's 0x427FB0 on %d entities: %d runs, %d commands and records byte for byte", static_cast< int >( g_golden_mlo_entities_count ), runs, commands );
+    else
+        LOG_ERROR( "the UI minimap layout draw FAILED %d checks against retail's", failed );
+    return failed == 0;
+}
+
+// ui_remap_on_focus / _set_focus / _hide / _tick / _event / _touch_* / _decision /
+// _box_result (core/ui remap.hxx) against retail's row runtime (oracle case
+// remap_logic): one script per row kind on the real entity; after each step the row's
+// bytes, the point, hover, select, box, +0x204, the axes, the two auto settings
+// and the log of the hook calls with their arguments.
+inline bool verify_ui_remap_logic( )
+{
+    int failed = 0, steps = 0, logged = 0;
+    for ( std::size_t k = 0; k < g_golden_rl_rows_count; ++k )
+    {
+        const golden_rl_row_t& g = g_golden_rl_rows[ k ];
+        const std::vector< std::uint8_t > raw = ui_unhex( g.m_fields ), block = ui_unhex( g.m_block );
+        golden_rm_row_t row = { };
+        row.m_type = g.m_type;
+        row.m_channel = g.m_channel;
+        row.m_label = g.m_label;
+        row.m_config = g.m_config;
+        ui_remap_t r = ui_rm_of( raw, row, 0u );
+        r.m_selected = raw[ 0x1F0 - 0x60 ];
+        std::memcpy( &r.m_hover, raw.data( ) + ( 0x22C - 0x60 ), 4 );
+        float inverse[ 16 ];
+        std::memcpy( inverse, block.data( ) + 0x54, 64 );
+        ui_remap_runtime_t s;
+        s.m_axes.assign( 3, 0.0f );   // retail's array exists before the first opening
+        float axes[ 3 ] = { 0.0f, 0.0f, 0.0f };
+        std::uint32_t bits = 0;
+        std::vector< int > keys;
+        std::uint8_t automatic[ 2 ] = { 1, 1 };
+        std::string log;
+        const auto note = [ & ]( const std::string& t )
+        {
+            log += ( log.empty( ) ? "" : ";" ) + t;
+            ++logged;
+        };
+        ui_remap_hooks_t h;
+        h.m_set_focus = [ & ]
+        {
+            std::uint32_t hash = 0x811C9DC5u;
+            for ( const char* c = "OnUISetFocus"; *c; ++c )
+                hash = ( hash ^ static_cast< std::uint8_t >( *c ) ) * 0x01000193u;
+            char t[ 32 ];
+            std::snprintf( t, sizeof t, "broadcast 0x%08X", hash );
+            note( t );
+        };
+        h.m_nav = [ & ]( const char* plug, std::int32_t arg )
+        {
+            note( std::string( "find " ) + plug );
+            note( "nav " + std::to_string( arg ) );
+            note( "sound Global/UI_and_Menu/menu_browse" );
+        };
+        h.m_sound = [ & ] { note( std::string( "sound " ) + g.m_sfx ); };
+        h.m_open_box = [ & ]( bool can_auto )
+        {
+            note( std::string( "box " ) + g.m_label + "|Control_Mapping_MB_Body|" + ( can_auto ? "MessageBox_Auto" : "" ) + "|MessageBox_Cancel" );
+        };
+        h.m_channels = [ ] { return 3; };
+        h.m_axis = [ & ]( int i ) { return axes[ i ]; };
+        h.m_button_bits = [ & ] { return bits; };
+        h.m_key = [ & ]( int key )
+        {
+            for ( int d : keys )
+                if ( d == key )
+                    return true;
+            return false;
+        };
+        h.m_bind = [ & ]( int slot, std::int32_t config, const std::string& channel, int kind, int index )
+        {
+            note( "bind " + std::to_string( slot ) + " " + std::to_string( config ) + " " + channel + " " + std::to_string( kind ) + " " + std::to_string( index ) );
+        };
+        if ( g.m_vtable == 0x73D45Cu )
+            h.m_set_auto = [ & ]( std::uint8_t v )
+            {
+                if ( g.m_config == 0 || g.m_config == 1 )
+                    automatic[ g.m_config ] = v;
+            };
+        for ( int n = 0; n < g.m_steps; ++n )
+        {
+            const golden_rl_step_t& t = g_golden_rl_steps[ g.m_first + n ];
+            log.clear( );
+            float f[ 3 ];
+            std::memcpy( f, t.m_f, 12 );
+            switch ( t.m_op )
+            {
+            case 0: ui_remap_set_focus( s, h ); break;
+            case 1: ui_remap_tick( r, s, h ); break;
+            case 2: ui_remap_on_focus( s, t.m_i != 0 ); break;
+            case 3: ui_remap_event( r, s, t.m_text, t.m_i, h ); break;
+            case 4: ui_remap_decision( r, s, h ); break;
+            case 5:
+            {
+                std::memcpy( axes, f, 12 );
+                bits = t.m_bits;
+                keys.clear( );
+                for ( const char* c = t.m_keys; *c; )
+                {
+                    char* end = nullptr;
+                    keys.push_back( static_cast< int >( std::strtol( c, &end, 10 ) ) );
+                    c = *end ? end + 1 : end;
+                }
+                break;
+            }
+            case 6: ui_remap_touch_down( r, s, inverse, f ); break;
+            case 7: ui_remap_touch_point( s, inverse, f ); break;
+            case 8: ui_remap_touch_up( r, s ); break;
+            case 9: ui_remap_box_result( s, t.m_i, h ); break;
+            default: ui_remap_hide( r, s ); break;
+            }
+            ++steps;
+            char state[ 16 ];
+            std::snprintf( state, sizeof state, "%02x%02x%02x%02x%02x%02x", r.m_visible, r.m_selected, s.m_focus, s.m_pressed, s.m_down, s.m_released );
+            std::string axes_text;
+            if ( !s.m_axes.empty( ) )
+                for ( int a = 0; a < 3; ++a )
+                {
+                    char v[ 16 ];
+                    std::snprintf( v, sizeof v, "0x%08X", ui_lv_bits( s.m_axes[ static_cast< std::size_t >( a ) ] ) );
+                    axes_text += ( a ? ";" : "" ) + std::string( v );
+                }
+            const bool same = t.m_state == std::string( state ) && ui_lv_bits( s.m_point[ 0 ] ) == t.m_point[ 0 ] && ui_lv_bits( s.m_point[ 1 ] ) == t.m_point[ 1 ] && r.m_hover == t.m_hover && s.m_select == t.m_select &&
+                              ( s.m_box ? 1 : 0 ) == t.m_box && s.m_buttons == t.m_buttons && axes_text == t.m_axes && automatic[ 0 ] == t.m_auto[ 0 ] && automatic[ 1 ] == t.m_auto[ 1 ] && log == t.m_log;
+            if ( !same && ++failed <= 8 )
+                LOG_ERROR( "ui remap logic: row %d step %d (op %d): %s hover %d select %d box %d buttons 0x%08X [%s] {%s} (retail %s %d %d %d 0x%08X [%s] {%s})", static_cast< int >( k ), n, t.m_op, state, r.m_hover,
+                           s.m_select, s.m_box ? 1 : 0, s.m_buttons, axes_text.c_str( ), log.c_str( ), t.m_state, t.m_hover, t.m_select, t.m_box, t.m_buttons, t.m_axes, t.m_log );
+        }
+    }
+    if ( failed == 0 )
+        LOG_SUCCESS( "the remapping row's runtime matches retail's (0x4613A0, 0x4613F0, 0x4615A0, 0x4612E0, 0x461380, 0x461760, 0x4617F0, 0x461800, 0x4623D0, 0x4625C0, 0x4627F0, 0x461900) on %d rows: %d steps, %d hook calls",
+                     static_cast< int >( g_golden_rl_rows_count ), steps, logged );
+    else
+        LOG_ERROR( "the UI remapping logic FAILED %d checks against retail's", failed );
+    return failed == 0;
+}
+
 inline bool verify_ui_widgets_all( )
 {
     bool ok = true;
+    ok = verify_ui_championship_draw( ) && ok;
+    ok = verify_ui_remap_draw( ) && ok;
+    ok = verify_ui_remap_logic( ) && ok;
+    ok = verify_ui_message_box_frame( ) && ok;
+    ok = verify_ui_control_methods( ) && ok;
+    ok = verify_ui_page_layout_tick( ) && ok;
+    ok = verify_ui_page_layout( ) && ok;
     ok = verify_ui_text_layout_draw( ) && ok;
     ok = verify_ui_game_config_release( ) && ok;
     ok = verify_ui_message_box_draw( ) && ok;
     ok = verify_ui_slider_draw( ) && ok;
     ok = verify_ui_hud_controls( ) && ok;
+    ok = verify_ui_hud_layout_draw( ) && ok;
+    ok = verify_ui_minimap_layout( ) && ok;
     ok = verify_ui_hud_toast( ) && ok;
     return ok;
 }

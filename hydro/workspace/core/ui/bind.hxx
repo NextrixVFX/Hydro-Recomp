@@ -1250,7 +1250,14 @@ private:
         }
     }
 
-    // 0x505690 over the bound maps (pre-order = registration order).
+    // 0x505690 over the bound maps, in pre-order = registration order. ORDER UNKNOWN (water batch 28):
+    // VuEventManager keeps a broadcast's subscribers in a std::set< VuMethodInterface1* >, so retail runs
+    // them in ascending address of the VuMethod objects the registrations allocate (operator new on the
+    // CRT heap - not a fixed order). The oracle's bump heap allocates ascending, so every golden holds
+    // registration order; that is what this replays. Order-sensitive here: OnUIEvent (a handler's focus
+    // move broadcasts OnUISetFocus inside the dispatch, so a later subscriber of the same OnUIEvent sees
+    // the new focus) and OnUITick (the order of the broadcasts / plug fires the ticks emit). OnUISetFocus
+    // handlers each test their own name - independent.
     void broadcast( std::uint32_t hash, const ui_params_t& p )
     {
         trace( ui_trace_kind_t::broadcast, -1, std::string( ), hash, p, true );

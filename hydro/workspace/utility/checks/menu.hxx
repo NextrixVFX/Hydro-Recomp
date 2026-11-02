@@ -1,5 +1,6 @@
 #pragma once
 
+#include <workspace/core/ui/bind.hxx>
 #include <workspace/core/ui/board.hxx>
 #include <workspace/core/ui/frame.hxx>
 #include <workspace/core/ui/ladder.hxx>
@@ -285,6 +286,144 @@ inline bool verify_ui_config_nav( )
             static_cast< int >( g_golden_cn_entities_count ), runs, steps, calls );
     else
         LOG_ERROR( "the config navigation FAILED %d checks against retail's (%d runs)", failed, failed_runs );
+    return failed == 0;
+}
+
+// THE BINDING'S SELECTOR GLUE, batch 27 (C++ only: golden config_nav). c_ui_binding
+// on each GameConfig* project with a touch device: bind_config's fields from OUR
+// loaded properties, config_setup( )'s build + initialize, h.touch's registration
+// in the device and handlers - the lambdas verify_ui_config_nav mirrors, here the
+// real ones. Each run's steps through the bound selector (input / tick through its
+// members, touch through the device), against retail's root / combos / focus / nav
+// bytes after each step. Platform answers: the step's logged calls by their
+// arguments. The plugs and broadcasts are stubbed, as in the case.
+inline bool verify_ui_config_glue( )
+{
+    const ui_loaded_t& loaded = ui_loaded( );
+    int failed = 0, runs = 0, steps = 0, answers = 0;
+    auto bad = [ &failed ]( const char* what, int k )
+    {
+        if ( ++failed <= 8 )
+            LOG_ERROR( "ui config glue: %s differs from retail (step %d)", what, k );
+    };
+    const value_t track_db = ui_cx_document( 2 ), option_db = ui_cx_document( 4 );
+    static const float inverse[ 16 ] = { 1.25f, 0.03125f, 0, 0, -0.0625f, 0.875f, 0, 0, 0, 0, 1, 0, -0.1f, 0.05f, 0, 1 };
+    for ( std::size_t k = 0; k < g_golden_cn_entities_count; ++k )
+    {
+        const golden_cn_entity_t& want = g_golden_cn_entities[ k ];
+        entity_t* root = nullptr;
+        for ( std::size_t p = 0; p < g_golden_ui_projects_count; ++p )
+            if ( std::strcmp( g_golden_ui_projects[ p ].m_asset, want.m_project ) == 0 && !loaded.trees[ p ].empty( ) )
+                root = const_cast< entity_t* >( loaded.trees[ p ][ 0 ].second );
+        if ( !root )
+        {
+            bad( "the project", static_cast< int >( k ) );
+            continue;
+        }
+        for ( int r = 0; r < want.m_runs; ++r )
+        {
+            const golden_cn_run_t& run = g_golden_cn_runs[ want.m_first + r ];
+            const std::vector< std::uint8_t > rdoc = ui_unhex( run.m_root );
+            value_t doc_root = c_reader( rdoc ).parse( );
+            const golden_cn_step_t* step = nullptr;
+            int at = 0;
+            ui_touch_device_t device;
+            ui_bind_hooks_t hooks;
+            hooks.m_root = &doc_root;
+            hooks.m_touch_device = &device;
+            hooks.m_inverse = inverse;
+            hooks.m_option_db = &option_db;
+            hooks.m_track_db = &track_db;
+            hooks.m_config_flags = want.m_flags;
+            hooks.m_platform = [ & ]( const std::string& name ) -> std::pair< bool, int >
+            {
+                // the step's logged call with these arguments (the verify_ui_config_nav profile logs); a call that check's profile never makes answers false
+                if ( !step )
+                    return { false, 0 };
+                for ( int l = 0; l < step->m_logs; ++l )
+                {
+                    const golden_bci_log_t& g = g_golden_cn_logs[ step->m_first_log + l ];
+                    std::string key;
+                    if ( g.m_kind == 0 )
+                    {
+                        const std::string tag = std::to_string( g.m_slot );
+                        key = g.m_slot >= 100 ? tag + "|" + g.m_a + "|" + g.m_b + "|" + g.m_c : tag + "|" + g.m_a + "|" + g.m_b;
+                    }
+                    else if ( g.m_kind == 1 )
+                        key = "license";
+                    else if ( g.m_kind == 2 )
+                        key = std::string( "132|" ) + g.m_a;
+                    else if ( g.m_kind == 3 )
+                        key = "4D3170";
+                    else if ( g.m_kind == 8 )
+                        key = std::string( "144|" ) + g.m_a;
+                    else if ( g.m_kind == 10 )
+                        key = std::string( "88|" ) + g.m_a;
+                    else if ( g.m_kind == 11 )
+                        key = std::string( "48|" ) + g.m_a + "|" + g.m_b + "|" + g.m_c;
+                    if ( key == name )
+                    {
+                        ++answers;
+                        return { g.m_answer != 0, g.m_answer };
+                    }
+                }
+                return { false, 0 };
+            };
+            c_ui_binding bind( *root, hooks );
+            if ( static_cast< std::size_t >( want.m_index ) >= bind.m_bound.size( ) || !bind.m_bound[ static_cast< std::size_t >( want.m_index ) ]->m_config )
+            {
+                bad( "the bound selector", static_cast< int >( k ) );
+                continue;
+            }
+            ui_bound_config_t& c = *bind.m_bound[ static_cast< std::size_t >( want.m_index ) ]->m_config;
+            // retail's run stubs these (the case's hooks): the plugs and broadcasts must not reach this binding's live graph, which would re-enter the selector
+            c.m_hooks.fire = [ ]( const std::string&, const ui_params_t& ) { return true; };
+            c.m_hooks.broadcast = [ ]( std::uint32_t, const ui_params_t& ) { };
+            ++runs;
+            for ( int s = 0; s < run.m_steps; ++s )
+            {
+                step = &g_golden_cn_steps[ run.m_first + s ];
+                const int row = run.m_first + s;
+                at = 0;
+                switch ( step->m_op )
+                {
+                case 5: bind.config_setup( ); break;
+                case 0:
+                {
+                    ui_params_t params;
+                    if ( step->m_has_text )
+                        params.add_string( step->m_text );
+                    ui_config_input( c.base( ), c.m_env, c.m_doc, params, c.m_class, c.m_profile, c.m_hooks );
+                    break;
+                }
+                case 1: ui_config_tick( c.base( ), c.m_nav, c.m_env, c.m_doc, ui_cn_float( step->m_a ), c.m_class, c.m_profile, c.m_hooks ); break;
+                case 2: ui_touch_dispatch_down( device, 1u, ui_cn_float( step->m_a ), ui_cn_float( step->m_b ) ); break;
+                case 3:
+                    if ( device.m_touches.empty( ) )
+                        device.m_touches.resize( 1 );
+                    device.m_touches[ 0 ].m_point[ 0 ] = ui_cn_float( step->m_a );
+                    device.m_touches[ 0 ].m_point[ 1 ] = ui_cn_float( step->m_b );
+                    ui_touch_dispatch_move( device );
+                    break;
+                default: ui_touch_dispatch_up( device, 1u, 0.0f, 0.0f ); break;
+                }
+                ++steps;
+                std::string after;
+                vujb_dump( doc_root, after );
+                // one count per failing step
+                const char* what = device.m_unhandled ? "the touch dispatch (an unhandled callback)" : bind.m_config_faults ? "a selector path not recreated" :
+                                   after != step->m_after ? "the root after" : ui_cx_combo_text( c.base( ).m_combos ) != step->m_combos ? "the combo records" :
+                                   c.base( ).m_focus != step->m_focus ? "the focus" : ui_cn_nav_hex( c.m_nav ) != step->m_nav ? "the nav bytes" : nullptr;
+                if ( what )
+                    bad( what, row );
+            }
+        }
+    }
+    if ( failed == 0 )
+        LOG_SUCCESS( "c_ui_binding's selector glue (bind_config, config_setup, h.touch's registration, the device's dispatch) matches retail's navigation on %d GameConfig entities: "
+                     "%d runs, %d steps (root, combos, focus, nav bytes), %d platform answers", static_cast< int >( g_golden_cn_entities_count ), runs, steps, answers );
+    else
+        LOG_ERROR( "the selector glue FAILED %d checks against retail's", failed );
     return failed == 0;
 }
 
@@ -1599,6 +1738,7 @@ inline bool verify_ui_menu_all( )
     ok = verify_ui_screen_draw( ) && ok;
     ok = verify_ui_config_next( ) && ok;
     ok = verify_ui_config_nav( ) && ok;
+    ok = verify_ui_config_glue( ) && ok;
     ok = verify_ui_boat_nav( ) && ok;
     return ok;
 }
