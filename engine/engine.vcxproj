@@ -204,6 +204,9 @@ copy /Y "$(ProjectDir)impl\engine.hxx" "$(ProjectDir)..\hydro\impl\engine\engine
     <ClInclude Include="workspace\core\render\direct.hxx" />
     <ClInclude Include="workspace\core\render\gfx.hxx" />
     <ClInclude Include="workspace\core\render\mesh.hxx" />
+    <ClInclude Include="workspace\core\render\post.hxx" />
+    <ClInclude Include="workspace\core\render\program.hxx" />
+    <ClInclude Include="workspace\core\render\resource.hxx" />
     <ClInclude Include="workspace\core\render\shader.hxx" />
     <ClInclude Include="workspace\core\render\swap.hxx" />
     <ClInclude Include="workspace\core\render\target.hxx" />

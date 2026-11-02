@@ -211,6 +211,7 @@
     <ClInclude Include="workspace\core\world\animate.hxx" />
     <ClInclude Include="workspace\core\world\attach.hxx" />
     <ClInclude Include="workspace\core\world\awards.hxx" />
+    <ClInclude Include="workspace\core\world\backend.hxx" />
     <ClInclude Include="workspace\core\world\background.hxx" />
     <ClInclude Include="workspace\core\world\blend.hxx" />
     <ClInclude Include="workspace\core\world\bodies.hxx" />
@@ -218,10 +219,12 @@
     <ClInclude Include="workspace\core\world\build.hxx" />
     <ClInclude Include="workspace\core\world\bus.hxx" />
     <ClInclude Include="workspace\core\world\collide.hxx" />
+    <ClInclude Include="workspace\core\world\composer.hxx" />
     <ClInclude Include="workspace\core\world\control.hxx" />
     <ClInclude Include="workspace\core\world\corona.hxx" />
     <ClInclude Include="workspace\core\world\dbrt.hxx" />
     <ClInclude Include="workspace\core\world\drawer.hxx" />
+    <ClInclude Include="workspace\core\world\drawing.hxx" />
     <ClInclude Include="workspace\core\world\drive.hxx" />
     <ClInclude Include="workspace\core\world\dynamics.hxx" />
     <ClInclude Include="workspace\core\world\dynprop.hxx" />
@@ -274,6 +277,7 @@
     <ClInclude Include="workspace\core\world\rules.hxx" />
     <ClInclude Include="workspace\core\world\session.hxx" />
     <ClInclude Include="workspace\core\world\settings.hxx" />
+    <ClInclude Include="workspace\core\world\shading.hxx" />
     <ClInclude Include="workspace\core\world\skeleton.hxx" />
     <ClInclude Include="workspace\core\world\slalom.hxx" />
     <ClInclude Include="workspace\core\world\sorted.hxx" />
@@ -291,6 +295,7 @@
     <ClInclude Include="workspace\core\world\wake.hxx" />
     <ClInclude Include="workspace\core\world\watchers.hxx" />
     <ClInclude Include="workspace\core\world\water.hxx" />
+    <ClInclude Include="workspace\core\world\waterpass.hxx" />
     <ClInclude Include="workspace\core\world\wave.hxx" />
     <ClInclude Include="workspace\core\world\wavemap.hxx" />
     <ClInclude Include="workspace\core\world\world.hxx" />

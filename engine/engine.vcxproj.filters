@@ -353,6 +353,15 @@
     <ClInclude Include="workspace\core\render\mesh.hxx">
       <Filter>workspace\core\render</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\core\render\post.hxx">
+      <Filter>workspace\core\render</Filter>
+    </ClInclude>
+    <ClInclude Include="workspace\core\render\program.hxx">
+      <Filter>workspace\core\render</Filter>
+    </ClInclude>
+    <ClInclude Include="workspace\core\render\resource.hxx">
+      <Filter>workspace\core\render</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\core\render\shader.hxx">
       <Filter>workspace\core\render</Filter>
     </ClInclude>
