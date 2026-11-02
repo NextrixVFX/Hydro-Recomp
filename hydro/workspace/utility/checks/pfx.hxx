@@ -1,6 +1,7 @@
 #pragma once
 
 #include <workspace/core/world/pfxclass.hxx>
+#include <workspace/core/world/pfxdraw.hxx>
 #include <workspace/core/world/pfxsim.hxx>
 #include <workspace/core/world/pfxload.hxx>
 #include <workspace/core/world/pfxmgr.hxx>
@@ -2651,6 +2652,81 @@ inline bool verify_pfx_quad_fill( )
     return bad == 0;
 }
 
+// world/pfxdraw.hxx against retail's 0x58BD60 / 0x58D030 (case pfx_submit): the record's words but the renderer (+0) on real particle lists, the buffer's used bytes, the command's key, callback, memory offset and type.
+inline bool verify_pfx_submit( )
+{
+    struct hooks_t final : gfx_sort_hooks_t
+    {
+        gfx_material_t m;
+        std::uint32_t device( int, std::uint32_t, std::uint32_t, std::uint32_t ) override { return 0u; }
+        void program( std::uint32_t, int, std::uint32_t, std::uint32_t, const std::uint32_t* ) override { }
+        std::uint32_t thread( int, std::uint32_t, std::uint32_t ) override { return 0u; }
+        void profile( int ) override { }
+        void composer( int, std::uint32_t, std::uint32_t ) override { }
+        void water_flip( ) override { }
+        void light_flip( ) override { }
+        std::uint32_t texture_handle( std::uint32_t t ) override { return t; }
+        void draw( std::uint32_t, std::uint8_t* ) override { }
+        const gfx_material_t* material( std::uint32_t ) override { return &m; }
+        const gfx_chunk_t* chunk( std::uint32_t ) override { return nullptr; }
+    };
+    const unsigned* w = g_golden_pst_words;
+    const unsigned n = *w++, base = *w++, size = *w++;
+    int bad = 0, commands = 0, words = 0;
+    for ( unsigned v = 0; v < n; ++v )
+    {
+        const unsigned trail = *w++, lo = *w++, hi = *w++, mkey = *w++, count = *w++, used = *w++, offset = *w++;
+        gfx_camera_t camera;
+        std::memcpy( camera.m_eye, w, 12 );
+        std::memcpy( camera.m_direction, w + 3, 12 );
+        std::memcpy( &camera.m_far, w + 6, 4 );
+        w += 7;
+        pfx_heap_t h;
+        h.add( base, size );
+        std::memcpy( h.find( base ), w, size );
+        w += size / 4;
+        auto hooks = std::make_unique< hooks_t >( );
+        hooks->m.m_key = mkey;
+        gfx_sort_t sort( *hooks );
+        sort.reserve( );
+        sort.m_buffers[ 0 ].m_used = 0x10;
+        sort.m_key_lo = lo;
+        sort.m_key_hi = hi;
+        const std::uint32_t pattern = base + 0x100, node = h[ pattern + 0x10 ];
+        const std::uint32_t materials[ 8 ] = { 1, 1, 1, 1, 1, 1, 1, 1 };
+        const bool made = trail ? pfx_trail_submit( sort, h, pattern, camera, 1u ) : pfx_quad_submit( sort, h, pattern, camera, materials, h[ h[ node + 0x9C ] + 0x4C ] != 0u );
+        const unsigned got = static_cast< unsigned >( sort.m_commands[ 0 ].size( ) );
+        bool same = made == ( count != 0u ) && got == count;
+        if ( count )
+        {
+            const ui_gfx_command_t& c = sort.m_commands[ 0 ].front( );
+            same = same && c.m_words[ 0 ] == w[ 0 ] && c.m_words[ 1 ] == w[ 1 ] && c.m_words[ 2 ] == w[ 2 ] && c.m_words[ 3 ] == w[ 3 ] && ( c.m_words[ 6 ] & 0xFFFFu ) == w[ 4 ];
+            w += 5;
+            same = same && static_cast< unsigned >( sort.m_buffers[ 0 ].m_used ) - 0x10u == used && static_cast< unsigned >( sort.m_offset ) == offset;
+            ++commands;
+        }
+        const unsigned nr = *w++;
+        if ( same && nr )
+        {
+            words += static_cast< int >( nr );
+            const std::uint8_t* mine = sort.m_buffers[ 0 ].m_memory.data( ) + sort.m_offset;
+            same = std::memcmp( mine + 4, w + 1, 4 * ( nr - 1 ) ) == 0;
+        }
+        w += nr;
+        if ( !same )
+        {
+            if ( bad < 6 )
+                LOG_ERROR( "pfx_submit vector %u (trail %u) differs", v, trail );
+            ++bad;
+        }
+    }
+    if ( bad == 0 )
+        LOG_SUCCESS( "The pfx renderers' submits (0x58BD60, 0x58D030) match retail: %u patterns, %d commands, %d record words", n, commands, words );
+    else
+        LOG_ERROR( "pfx_submit FAILED %d", bad );
+    return bad == 0;
+}
+
 // pfxclass.hxx pfx_trail_fill against retail's 0x58D3F0 (case pfx_trail_fill): every vertex word (position, colour, u, v)
 // of 120 synthetic draw records (80 2D Trail, 40 3D Ribbon), and the strip's primitive count / the 3D Ribbon's vt+0xAC
 // pair from the GPU half's logged calls.
@@ -2712,6 +2788,7 @@ inline bool verify_pfx_all( )
     bool ok = true;
     ok = verify_pfx_trail_fill( ) && ok;
     ok = verify_pfx_quad_fill( ) && ok;
+    ok = verify_pfx_submit( ) && ok;
     ok = verify_pfx_sort_layers( ) && ok;
     ok = verify_pfx_impl_teardown( ) && ok;
     ok = verify_pfx_entity_draw( ) && ok;

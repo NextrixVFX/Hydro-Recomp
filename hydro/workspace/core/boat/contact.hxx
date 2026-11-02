@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cmath>
+
 #include <workspace/core/boat/hull.hxx>
 #include <workspace/core/boat/meshes.hxx>
 #include <workspace/core/boat/surface.hxx>
@@ -49,6 +51,23 @@ struct contact_record_t
     std::uint8_t surface1 = 0;            // +0x2D (+0x2E / +0x2F stale)
     float friction = 0.0f;                // +0x30
 };
+
+// 0x43E420 VuRampEntity's contact callback, the boat's branch (the other's owner +0x2C0 a VuBoatEntity): a normal with z below -0.9 (the record as
+// given: its sign depends on which object the ramp is) compares d = n.v with p = v + n d (retail adds; not the tangential part): |p| above |d|
+// sets the friction to minus |d| / |p|. True: the hull's byte +0x174 = 1 (0x43E420's last store, boat +0x228).
+inline bool ramp_contact( contact_record_t& r, const float* v )
+{
+    const float nx = r.normal[ 0 ], ny = r.normal[ 1 ], nz = r.normal[ 2 ];
+    if ( !( nz < -0.89999998f ) )
+        return false;
+    const float d = ( nx * v[ 0 ] + ny * v[ 1 ] ) + nz * v[ 2 ];
+    const float py = ny * d + v[ 1 ], px = nx * d + v[ 0 ], pz = nz * d + v[ 2 ];
+    const float a = ( ( v[ 1 ] - py ) * ( v[ 1 ] - py ) + ( v[ 0 ] - px ) * ( v[ 0 ] - px ) ) + ( v[ 2 ] - pz ) * ( v[ 2 ] - pz );
+    const float b = ( py * py + px * px ) + pz * pz;
+    if ( b > a )
+        r.friction = -( std::sqrt( a ) / std::sqrt( b ) );
+    return true;
+}
 
 struct contact_hooks_t
 {

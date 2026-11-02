@@ -2,6 +2,7 @@
 
 #include <workspace/core/assets/archive.hxx>
 #include <workspace/core/boat/fleet.hxx>
+#include <workspace/core/world/pfxdraw.hxx>
 #include <workspace/core/world/pfxload.hxx>
 #include <workspace/core/world/pfxmgr.hxx>
 #include <workspace/core/world/pfxsim.hxx>
@@ -35,7 +36,9 @@
 //     a system is drawn while its component is added.
 //   The "Final" phase: VuPfxManager's tick 0x52BBF0 (pfx_manager_tick), then VuPfxImpl's 0x51DD80 (pfx_impl_tick).
 //
-// THE DRAW (ours - the renderer, flagged): retail's quad / trail renderers 0x58BD60 / 0x58D030 build GPU batches
+// THE DRAW: with `m_retail` set (the window's path) quads and trails go through 0x58BD60 / 0x58D030 (world/pfxdraw.hxx) and draw( ) keeps only the geoms; the frame's list stands for the draw manager's,
+// no frustum test of a component's aabb yet. Without a window, the old hand path below (ours, flagged):
+// retail's quad / trail renderers 0x58BD60 / 0x58D030 build GPU batches
 // (hooks). A system drawn here walks its pattern instances (+0x10, next +4; the node +0x10, its class by node vtable)
 // and places, per particle of the list (+0x20, next +0): a QUAD as the camera-facing card the old c_pfx drew - the
 // particle's position (+0x08; through the system matrix +0x1C when the pattern's Space +0x34 is Object, the rule
@@ -66,11 +69,14 @@ public:
         pfx_runtime_init( m_rt );
         m_lib = pfx_library_t{ };
         m_binding = pfx_manager_binding_t{ &m_rt, &m_lib };
+        m_binding.named = [ this ]( const char* path ) { load_named( path ); };
         m_ops = pfx_manager_runtime_ops( m_binding );
         m_manager = pfx_manager_t{ };
         pfx_manager_init( m_manager, m_ops );
         m_assets.clear( );
         m_statics.clear( );
+        m_frame_systems.clear( );
+        m_node_assets.clear( );
         m_trails_logged = false;
         m_frames = 0;
         m_unrecreated = 0;
@@ -95,14 +101,8 @@ public:
             return 0u;
         }
         shared_t shared( *this );
-        const std::size_t slash = effect.find( '/' );
-        const std::string asset = effect.substr( 0, slash );
-        if ( m_assets.insert( asset ).second )
-        {
-            std::vector< std::uint8_t > blob;
-            if ( !archive.read( ( "VuPfxAsset/" + asset ).c_str( ), blob ) || pfx_load_asset( m_rt, m_lib, asset, blob ) == 0u )
-                LOG_WARNING( "pfx: VuPfxAsset/%s did not load", asset.c_str( ) );
-        }
+        m_archive = &archive;
+        load_named( effect.c_str( ) );
         const std::uint32_t inst = pfx_runtime_create_path( m_rt, m_lib, effect );
         if ( inst == 0u )
         {
@@ -215,6 +215,7 @@ public:
     {
         c_engine::drop( 11 );
         c_engine::drop( 14 );
+        m_frame_systems.clear( );
         if ( !m_ready || eye == nullptr || target == nullptr )
             return;
         if ( m_card < 0 )
@@ -228,13 +229,19 @@ public:
             {
                 const std::uint32_t node = m_rt.heap[ pattern + 0x10 ];
                 const std::uint32_t vt = m_rt.heap[ node ];
-                if ( vt == 0x007505ACu )
+                if ( m_retail )
+                {
+                    if ( vt == 0x00750328u )
+                        draw_geoms( instance, pattern, node, model );
+                }
+                else if ( vt == 0x007505ACu )
                     draw_quads( instance, pattern, node, card, right, up, texture );
                 else if ( vt == 0x00750328u )
                     draw_geoms( instance, pattern, node, model );
                 else if ( vt == 0x00750294u && m_rt.heap[ pattern + 0x28 ] != 0u )
                     ++trails;
             }
+            m_frame_systems.push_back( instance );
         };
         for ( const static_t& s : m_statics )
             if ( s.drawn )
@@ -258,12 +265,69 @@ public:
         }
     }
 
+    // What the retail renderers need of a node, cached by its address: the pattern's assets (0x58C39C, 0x58C3D7; 0 = no asset).
+    struct node_assets_t
+    {
+        std::uint32_t colour = 0, tile = 0;
+    };
+    std::function< std::uint32_t( const std::string& ) > m_retail;   // a texture's id on retail's path: set, quads and trails go to the sort
+
+    const node_assets_t& node_assets( std::uint32_t node, std::uint32_t name, std::uint32_t tile_name )
+    {
+        const auto found = m_node_assets.find( node );
+        if ( found != m_node_assets.end( ) )
+            return found->second;
+        node_assets_t a;
+        const std::string& colour = text( node, name );
+        if ( !colour.empty( ) )
+            a.colour = m_retail( colour );
+        if ( tile_name != 0u )
+        {
+            const std::string& tile = text( node, tile_name );
+            if ( !tile.empty( ) )
+                a.tile = m_retail( tile );
+        }
+        return m_node_assets.emplace( node, a ).first->second;
+    }
+
+    const std::uint8_t* node_bytes( std::uint32_t node ) { return reinterpret_cast< const std::uint8_t* >( m_rt.heap.find( node ) ); }
+
+    // The frame's systems, each pattern's slot 2 with the camera: quad 0x5920B0, trail 0x58F9C0, the renderers on the sort. Patterns holding no particles submit nothing. Geoms went in draw( ).
+    void submit( gfx_sort_t& sort, const gfx_camera_t& camera, const std::uint32_t* quad_materials, std::uint32_t trail_material )
+    {
+        if ( !m_ready || !m_retail )
+            return;
+        for ( const std::uint32_t instance : m_frame_systems )
+            for ( std::uint32_t pattern = m_rt.heap[ instance + 0x10 ]; pattern != 0u; pattern = m_rt.heap[ pattern + 4 ] )
+            {
+                const std::uint32_t node = m_rt.heap[ pattern + 0x10 ], vt = m_rt.heap[ node ];
+                if ( !pfx_pattern_submits( m_rt.heap[ pattern + 0x28 ] ) )
+                    continue;
+                if ( vt == 0x007505ACu )
+                    pfx_quad_submit( sort, m_rt.heap, pattern, camera, quad_materials, node_assets( node, 0x3Cu, 0x54u ).tile != 0u );
+                else if ( vt == 0x00750294u )
+                    pfx_trail_submit( sort, m_rt.heap, pattern, camera, trail_material );
+            }
+    }
+
     // The runtime / VuPfxManager the race's boats reach (the Build tick's pfx, the hull's splash).
     pfx_runtime_t* runtime( ) { return m_ready ? &m_rt : nullptr; }
     pfx_manager_t* manager( ) { return m_ready ? &m_manager : nullptr; }
     const pfx_manager_ops_t* manager_ops( ) const { return m_ready ? &m_ops : nullptr; }
 
 private:
+    // The asset of an effect's first path segment, once (the boats' effects name assets no static pfx does: Pack01). Ours, flagged: see the top.
+    void load_named( const char* path )
+    {
+        const std::string effect( path );
+        const std::string asset = effect.substr( 0, effect.find( '/' ) );
+        if ( m_archive == nullptr || !m_assets.insert( asset ).second )
+            return;
+        std::vector< std::uint8_t > blob;
+        if ( !m_archive->read( ( "VuPfxAsset/" + asset ).c_str( ), blob ) || pfx_load_asset( m_rt, m_lib, asset, blob ) == 0u )
+            LOG_WARNING( "pfx: VuPfxAsset/%s did not load", asset.c_str( ) );
+    }
+
     // The shared VuRandom in for one runtime call, back out after it (see the top).
     struct shared_t
     {
@@ -434,6 +498,7 @@ private:
     }
 
     bool m_ready = false;
+    const c_archive* m_archive = nullptr;
     fleet_random_t* m_random = nullptr;   // VuRandom 0x736810 (c_world's)
     int m_card = -1;
     bool m_trails_logged = false;
@@ -444,6 +509,8 @@ private:
     pfx_manager_t m_manager;
     std::set< std::string > m_assets;
     std::vector< static_t > m_statics;
+    std::vector< std::uint32_t > m_frame_systems;
+    std::map< std::uint32_t, node_assets_t > m_node_assets;
     float m_camera[ 3 ]{};
     int m_unrecreated = 0;
     int m_frames = 0;

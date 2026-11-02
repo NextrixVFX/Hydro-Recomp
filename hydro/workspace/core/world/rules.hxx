@@ -72,6 +72,7 @@ struct race_rules_boat_t
     const std::uint8_t* sector = nullptr;
     int checkpoint = -1;                       // +0x4D8
     bool human = false;
+    int drive = -1;                            // ours: its index in the session's boats when not its own (a ghost, made after the nuisance boats)
 };
 
 // The VuGame fields the rules read: +0x44 a circuit, +0x48 the track length,

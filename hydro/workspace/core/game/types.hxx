@@ -5,6 +5,7 @@
 #include <workspace/core/world/transform.hxx>
 #include <workspace/core/entity/corona.hxx>
 #include <workspace/core/entity/draw.hxx>
+#include <workspace/core/entity/dynamic.hxx>
 #include <workspace/core/entity/rigid.hxx>
 #include <workspace/core/entity/rig.hxx>
 #include <workspace/core/entity/gfx.hxx>
@@ -1270,6 +1271,12 @@ inline void foliage_component_load( entity_t& owner, const value_t& properties )
     property_bool( properties, "Reflect", s->reflect, s->reflect );
 }
 
+// VuDynamicLightEntity (engine entity/dynamic.hxx).
+struct dynamic_light_state_t
+{
+    dynamic_light_t value;
+};
+
 // VuAmbientLightEntity / VuDirectionalLightEntity (engine entity/rig.hxx).
 struct ambient_light_state_t
 {
@@ -1413,12 +1420,18 @@ struct prop_entity_state_t
 
 inline std::shared_ptr< void > entity_state_for( const std::string& cls )
 {
-    if ( cls == "VuPropEntity" )
+    if ( cls == "VuPropEntity" || cls == "VuRampEntity" )    // VuRampEntity (create 0x43E340): VuPropEntity's ctor 0x5464C0, its properties
         return std::make_shared< prop_entity_state_t >( );
     if ( const action_kind_t* k = entity_action_kind( cls ) )
         return k->m_make( );
     if ( cls == "VuFoliageEntity" )
         return std::make_shared< foliage_state_t >( );
+    if ( cls == "VuDynamicLightEntity" )
+    {
+        auto s = std::make_shared< dynamic_light_state_t >( );
+        dynamic_light_construct( s->value );
+        return s;
+    }
     if ( cls == "VuCoronaEntity" )
     {
         auto s = std::make_shared< corona_state_t >( );
@@ -1507,6 +1520,8 @@ inline void entity_load_properties( entity_t& entity, const value_t& properties 
         corona_state_t* s = static_cast< corona_state_t* >( entity.m_state.get( ) );
         corona_load( s->value, properties, s->defaults );
     }
+    else if ( entity.m_type == "VuDynamicLightEntity" && entity.m_state )
+        dynamic_light_load( static_cast< dynamic_light_state_t* >( entity.m_state.get( ) )->value, properties );
     else if ( entity.m_type == "VuAmbientLightEntity" && entity.m_state )
     {
         ambient_light_state_t* s = static_cast< ambient_light_state_t* >( entity.m_state.get( ) );

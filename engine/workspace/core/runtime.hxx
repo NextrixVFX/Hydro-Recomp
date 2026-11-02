@@ -79,6 +79,11 @@ void c_engine::lens( float tan_half, float near_plane )
     g_viewport( ).lens( tan_half, near_plane );
 }
 
+void c_engine::flip_interval( int interval )
+{
+    g_swap_interval = static_cast< std::uint32_t >( interval );
+}
+
 void c_engine::sun( const float* direction )
 {
     g_light( ).aim( direction );
@@ -160,18 +165,40 @@ int c_engine::run( const char* title )
     LOG_SUCCESS( "draw handlers %d  scene nodes %d", g_draw( ).count( ), g_scene( ).count( ) );
 
     g_bench( ).configure( );
-    if ( g_bench( ).active( ) )
-        swap.vsync( false );
 
     // Ours (a test driver): --exit-after N ends the run after N frames, so the real window path can be run unattended.
     const char* exit_after = c_engine::option( "exit-after" );
     long frames = 0;
+
+    // Ours, not retail: the frame rate in the title bar every half second, the average and the worst frame of that
+    // window. In the title so it costs nothing to draw and never reaches a still.
+    double fps_start = trace::now( ), fps_last = fps_start, fps_worst = 0.0;
+    int fps_frames = 0;
     while ( window.pump( ) )
     {
         g_draw( ).tick( );
         if ( g_overlay_pass )
             g_overlay_pass( g_overlay_user );
         swap.present( );
+
+        const double fps_now = trace::now( );
+        fps_worst = ( std::max )( fps_worst, fps_now - fps_last );
+        fps_last = fps_now;
+        ++fps_frames;
+        if ( fps_now - fps_start >= 500.0 )   // trace::now is milliseconds
+        {
+#if HYDRO_HOST_WINDOWS
+            const double span = fps_now - fps_start;
+            wchar_t text[ 96 ];
+            swprintf_s( text, L"%hs  |  %.0f fps  |  %.2f ms  |  worst %.2f ms", title, fps_frames * 1000.0 / span,
+                span / fps_frames, fps_worst );
+            SetWindowTextW( window.handle( ), text );
+#endif
+            fps_start = fps_now;
+            fps_worst = 0.0;
+            fps_frames = 0;
+        }
+
         if ( !g_bench( ).step( ) )
             break;
         if ( exit_after && ++frames >= std::atol( exit_after ) )

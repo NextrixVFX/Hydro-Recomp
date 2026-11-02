@@ -23,6 +23,7 @@
 struct gfx_camera_t
 {
     float m_eye[ 3 ] = { };             // +0
+    float m_direction[ 3 ] = { };       // +0x140
     float m_far = 0.0f;                 // +0x17C
     float m_planes[ 24 ] = { };         // +0x1E0
 };

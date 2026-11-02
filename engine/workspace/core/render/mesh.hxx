@@ -34,6 +34,14 @@ public:
     void reflecting( bool enabled );
     // The water surfaces' pass (hydro world/waterpass.hxx): runs inside draw( ), the scene bound, the transparent pass's blend and depth set up.
     void water_pass( void ( *pass )( void* ), void* user ) { m_water_pass = pass; m_water_user = user; }
+    // The sort's layer 0xA reached: the water now (retail's order: below-water pfx, water, above-water pfx and alpha), not after the stage.
+    void water_now( )
+    {
+        if ( m_water_pass == nullptr || m_reflecting )
+            return;
+        m_water_pass( m_water_user );
+        m_water_done = true;
+    }
     void stage_pass( void ( *pass )( void*, bool ), void* user ) { m_stage_pass = pass; m_stage_user = user; }
     void* view_of( int texture ) const;
     void draw( );
@@ -146,6 +154,7 @@ private:
     float m_fog_color[ 3 ] = { 156.0f / 255.0f, 196.0f / 255.0f, 215.0f / 255.0f };
     bool m_reflecting = false;
     void ( *m_water_pass )( void* ) = nullptr;
+    bool m_water_done = false;
     void* m_water_user = nullptr;
     void ( *m_stage_pass )( void*, bool ) = nullptr;
     void* m_stage_user = nullptr;
@@ -686,7 +695,7 @@ void c_geometry::reflecting( bool enabled )
 void c_geometry::draw( )
 {
     const double ensure_start = trace::now( );
-    if ( m_placements.empty( ) || !ensure( ) )
+    if ( ( m_placements.empty( ) && m_stage_pass == nullptr ) || !ensure( ) )   // the retail stage draws with no engine placement at all
         return;
     trace::frame( ).ensure += trace::now( ) - ensure_start;
 
@@ -931,7 +940,9 @@ void c_geometry::draw( )
         bound_cull = nullptr;
     }
 
-    if ( !m_reflecting && m_blend != nullptr && m_depth != nullptr )
+    if ( m_water_done )
+        m_water_done = false;
+    else if ( !m_reflecting && m_blend != nullptr && m_depth != nullptr )
     {
         ID3D11BlendState* previous_blend = nullptr;
         ID3D11DepthStencilState* previous_depth = nullptr;
@@ -1081,6 +1092,11 @@ void c_engine::stage_pass( void ( *pass )( void*, bool ), void* user )
 void c_engine::water_pass( void ( *pass )( void* ), void* user )
 {
     g_geometry( ).water_pass( pass, user );
+}
+
+void c_engine::water_now( )
+{
+    g_geometry( ).water_now( );
 }
 
 void* c_engine::texture_view( int texture )

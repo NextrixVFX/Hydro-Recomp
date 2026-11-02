@@ -14,6 +14,7 @@
 #include <workspace/core/world/pause.hxx>
 #include <workspace/core/boat/construct.hxx>
 #include <workspace/core/boat/fleet.hxx>
+#include <workspace/core/boat/ghost.hxx>
 #include <workspace/core/boat/load.hxx>
 #include <workspace/core/boat/meshes.hxx>
 #include <workspace/core/boat/nuisance.hxx>
@@ -98,6 +99,7 @@ struct race_session_load_ctx_t
 
 struct race_session_boat_t
 {
+    const ghost_data_t* ghost = nullptr;   // VuGhostBoatEntity +0x520
     boat_graph_t graph;
     std::unique_ptr< race_boat_driver_t > driver;
     vu_rigid_body_t body{};
@@ -241,6 +243,12 @@ struct race_session_t
     tire_track_manager_t tire_tracks;   // VuTireTrackManager g 0x7590F4 (world/tiretrack.hxx; its lists stay empty in retail)
     ghost_loads_t ghost_loads;          // VuGhostGame +0x75C .. and +0x740 (ShowError's message)
     ghost_game_t ghost_game;            // the handlers' view of the game (world/ghostplay.hxx)
+    std::vector< std::unique_ptr< ghost_record_t > > ghost_records;   // VuGhostManager +0x64
+    std::vector< std::unique_ptr< entity_t > > ghost_entities;
+    std::vector< std::shared_ptr< void > > ghost_ticks;
+    std::function< race_session_boat_t*( const std::string&, const value_t& ) > ghost_make;
+    std::function< void( std::size_t ) > boat_models;   // the hull's three instances, c_world's
+    const value_t* constant_db = nullptr;
     std::vector< pfx_frame_boat_t > pfx_boats;
     std::vector< pfx_frame_fluids_t > pfx_fluids;
     std::vector< race_start_boat_t > start_boats;
@@ -436,6 +444,8 @@ struct race_session_t
     // run (race_session_frame), the script's clock.
     std::shared_ptr< struct race_input_script_t > input_script;
     bool autopilot = false;   // --autopilot (world/autopilot.hxx)
+    bool autopilot_keys = false;   // --autopilot-keys
+    int autopilot_held = 0;
     // The input retail reads (game/input.hxx): the managers on InputDB's document, which `input_db` keeps alive. Made here at
     // the session's start, not by the engine's init 0x566230 (ours: no input exists outside a race yet). Null: InputDB did not
     // load; the hooks answer 0.
@@ -485,7 +495,7 @@ inline void race_session_post( race_session_t& s, const char* name, const ui_par
     race_bus_broadcast( s.bus, event_hash( name ), params ? *params : none );
 }
 
-inline void race_drive_setup( race_session_t& s, const value_t* constant_db );
+inline void race_drive_setup( race_session_t& s, const value_t* constant_db, std::size_t first = 0 );
 inline void race_drive_decision( race_session_t& s, std::size_t boat, float dt );
 inline void race_drive_viewports( race_session_t& s );
 inline void race_drive_build( race_session_t& s, std::size_t boat, float dt );
@@ -1336,7 +1346,7 @@ inline void race_session_motion_update( race_session_t& rs, entity_t& target, bo
         }
         return;
     }
-    if ( cls != "VuPropEntity" && cls != "VuBreakablePropEntity" && cls != "VuAnimatedPropEntity" )
+    if ( cls != "VuPropEntity" && cls != "VuRampEntity" && cls != "VuBreakablePropEntity" && cls != "VuAnimatedPropEntity" )
     {
         race_unwired( rs, "a motion target of class " + cls + " - its motion IF slot 0 is not read (UNKNOWN, not run)" );
         return;
@@ -1850,7 +1860,8 @@ inline void race_session_level_bodies( race_session_t& s, entity_t& tree, const 
             return;
         }
         const bool breakable = e.m_type == "VuBreakablePropEntity";
-        if ( e.m_type != "VuPropEntity" && !breakable )
+        const bool ramp = e.m_type == "VuRampEntity";    // slot 6 0x43E3F0: 0x546910, then +0xD8 |= 0x10 (below)
+        if ( e.m_type != "VuPropEntity" && !breakable && !ramp )
         {
             ++unknown[ e.m_type.empty( ) ? std::string( "(UNKNOWN node)" ) : e.m_type ];
             return;
@@ -1883,6 +1894,9 @@ inline void race_session_level_bodies( race_session_t& s, entity_t& tree, const 
             c.word_f4 = 1;
             c.flags_d8 |= 1u;
         }
+        // VuRampEntity's create 0x43E340: the rigid component's +0xF4 = its +0x7C part (contact callback 0x43E420).
+        if ( ramp )
+            c.word_f4 = 1;
         const bool ok = bodies_prop_game_initialize( *bp, c, visible, asset, t->world, t->scale, id, hooks, [] { /* g 0x7590B8 vt+0x28: the renderer */ },
             [ & ]( level_body_t& lb ) {
                 d.objects[ &lb.body ] = &lb.collision;
@@ -1891,6 +1905,11 @@ inline void race_session_level_bodies( race_session_t& s, entity_t& tree, const 
             why );
         if ( !ok )
             race_unwired( s, "VuPropEntity '" + e.m_name + "': " + why + " (UNKNOWN, no body)" );
+        if ( ramp && ok )
+        {
+            c.flags_d8 |= 0x10u;
+            body_word( bp->body, 0x2D0 ) = c.flags_d8;
+        }
         if ( bp->in_world )
             ++added;
         // VuBreakablePropEntity's slot 6 0x434620: 0x546910 above, then the "Decision" tick 0x434A20 and the "Build" tick
@@ -2006,9 +2025,33 @@ inline void race_session_dev_trace( const race_session_t& s, int before )
 // The "Input" phase: the device's, the manager's and the control method's ticks (c_input_device::tick), `real_dt` = the tick
 // manager's unscaled frame time; then g 0x758FC0 +0x18 where the session reads it. A loaded --input-script keeps method 0,
 // the method its keys were written for (ours: the device still ticks, so the UI's "Select" stays live).
+inline float race_autopilot_axis( const race_session_t& s, const char* name );   // world/autopilot.hxx
+
 inline void race_input_tick( void* user, float dt )
 {
     race_session_t& s = *static_cast< race_session_t* >( user );
+    // --autopilot-keys (ours): the autopilot's steering as LEFT / RIGHT on the device, so the whole keyboard path runs; ConstantDB's auto throttle drives.
+    if ( s.autopilot_keys )
+    {
+        // A pad on the test machine (XInput 0) would take the control method to 0 at a time of its own: this run has no pads.
+        s.input->device.hooks.get_state = [ ]( void*, int, input_xinput_state_t* ) -> std::uint32_t { return 0x48Fu; };
+        s.input->device.hooks.get_caps = [ ]( void*, int, std::uint8_t* ) -> std::uint32_t { return 0x48Fu; };
+        const float steer = race_autopilot_axis( s, "Steering" );
+        const int left = input_key_index( "LEFT" ), right = input_key_index( "RIGHT" );
+        const int want = steer < -0.2f ? -1 : steer > 0.2f ? 1 : 0;
+        if ( want != s.autopilot_held )
+        {
+            if ( s.autopilot_held < 0 )
+                s.input->device.key_up( left );
+            else if ( s.autopilot_held > 0 )
+                s.input->device.key_up( right );
+            if ( want < 0 )
+                s.input->device.key_down( left );
+            else if ( want > 0 )
+                s.input->device.key_down( right );
+            s.autopilot_held = want;
+        }
+    }
     for ( const race_session_t::key_script_t& k : s.key_script )
         if ( k.frame == s.frames )
         {
@@ -2276,7 +2319,8 @@ struct race_session_dbs_t
 // when an option is missing or the builder is not recreated. The roster picks
 // draw from the shared VuRandom 0x736810 in whatever state the run has left it.
 inline bool race_session_game_data( const std::string& mode, const std::string& track_name, const std::string& course, const std::string& boat,
-                                    const std::string& skin, const race_session_dbs_t& db, fleet_random_t& random, value_t& out )
+                                    const std::string& skin, const race_session_dbs_t& db, fleet_random_t& random, value_t& out,
+                                   std::function< std::string( const char* ) > string_db = nullptr )
 {
     if ( mode.empty( ) || boat.empty( ) || skin.empty( ) || track_name.empty( ) )
     {
@@ -2292,6 +2336,8 @@ inline bool race_session_game_data( const std::string& mode, const std::string& 
     env.boat_db = db.boat_db;
     env.track_db = db.track_db;
     env.random = &random;
+    env.player_name = platform_gamer_tag( );
+    env.string_db = std::move( string_db );
     ui_game_config_t built;
     out = ui_front_end_game_data( mode, track_name, course, boat, skin, env, &built );
     if ( !built.built )
@@ -2369,10 +2415,13 @@ inline void race_session_game_release( race_session_t& s )
                      " components' vt+0x28 not run; the repository vt+0x24 / +0x1C (hooks)" );
 }
 
+inline void race_powerups_release( race_session_t& s );   // world/pickups.hxx
+
 inline void race_session_end( race_session_t& s )
 {
     if ( !s.active )
         return;
+    race_powerups_release( s );
     if ( s.world.pfx )   // the pfx frame's boats die with the session (world/drive.hxx race_drive_pfx_frame)
     {
         pfx_frame_t& pf = s.world.pfx->frame;
@@ -2436,7 +2485,7 @@ inline void race_session_end( race_session_t& s )
         s.slalom_draw = false;   // +0x744's +0x1E = 0 after the draw manager's remove (g 0x7590B8 vt+0x2C - the renderer's)
         race_unwired( s, "VuSlalomGame slot 6 0x48C880: the draw manager's remove (g 0x7590B8 vt+0x2C) of +0x744 - the renderer's (a hook)" );
     };
-    h.ghost_release = [ &s ] { ghost_clear( s.ghost ); };   // VuGhostGame slot 6 0x485360: 0x4AF490 (no ghost boats: 0x4AF640 not recreated)
+    h.ghost_release = [ &s ] { ghost_clear( s.ghost ); };   // VuGhostGame slot 6 0x485360: 0x4AF490
     h.call = [ &s ]( const char* what ) {
         const std::string w( what );
         if ( w == "cameras" )

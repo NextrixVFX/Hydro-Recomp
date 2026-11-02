@@ -6,6 +6,7 @@
 #include <workspace/core/world/action.hxx>
 #include <workspace/core/world/mine.hxx>
 #include <workspace/core/world/rules.hxx>
+#include <workspace/core/world/profile.hxx>
 
 #include <algorithm>
 #include <cstdio>
@@ -1965,9 +1966,85 @@ inline bool verify_prop_plugs( )
     return failed == 0;
 }
 
+// ROUTING (no retail side: the slots themselves are verified by settings_profile, unlock_rewards, progress_records, progress_champ): ui_profile_saved reaches
+// the slot each selector's offset names, on a hand-built UnlockDB and save document.
+inline bool verify_profile_saved( )
+{
+    value_t db;
+    value_t& root = json_member( db, "VuDBAsset" );
+    value_t& rows = json_member( root, "Unlockables" );
+    rows.tag = 5;
+    rows.kind = value_t::kind_t::list;
+    const auto row = [ &rows ]( const char* type, const char* name, const char* mode, const char* track, std::int32_t credits, bool trial ) {
+        value_t r;
+        json_set_string( json_member( r, "Type" ), type );
+        json_set_string( json_member( r, "Name" ), name );
+        json_set_string( json_member( r, "Mode" ), mode );
+        json_set_string( json_member( r, "Track" ), track );
+        json_set_int( json_member( r, "Credits" ), credits );
+        value_t& t = json_member( r, "AvailableInTrial" );
+        t.tag = 3;
+        t.kind = value_t::kind_t::integer;
+        t.integer = trial ? 1 : 0;
+        rows.list.push_back( r );
+    };
+    row( "Boat", "Costly", "", "", 1000, false );
+    row( "Boat", "Free", "", "", 0, true );
+    row( "Track", "", "Race", "Far", 2000, false );
+    row( "Track", "", "Race", "Near", 0, true );
+    c_unlock_manager unlock;
+    unlock.init( &db, value_t{ }, value_t{ } );
+    value_t save;
+    const ui_profile_t p = ui_profile_saved( unlock, save );
+    int failed = 0, compared = 0;
+    const auto same = [ & ]( const char* what, int got, int want ) {
+        ++compared;
+        if ( got != want )
+        {
+            LOG_ERROR( "profile: %s = %d, want %d", what, got, want );
+            ++failed;
+        }
+    };
+    same( "boat locked", p.unlock( 92, "Boat", "Costly", "" ), 0 );
+    same( "boat open", p.unlock( 92, "Boat", "Free", "" ), 1 );
+    same( "boat trial no", p.unlock( 96, "Boat", "Costly", "" ), 0 );
+    same( "boat trial yes", p.unlock( 96, "Boat", "Free", "" ), 1 );
+    same( "track locked", p.unlock( 100, "Race", "Far", "" ), 0 );
+    same( "track open", p.unlock( 100, "Race", "Near", "" ), 1 );
+    same( "track trial no", p.unlock( 104, "Race", "Far", "" ), 0 );
+    same( "track trial yes", p.unlock( 104, "Race", "Near", "" ), 1 );
+    same( "no row answers open", p.unlock( 92, "Boat", "Unlisted", "" ), 1 );
+    unlock.add_credits( 1500, 0, nullptr );
+    same( "boat bought", p.unlock( 92, "Boat", "Costly", "" ), 1 );
+    same( "track not yet", p.unlock( 100, "Race", "Far", "" ), 0 );
+    same( "fresh race_done", p.race_done( "Race", "Near", "None" ), 0 );
+    same( "fresh race_rank", p.race_rank( "Race", "Near", "None" ), 0x7FFFFFFF );
+    same( "fresh boat", p.progress( "Free" ), 0 );
+    same( "fresh champ", p.champ_done( "Cup" ), 0 );
+    same( "fresh champ rank", p.champ_rank( "Cup" ), 0x7FFFFFFF );
+    same( "fresh ghost", p.ghost_done( "Near" ), 0 );
+    ui_progress_add( save, "Race", "Near", "None", "Free", 0, 2, 90.0f, 45.0f );
+    ui_progress_boat_used( save, "Free" );
+    ui_progress_champ_result( save, "Cup", 1 );
+    ui_progress_ghost_add( save, "Near", 0, 80.0f );
+    same( "race_done", p.race_done( "Race", "Near", "None" ), 1 );
+    same( "race_rank", p.race_rank( "Race", "Near", "None" ), 2 );
+    same( "other mode's record", p.race_done( "TimeTrial", "Near", "None" ), 0 );
+    same( "another mode index holds nothing", p.race_rank( "Race", "Far", "None" ), 0x7FFFFFFF );
+    same( "boat used", p.progress( "Free" ), 1 );
+    same( "champ", p.champ_done( "Cup" ), 1 );
+    same( "champ rank", p.champ_rank( "Cup" ), 1 );
+    same( "ghost", p.ghost_done( "Near" ), 1 );
+    if ( failed )
+        return false;
+    LOG_SUCCESS( "profile on the saved state: %d answers (ROUTING onto the verified slots)", compared );
+    return true;
+}
+
 inline bool verify_session_all( )
 {
     bool ok = true;
+    ok = verify_profile_saved( ) && ok;
     ok = verify_prop_plugs( ) && ok;
     ok = verify_game_awards( ) && ok;
     ok = verify_pause_gate( ) && ok;

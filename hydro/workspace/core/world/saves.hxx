@@ -10,8 +10,8 @@
 // up with the saves off: a test run reads ConstantDB's defaults, as a first launch does.
 //   Hooks, the platform's: the category volumes (no audio device), the tilt device g 0x759000 vt+0x54 / +0x58 (the bytes 0x758FCF, 0x758FFC:
 //   no sensor), "StoreBeta" 0x4D3170 (no), g_vudevconfig's "UnlockAll", "DeviceType", "DisplayScale" (a shipped game has no dev config).
-//   The flip interval is held in the settings; the swap chain does not take it yet: FLAGGED. VuWater's four fidelity fields and the lens are
-//   written into m_settings_platform only: FLAGGED, the water agent's.
+//   The flip interval reaches the swap chain. VuWater's four fidelity fields reach m_water (water_fidelity); their readers: the wake's rate here, the
+//   surface shader's gates 0x5DB800 in world/waterpass.hxx are still fixed at High's answers (the water agent's). The lens's hook: unset.
 
 inline void c_world::saves_start( )
 {
@@ -26,7 +26,7 @@ inline void c_world::saves_start( )
     if ( const char* dir = c_engine::option( "save-dir" ) )
         save_seam::redirect( dir );
     else
-        for ( const char* driver : { "bench", "background", "exit-after", "input-script", "keys", "menu-keys", "fixed-step", "autopilot" } )
+        for ( const char* driver : { "bench", "background", "exit-after", "input-script", "keys", "menu-keys", "fixed-step", "autopilot", "autopilot-keys" } )
             if ( c_engine::option( driver ) != nullptr )
             {
                 LOG_INFO( "saves: off (--%s, no --save-dir): a test run never touches the player's folder", driver );
@@ -84,7 +84,11 @@ inline void c_world::settings_start( )
     settings_configure( m_settings, display, "High", flip );
     m_settings_platform.m_sys_54 = [ ] { return false; };
     m_settings_platform.m_sys_58 = [ ] { return false; };
-    m_settings_platform.m_flip = [ this ]( int v ) { m_settings.ui.m_flip_interval = v; };
+    m_settings_platform.m_flip = [ this ]( int v ) {
+        m_settings.ui.m_flip_interval = v;
+        c_engine::flip_interval( v );
+    };
+    m_settings_platform.m_broadcast = [ this ]( std::uint32_t, const ui_params_t& ) { water_fidelity( ); };   // "OnWaterSettingsChanged": 0x5DB3F0's rebuild is the renderer's
     m_settings_hooks.category = [ ]( const char*, float ) { };
     m_settings_hooks.flip_interval = m_settings_platform.m_flip;
     m_settings_hooks.has_accelerometer = m_settings_platform.m_sys_54;
@@ -99,7 +103,15 @@ inline void c_world::settings_start( )
             LOG_WARNING( "saves: VuDBAsset/UnlockDB not in the pack" );
     }
     m_unlock.store_beta = [ ] { return false; };
-    m_unlock.init( m_unlock_db.tag ? &m_unlock_db : nullptr, value_t{ }, m_cloud.data );   // getParam( "UnlockAll" ): 0x4FDB70 answers null
+    // g_vudevconfig's getParam( "UnlockAll" ): a shipped game has none; --unlock-all (ours, a test driver) answers true.
+    value_t dev_unlock_all;
+    if ( c_engine::option( "unlock-all" ) != nullptr )
+    {
+        dev_unlock_all.tag = 3;
+        dev_unlock_all.kind = value_t::kind_t::integer;
+        dev_unlock_all.integer = 1;
+    }
+    m_unlock.init( m_unlock_db.tag ? &m_unlock_db : nullptr, dev_unlock_all, m_cloud.data );
     unlock_bind( );
     {
         float fov = 0.0f;
@@ -110,8 +122,17 @@ inline void c_world::settings_start( )
               m_settings.ui.m_flip_interval, m_settings.auto_throttle_pad ? 1 : 0, m_settings.auto_throttle_keys ? 1 : 0, m_settings.ui.m_steering, m_settings.ui.m_vibration ? 1 : 0, m_unlock.total );
 }
 
+// VuSettingsManager 0x4B50A0's four VuWater fields (+0x40, +0x44 .. +0x46).
+inline void c_world::water_fidelity( )
+{
+    m_water.wake_rate = m_settings_platform.m_water_scale;
+    m_water.render_flags[ 0 ] = m_settings_platform.m_water_44;
+    m_water.render_flags[ 1 ] = m_settings_platform.m_water_45;
+    m_water.render_flags[ 2 ] = m_settings_platform.m_water_46;
+}
+
 // The award screen's and the championship's slots over the managers (ui/award.hxx, ui/standings.hxx). The unlock row (0x47F790's VuJsonContainer) reaches
-// the screen open at the time. g 0x758FE8's rewards slots 6 .. 11: boat's reward( ), not on this tree: see unlock_value (opening.hxx).
+// the screen open at the time. g 0x758FE8's rewards slots 6 .. 11: reward( ), through unlock_value (opening.hxx).
 inline void c_world::unlock_bind( )
 {
     static const auto queue = [ ]( race_session_t& race ) {
@@ -141,6 +162,7 @@ inline void c_world::unlock_bind( )
         ui_params_t p;
         ui_params_add_bool( p, busy );
         race_broadcast( "OnAwardScreenBusy", &p );
+        award_busy( p );
     };
     a.m_input = [ this ]( const char* name ) { return m_race.input && m_race.input->manager.pressed( 0, name ); };
     a.m_touches = [ ] { return 0x7FFF; };   // g 0x759070 +0x1C: no finger down
@@ -158,6 +180,7 @@ inline void c_world::unlock_bind( )
             m_champ_db = c_reader( bytes ).parse( );
     }
     c.m_champ_db = &m_champ_db;
+    c.m_player_name = platform_gamer_tag( );
     c.m_random = &m_vurandom;
     c.m_string = [ this ]( const char* id ) { return string_db_get( m_string_db, id ? id : "" ); };
     c.m_broadcast = [ this ]( const char* event, const ui_params_t& p ) {
@@ -177,6 +200,10 @@ inline void c_world::unlock_bind( )
         walk( walk, *project.root );
     };
     c.m_names = [ this ]( std::int32_t value, std::vector< std::string >& names ) { return m_unlock.unlock_count_for( value, names ) != 0; };
+    c.m_value = [ this ]( const std::string& name, std::int32_t place ) { return m_unlock.reward( "Championship", name, place ); };   // vt+0x1C 0x4B6170
+    m_difficulty_env.m_boat_db = &m_boat_db;
+    m_difficulty_env.m_champ_db = &m_champ_db;
+    m_difficulty_env.m_round = [ this ]( ) -> const value_t& { return ui_progress_champ_state( m_cloud.data ); };   // vt+0x6C
     ui_champ_save_bind( c, m_cloud );
     ui_champ_award_bind( c, m_race.screens );
 }

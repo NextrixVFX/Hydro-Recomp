@@ -12,6 +12,7 @@
 #include <workspace/core/assets/reader.hxx>
 #include <workspace/core/assets/tree.hxx>
 #include <workspace/core/game/input.hxx>
+#include <workspace/core/game/identity.hxx>
 #include <workspace/core/world/control.hxx>
 #include <workspace/core/world/effects.hxx>
 #include <workspace/core/world/pfx.hxx>
@@ -594,6 +595,7 @@ private:
     value_t m_champ_db;
     ui_champ_env_t m_champ_env;
     void settings_start( );
+    void water_fidelity( );
     void unlock_bind( );
     // VuActionGameMode +0x60 past its gate (ui/paused.hxx, world/huds.hxx pause_bind).
     void pause_bind( );
@@ -622,12 +624,41 @@ private:
     const std::string& menu_tick( float dt );
     void menu_any_key( );
     std::uint32_t m_menu_pad = 0;
-    ui_bind_hooks_t menu_hooks( );
+    ui_bind_hooks_t menu_hooks( int id );
+    struct screen_state_t   // world/external.hxx: what a screen's entities hold outside the UI's tree
+    {
+        std::map< const entity_t*, sound_event_t > sounds;     // VuAudioEventEntity +0x78
+        std::map< const entity_t*, logic_entity_t > logic;
+    };
+    screen_state_t m_game_screen_state;                 // the Results and Award projects
+    c_ui_binding* m_logic_binding = nullptr;            // the screen a logic handler runs on
     struct menu_project_t
     {
         std::unique_ptr< entity_t > root;
         std::unique_ptr< c_ui_binding > binding;
+        screen_state_t state;
     };
+    // World/external.hxx.
+    ui_profile_t menu_profile( );
+    const logic_services_t& logic_services( );
+    void logic_broadcast_event( const char* event, const ui_params_t& p );
+    logic_entity_t* screen_logic( screen_state_t& state, entity_t& e );
+    ui_ret_t screen_external( screen_state_t& state, c_ui_binding& binding, entity_t& e, const char* plug, const ui_params_t& p );
+    void award_busy( const ui_params_t& p );
+    bool menu_poster( std::uint32_t hash, const ui_params_t& p );
+    void ui_play( const char* name )
+    {
+        std::uint32_t event = 0;
+        if ( m_sound.get_event && m_sound.get_event( m_sound.user, name, 1u, &event, nullptr ) == 0 && m_sound.start )
+            m_sound.start( m_sound.user, event );
+    }
+    logic_services_t m_logic_services;
+    value_t m_profile_temp;                             // g 0x759084 +0x18
+    value_t m_option_db;                                // gameutil +0x34
+    value_t m_page_db;                                  // VuDBAsset/PageLayoutDB
+    std::string m_logic_sku;                            // m_logic_game.sku: the pack's
+    float m_menu_dt = 0.0f;                             // the tick manager's delta the screen tick sees
+    ui_difficulty_env_t m_difficulty_env;
     mode_manager_t m_modes;
     front_end_engine_t m_menu_engine;
     std::unique_ptr< c_front_end > m_menu;
@@ -687,6 +718,13 @@ private:
             c_engine::drop( alpha );
         m_foliage = foliage_manager_t{ };
         m_foliage_entities.clear( );
+        if ( m_retail )
+        {
+            for ( gfx_light_t& l : m_retail->m_dynamic_lights )
+                m_retail->m_dynamic.light_off( l );
+            m_retail->m_dynamic_lights.clear( );
+        }
+        m_light_of.clear( );
         m_pfx.clear( );
         m_draws = 0;
         m_stack.clear( );
@@ -1097,7 +1135,10 @@ public:
             front_end = front_end_defaults( text( mode ), text( track ), text( course ), dbs, game_data );
         else if ( race )
             front_end = race_session_game_data( text( mode ), text( track ), text( course ), text( c_engine::option( "boat" ) ),
-                                                text( c_engine::option( "skin" ) ), dbs, m_vurandom, game_data );
+                                                text( c_engine::option( "skin" ) ), dbs, m_vurandom, game_data, [ this ]( const char* id ) -> std::string {
+                                                    string_db_ready( );
+                                                    return string_db_get( m_string_db, id ? id : "" );
+                                                } );
         if ( !front_end )
         {
             game_data = value_t{ };
@@ -1240,6 +1281,7 @@ public:
                 LOG_ERROR( "race: --input-script %s did not load (no keys) - the device answers", script );
         }
         m_race.autopilot = c_engine::option( "autopilot" ) != nullptr;
+        m_race.autopilot_keys = c_engine::option( "autopilot-keys" ) != nullptr;
         if ( const char* size = c_engine::option( "window-size" ) )
             sscanf_s( size, "%dx%d", &m_race.world.display_w, &m_race.world.display_h );
         if ( const char* keys = c_engine::option( "keys" ) )
@@ -1266,12 +1308,11 @@ public:
         // Boat_proxy/Proxy_diffuse placeholder) - retail's state at that point, not a stand-in. The damage pieces'
         // skins (+0x238, 0x4119F0) are not built here: our renderer does not draw the pieces. race_draw moves the
         // shown instance each frame (0x41EAE0's matrix).
-        for ( std::size_t k = 0; k < m_race.boats.size( ); ++k )
-        {
+        m_race.boat_models = [ this ]( std::size_t k ) {
             race_session_boat_t& b = *m_race.boats[ k ];
             const std::uint8_t* transform = m_race.start_boats[ k ].transform;
             if ( !transform )
-                continue;
+                return;
             float m[ 16 ];
             race_boat_draw_matrix( b.graph.objects[ 0 ].image.data( ), transform, m );
             const int at[ 3 ] = { 0xC4, 0xDC, 0xF4 };
@@ -1333,7 +1374,9 @@ public:
                       b.io.boat_strings[ 0xC4 ].c_str( ), b.io.boat_strings[ 0xDC ].c_str( ), b.io.boat_strings[ 0xF4 ].c_str( ), b.skin.c_str( ),
                       b.sections ? ( skinned ? "skin pass 0x421490 applied" : "skin pass 0x421490 ran, no texture changed" )
                                  : "skin pass 0x421490 not reached (0x420A70 stopped) - the models' own materials" );
-        }
+        };
+        for ( std::size_t k = 0; k < m_race.boats.size( ); ++k )
+            m_race.boat_models( k );
     }
 
     // Per frame: the draw 0x41EAE0's instance choice against this frame's eye, and its matrix: the transform's world
@@ -1351,6 +1394,11 @@ public:
                 continue;
             const std::uint8_t* boat = b.graph.objects[ 0 ].image.data( );
             gfx_retail_boat_t& r = *m_retail_boats[ k ];
+            if ( b.ghost )   // slot 12 0x422590: the fade, then 0x41EAE0
+            {
+                const std::size_t human = race_ghost_human( m_race );
+                ghost_boat_fade( b.graph.objects[ 0 ].image.data( ), transform, human < m_race.start_boats.size( ) ? m_race.start_boats[ human ].transform : nullptr );
+            }
             int pick = race_boat_draw_instance( boat, transform, p.m_eye );
             if ( pick < 0 )
                 continue;
@@ -1521,7 +1569,25 @@ public:
             // 0x558AC0 / 0x558C00 after the walk: 0x5BBAA0. Ours, flagged: the level's "Foliage Tint" as loaded for the composer's +0xA8: whether it follows the blended settings is unread.
             const std::uint8_t tint[ 3 ] = { static_cast< std::uint8_t >( m_foliage_tint ), static_cast< std::uint8_t >( m_foliage_tint >> 8 ), static_cast< std::uint8_t >( m_foliage_tint >> 16 ) };
             m_foliage.flush( sort, tint );
+            if ( !p.m_reflecting && c_engine::option( "no-pfx" ) == nullptr )   // VuPfxEntity's Reflect 0, the boats' 0x419CE0 draws nothing there
+                m_pfx.submit( sort, *p.m_camera, m_retail->m_pfx_materials, m_retail->m_pfx_trail_material );
+            if ( !p.m_reflecting )
+                for ( const retail_corona_t& c : m_retail_coronas )
+                    m_retail->corona_submit( sort, c.position, c.colour, c.size, c.rotation, c.amount, c.material );
         };
+        if ( m_retail->pfx_programs( ) )
+        {
+            m_pfx.m_retail = [ this ]( const std::string& name ) { return m_retail->texture( 0u, name ); };
+            m_retail->m_pfx_node = [ this ]( std::uint32_t node ) { return m_pfx.node_bytes( node ); };
+            m_retail->m_pfx_assets = [ this ]( std::uint32_t node, std::uint32_t& colour, std::uint32_t& tile ) {
+                const bool trail = *reinterpret_cast< const std::uint32_t* >( m_pfx.node_bytes( node ) ) == 0x00750294u;
+                const c_effects::node_assets_t& a = trail ? m_pfx.node_assets( node, 0x68u, 0u ) : m_pfx.node_assets( node, 0x3Cu, 0x54u );
+                colour = a.colour;
+                tile = a.tile;
+            };
+        }
+        else
+            LOG_WARNING( "pfx: the renderers' programs did not load: quads and trails stay on the hand path" );
         m_pfx.m_geom_sink = [ this ]( const std::string& asset, const float* matrix, std::uint32_t colour ) {
             gfx_static_model_t*& model = m_retail_geom_models[ asset ];
             if ( model == nullptr )
@@ -1539,6 +1605,19 @@ public:
             g.colour = colour;
             m_retail_geoms.push_back( g );
             return true;
+        };
+        m_coronas.m_sink = [ this ]( const float* position, std::uint32_t colour, float size, float rotation, float amount, const std::string& texture ) {
+            const std::uint32_t material = m_retail->corona_material( texture );
+            if ( material == 0u )
+                return;
+            retail_corona_t c;
+            std::memcpy( c.position, position, 12 );
+            c.colour = colour;
+            c.size = size;
+            c.rotation = rotation;
+            c.amount = amount;
+            c.material = material;
+            m_retail_coronas.push_back( c );
         };
         c_engine::stage_pass( &gfx_retail_t::engine_pass, m_retail.get( ) );
     }
@@ -1746,6 +1825,19 @@ public:
             c_engine::drop( 14 );
         }
         m_coronas.tick( dt );
+        // VuCoronaEntity's occlusion 0x61D000, the race's collision world. SUBSTITUTION: the triangle's material byte +0x29 (0x5E7650) is not loaded: every triangle stops the ray. No world (the front end): visible.
+        if ( m_race.active && m_race.dynamics )
+        {
+            gfx_corona_collision_ray_t ray;
+            ray.m_world = &m_race.dynamics->collision;
+            ray.m_image = []( void*, const collision_object_t& o ) { return reinterpret_cast< const std::uint8_t* >( o.body.object ); };
+            ray.m_surface = []( void*, const collision_object_t&, int ) { return -1; };
+            m_coronas.occlusion( m_eye, [ & ]( const float* from, const float* to ) { return static_cast< gfx_corona_entity_ray_t& >( ray ).blocked( from, to, 0xFFFFFFFFu ); } );
+        }
+        if ( m_retail )
+            if ( m_retail->m_projection[ 0 ] != 0.0f )
+                m_coronas.projection( m_retail->m_projection[ 0 ], m_retail->m_projection[ 5 ] );
+        m_retail_coronas.clear( );
         m_coronas.draw( m_eye, m_target, [ this ]( const std::string& path ) { return texture_for( path ); } );
         trace::frame( ).pfx += trace::now( ) - pfx_start;
     }
@@ -1881,6 +1973,15 @@ private:
     }
     bool m_stage_attached = false, m_stage_bound = false;
     std::unique_ptr< gfx_retail_t > m_retail;
+    std::map< std::string, gfx_light_t* > m_light_of;   // VuDynamicLightEntity by path, for TurnOn / TurnOff
+    struct retail_corona_t
+    {
+        float position[ 3 ];
+        std::uint32_t colour;
+        float size, rotation, amount;
+        std::uint32_t material;
+    };
+    std::vector< retail_corona_t > m_retail_coronas;
     std::vector< std::unique_ptr< gfx_retail_boat_t > > m_retail_boats;
     // VuPfxGeomPattern's particles this frame: 0x5903A0's tail, the model's draw 0x520130 at the particle's matrix and colour.
     struct retail_geom_t
@@ -2201,6 +2302,7 @@ private:
 
 #include <workspace/core/world/graph.hxx>
 #include <workspace/core/world/menu.hxx>
+#include <workspace/core/world/external.hxx>
 #include <workspace/core/world/saves.hxx>
 #include <workspace/core/world/motion.hxx>
 #include <workspace/core/world/animate.hxx>

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cmath>
+#include <functional>
 #include <cstring>
 #include <set>
 #include <string>
@@ -79,6 +80,7 @@ public:
         // strictly 0 or 1 - it gates the draw, it does not scale the alpha -
         // so the only error is the missing occlusion, not a wrong intensity.
         float visibility = 1.0f;
+        bool request = false;                   // +0xD0, the draw's: the next tick casts
     };
 
     int add( const corona_t& light )
@@ -135,6 +137,31 @@ public:
 
     void clear( ) { m_lights.clear( ); m_reported.clear( ); m_card = -1; }
 
+    // Set: the frame's sprites go here instead of the engine's blended layer (world/stage.hxx: 0x5E8410).
+    std::function< void( const float* position, std::uint32_t colour, float size, float rotation, float amount, const std::string& texture ) > m_sink;
+
+    // The camera's projection, retail's +0x44 and 0x7594D0's [0][0] (screen-space size, roll).
+    void projection( float x, float y ) { m_projection_x = x; m_projection_y = y; }
+
+    // 0x61D000 per corona: a request casts eye -> position less Query Radius toward the eye; visible when nothing answers. `blocked` = the ray.
+    template < typename Blocked >
+    void occlusion( const float* eye, Blocked&& blocked )
+    {
+        for ( corona_t& light : m_lights )
+        {
+            light.visibility = 0.0f;
+            if ( light.request )
+            {
+                const float dx = light.world[ 12 ] - eye[ 0 ], dy = light.world[ 13 ] - eye[ 1 ], dz = light.world[ 14 ] - eye[ 2 ];
+                const float scale = 1.0f / std::sqrt( ( dy * dy + dx * dx ) + dz * dz );
+                const float to[ 3 ] = { light.world[ 12 ] - ( scale * dx ) * light.query_radius, light.world[ 13 ] - ( scale * dy ) * light.query_radius, light.world[ 14 ] - ( scale * dz ) * light.query_radius };
+                if ( !blocked( eye, to ) )
+                    light.visibility = 1.0f;
+            }
+            light.request = false;
+        }
+    }
+
     int total( ) const { return static_cast< int >( m_lights.size( ) ); }
 
     int drawn( ) const { return m_drawn; }
@@ -190,7 +217,7 @@ public:
         right[ 1 ] = -right[ 1 ];
         right[ 2 ] = -right[ 2 ];
 
-        for ( const corona_t& light : m_lights )
+        for ( corona_t& light : m_lights )
         {
             if ( !light.registered )
                 continue;
@@ -250,6 +277,7 @@ public:
             if ( alpha <= 0 )
                 continue;
 
+            light.request = true;   // 0x61D3FA, before the visibility test
             if ( light.visibility <= 0.0f )
                 continue;
 
@@ -301,6 +329,16 @@ public:
             placed[ 14 ] = position[ 2 ];
             placed[ 15 ] = 1.0f;
 
+            // The record 0x61D1A0 hands the sort: the sprite on retail's layer 18 (additive, no depth).
+            if ( m_sink )
+            {
+                std::uint32_t colour = static_cast< std::uint32_t >( alpha ) << 24;
+                for ( int k = 0; k < 3; ++k )
+                    colour |= static_cast< std::uint32_t >( std::lrintf( light.color[ k ] * 255.0f ) ) << ( 8 * k );
+                m_sink( position, colour, sprite, light.rotation_offset, light.rotation_amount, light.texture );
+                ++m_drawn;
+                continue;
+            }
             const float color[ 4 ] = {
                 light.color[ 0 ], light.color[ 1 ], light.color[ 2 ],
                 static_cast< float >( alpha ) / 255.0f };

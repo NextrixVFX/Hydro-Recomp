@@ -2,6 +2,52 @@
 
 // The race session, second half (split from session.hxx, its include): race_session_start, the frame, the boat draw choice.
 
+// Each boat's postLoad, from VuGame's boat load and from the ghost's 0x4AF640. A ghost's image is 0x5A0 bytes (0x4AF640's new).
+inline void race_session_post_load( race_session_t& s, const race_session_dbs_t& db, const c_archive& archive, bool& made, entity_t& e, const value_t& entry )
+{
+    auto b = std::make_unique< race_session_boat_t >( );
+    b->owner = &s;
+    b->index = static_cast< int >( s.boats.size( ) );
+    const race_boat_state_t& st = *static_cast< const race_boat_state_t* >( e.m_state.get( ) );
+    b->name = e.m_name;
+    b->boat = st.boat;
+    b->skin = st.skin;
+    b->graph = boat_construct( *db.constant_db );
+    if ( st.driver_type == "Ghost" )
+        b->graph.objects[ 0 ].image.resize( 0x5A0 );
+    std::uint8_t* image = b->graph.objects[ 0 ].image.data( );
+    // The Boat text into +0x8C (0x420A70 reads it there); Driver Type (+0x74)
+    // and Skin (+0xA4) stay in the entity's state - their readers here are
+    // postLoad's compare (given the state's text) and the skin pass (a hook).
+    if ( !race_session_text( image, 0x8C, st.boat ) )
+    {
+        LOG_WARNING( "race: %s's Boat '%s' is 16+ characters (a heap std::string in +0x8C - not modelled); no race", e.m_name.c_str( ),
+                     st.boat.c_str( ) );
+        made = false;
+    }
+    race_session_boat_t& r = *b;
+    race_post_load_hooks_t ph;
+    ph.load_sections = [ &r, &db, &archive, &s ] { r.sections = race_session_sections( r, *db.boat_db, archive, s.surfaces_built ? &s.surfaces : nullptr ); };
+    ph.transform_changed = [ &r, &s ]
+    {
+        std::uint8_t* t = race_session_image( r, 0, 0x50 );
+        if ( !r.sections || !t )
+        {
+            ++s.stopped_transform;
+            return;
+        }
+        boat_transform_changed( r.graph.objects[ 0 ].image.data( ), reinterpret_cast< const float* >( t + 0x50 ), r.body, r.io.camera,
+                                r.io.instigator, race_session_transform_hooks( r ) );
+    };
+    const bool known = race_boat_post_load( image, st.driver_type, entry, *db.constant_db, r.driver, ph );
+    if ( !known )
+    {
+        LOG_WARNING( "race: %s's driver '%s' is UNKNOWN (no modelled class); no race", e.m_name.c_str( ), st.driver_type.c_str( ) );
+        made = false;
+    }
+    s.boats.push_back( std::move( b ) );
+}
+
 inline bool race_session_start( race_session_t& s, const std::string& mode, const value_t& game_data, const race_session_dbs_t& db,
                                 const c_archive& archive, entity_t& tree, const track_manager_t* track, fleet_random_t& random,
                                 const std::function< void( ) >& project_initialized = { } )
@@ -38,48 +84,7 @@ inline bool race_session_start( race_session_t& s, const std::string& mode, cons
     const entity_registry_t registry = build_entity_registry( { } );
     race_load_hooks_t hooks;
     bool made = true;
-    hooks.post_load = [ & ]( entity_t& e, const value_t& entry )
-    {
-        auto b = std::make_unique< race_session_boat_t >( );
-        b->owner = &s;
-        b->index = static_cast< int >( s.boats.size( ) );
-        const race_boat_state_t& st = *static_cast< const race_boat_state_t* >( e.m_state.get( ) );
-        b->name = e.m_name;
-        b->boat = st.boat;
-        b->skin = st.skin;
-        b->graph = boat_construct( *db.constant_db );
-        std::uint8_t* image = b->graph.objects[ 0 ].image.data( );
-        // The Boat text into +0x8C (0x420A70 reads it there); Driver Type (+0x74)
-        // and Skin (+0xA4) stay in the entity's state - their readers here are
-        // postLoad's compare (given the state's text) and the skin pass (a hook).
-        if ( !race_session_text( image, 0x8C, st.boat ) )
-        {
-            LOG_WARNING( "race: %s's Boat '%s' is 16+ characters (a heap std::string in +0x8C - not modelled); no race", e.m_name.c_str( ),
-                         st.boat.c_str( ) );
-            made = false;
-        }
-        race_session_boat_t& r = *b;
-        race_post_load_hooks_t ph;
-        ph.load_sections = [ &r, &db, &archive, &s ] { r.sections = race_session_sections( r, *db.boat_db, archive, s.surfaces_built ? &s.surfaces : nullptr ); };
-        ph.transform_changed = [ &r, &s ]
-        {
-            std::uint8_t* t = race_session_image( r, 0, 0x50 );
-            if ( !r.sections || !t )
-            {
-                ++s.stopped_transform;
-                return;
-            }
-            boat_transform_changed( r.graph.objects[ 0 ].image.data( ), reinterpret_cast< const float* >( t + 0x50 ), r.body, r.io.camera,
-                                    r.io.instigator, race_session_transform_hooks( r ) );
-        };
-        const bool known = race_boat_post_load( image, st.driver_type, entry, *db.constant_db, r.driver, ph );
-        if ( !known )
-        {
-            LOG_WARNING( "race: %s's driver '%s' is UNKNOWN (no modelled class); no race", e.m_name.c_str( ), st.driver_type.c_str( ) );
-            made = false;
-        }
-        s.boats.push_back( std::move( b ) );
-    };
+    hooks.post_load = [ & ]( entity_t& e, const value_t& entry ) { race_session_post_load( s, db, archive, made, e, entry ); };
     if ( !race_load_boats( s.game, s.game_data, util, *db.track_db, registry, hooks ) || !made || s.boats.empty( ) )
     {
         LOG_WARNING( "race: the boat load 0x481CE0 made no usable boat; no race" );
@@ -398,10 +403,10 @@ inline bool race_session_start( race_session_t& s, const std::string& mode, cons
         if ( s.world.save_doc )
             ui_progress_boat_used( *s.world.save_doc, boat );
     };
-    // THE POINT FOR c_unlock_manager::reward( ) (slots 6 .. 11, agent/boat d5289ec, not on this tree): no credits until then.
-    s.rules.screen_hooks.award.unlock_value = [ &s ]( std::uint32_t, const std::string&, std::int32_t ) {
-        race_unwired( s, "the unlock manager's reward slot 0x4B60B0 .. - not on this tree: no credits (UNKNOWN)" );
-        return 0;
+    // Slot 9's call: vt+0x18 0x4B60B0 Race, +0x20 0x4B6230 Slalom, +0x24 0x4B62F0 TimeTrial, +0x2C 0x4B6440 Ghost.
+    s.rules.screen_hooks.award.unlock_value = [ &s ]( std::uint32_t slot, const std::string& boat_class, std::int32_t tier ) {
+        const char* mode = slot == 0x18u ? "Race" : slot == 0x20u ? "Slalom" : slot == 0x24u ? "TimeTrial" : "Ghost";
+        return s.world.unlock ? s.world.unlock->reward( mode, boat_class, tier ) : 0;
     };
     s.rules.screen_hooks.award.unlock_show = [ &s ]( std::int32_t value, const std::vector< std::string >& names ) {   // vt+0x58 0x4B66E0
         return s.world.unlock && s.world.unlock->unlock_count_for( value, names ) != 0;
@@ -666,6 +671,25 @@ inline bool race_session_start( race_session_t& s, const std::string& mode, cons
             LOG_INFO( "race: %d VuAiNuisanceDriverStartEntity, %d nuisance boat(s) made", static_cast< int >( starts.size( ) ),
                       static_cast< int >( s.nuisance.size( ) ) );
     }
+    // The ghost's boat 0x4AF640 comes later, in LoadGhosts: the same load with the session's own copies of what it reads.
+    s.constant_db = db.constant_db;
+    s.ghost_make = [ &s, dbs = db, &archive ]( const std::string& name, const value_t& document ) -> race_session_boat_t* {
+        static const entity_registry_t ghost_registry = build_entity_registry( { } );
+        bool ok = true;
+        race_load_hooks_t h;
+        h.post_load = [ & ]( entity_t& e, const value_t& entry ) { race_session_post_load( s, dbs, archive, ok, e, entry ); };
+        entity_world_t bw = race_boat_world( ghost_registry, h );
+        std::unique_ptr< entity_t > child = entity_create( "VuBoatEntity", bw );
+        if ( !child )
+            return nullptr;
+        child->m_name = name;
+        const std::size_t before = s.boats.size( );
+        entity_load( *child, &document, bw );
+        h.post_load( *child, document );
+        race_entity_hash( *child, 0x811C9DC5u );
+        s.ghost_entities.push_back( std::move( child ) );
+        return ok && s.boats.size( ) == before + 1 ? s.boats[ before ].get( ) : nullptr;
+    };
     // The model's words for the weak references (race_session_t::words): each boat's +0x220 = its driver, the
     // driver's +0 = its vtable.
     for ( std::size_t k = 0; k < s.boats.size( ); ++k )

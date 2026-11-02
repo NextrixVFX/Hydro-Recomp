@@ -83,6 +83,7 @@ public:
     // The running game's water (hydro world/waterpass.hxx): the pass called in the transparent stage, a texture's view, the device, the context, the planar target's view,
     // the camera the pass draws with. Pointers are void* because this header has no D3D11.
     static void water_pass( void ( *pass )( void* ), void* user );
+    static void water_now( );
     // The game's retail scene (hydro world/stage.hxx): called once per view after the opaque placements, `reflecting` on the mirror pass.
     static void stage_pass( void ( *pass )( void*, bool ), void* user );
     static void* texture_view( int texture );
@@ -90,6 +91,7 @@ public:
     static void clear_colour( const void* rgba );
     static void reflection_plane( float z );
     static void lens( float tan_half, float near_plane );
+    static void flip_interval( int interval );   // g 0x75907C vt+0x28: the Present's sync interval
     static void matrices( float* view, float* projection, float* eye );
     // Six square RGBA faces in asset order; returns a cube handle for place().
     static int cube( const unsigned char* const* faces, int face );

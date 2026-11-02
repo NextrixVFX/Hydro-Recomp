@@ -80,6 +80,8 @@
 // read, by 0x413830).
 struct race_drive_t
 {
+    bool ghost = false;   // VuGhostDriver 0x737DDC
+    ghost_pilot_t ghost_pilot;
     race_session_t* session = nullptr;
     std::size_t index = 0;
     std::vector< std::uint8_t > records;
@@ -283,6 +285,21 @@ inline int race_drive_ray( void* user, const float* from, const float* to, const
     return n;
 }
 
+// 0x40C750's aabb: the hit body's shape (+0xCC) vt+4 getAabb( body +0x10, min, max ). A body not in the world answers an empty box and logs UNKNOWN.
+inline void race_drive_aabb( void* user, const std::uint8_t* body, float* mn, float* mx )
+{
+    race_session_t& s = *static_cast< race_session_t* >( user );
+    if ( s.dynamics )
+        for ( const collision_object_t* o : s.dynamics->collision.objects )
+            if ( reinterpret_cast< const std::uint8_t* >( o->body.object ) == body )
+            {
+                if ( !body_get_aabb( o->body, o->body.transform, mn, mx ) )
+                    race_unwired( s, "0x40C750: a hit body's getAabb reached a shape not recreated (UNKNOWN)" );
+                return;
+            }
+    race_unwired( s, "0x40C750: the ray's hit body is not in the collision world (UNKNOWN)" );
+}
+
 // 0x5296C0 on the probe point with the callback {vtable, point x, y,
 // direction x, y}: the finder starts at 0 (retail's [ebp-8]); water +0x18
 // (skip waves) is the build's 0.
@@ -430,7 +447,7 @@ inline void race_drive_driver( void* user, float dt )
         ai_tick_hooks_t h;
         h.avoid.user = &s;
         h.avoid.ray = race_drive_ray;
-        h.avoid.aabb = nullptr;   // reached only after a hit
+        h.avoid.aabb = race_drive_aabb;
         h.controls.user = &r;
         h.controls.misfire = []( void* u ) { race_unwired( *race_drive_of( u ).session, "audio: the BoostMisfire sound 0x41E060 (FMOD - platform)" ); };
         // The voice-over manager g 0x758FEC vt+0x1C (boat, line): world/voice.hxx's say-now on this boat.
@@ -453,7 +470,7 @@ inline void race_drive_driver( void* user, float dt )
         nuisance_hooks_t h;
         h.ai.avoid.user = &s;
         h.ai.avoid.ray = race_drive_ray;
-        h.ai.avoid.aabb = nullptr;   // reached only after a hit
+        h.ai.avoid.aabb = race_drive_aabb;
         h.ai.controls.user = &r;
         h.ai.controls.misfire = []( void* u ) { race_unwired( *race_drive_of( u ).session, "audio: the BoostMisfire sound 0x41E060 (FMOD - platform)" ); };
         h.ai.controls.voice = []( void* u, const char* line ) { race_session_vo_say( *race_drive_of( u ).session, race_drive_of( u ).d.boat, line, false ); };
@@ -467,7 +484,12 @@ inline void race_drive_driver( void* user, float dt )
         nuisance_driver_tick( *s.track, r.nuisance_pilot, t, r.nuisance_target, *s.random, dt, h );
         return;
     }
-    race_unwired( s, "a driver tick of a class not wired here (UI / ghost, or an AI boat with no pilot) - UNKNOWN" );
+    if ( r.ghost )
+    {
+        ghost_driver_tick( *s.track, r.ghost_pilot, r.d.transform );   // slot 18 0x40EBA0
+        return;
+    }
+    race_unwired( s, "a driver tick of a class not wired here (UI, or an AI boat with no pilot) - UNKNOWN" );
 }
 
 inline void race_drive_camera( void* user, float dt )
@@ -504,12 +526,15 @@ inline void race_drive_respawn( void* user )
 
 // ---- setup -----------------------------------------------------------------
 
-inline void race_drive_setup( race_session_t& s, const value_t* constant_db )
+inline void race_drive_setup( race_session_t& s, const value_t* constant_db, std::size_t first )
 {
-    s.drives.assign( s.boats.size( ), nullptr );
+    if ( first == 0 )
+        s.drives.assign( s.boats.size( ), nullptr );
+    else
+        s.drives.resize( s.boats.size( ) );
     if ( constant_db )
         s.vertical_fov = member( member( member( *constant_db, "VuDBAsset" ), "Camera" ), "VerticalFOV" );
-    for ( std::size_t k = 0; k < s.boats.size( ); ++k )
+    for ( std::size_t k = first; k < s.boats.size( ); ++k )
     {
         race_session_boat_t& b = *s.boats[ k ];
         std::uint8_t* transform = race_session_image( b, 0, 0x50 );
@@ -569,6 +594,7 @@ inline void race_drive_setup( race_session_t& s, const value_t* constant_db )
                 s.explosion_listeners.push_back( l );
             } );
         r->ai = vtable == 0x737B5Cu;
+        r->ghost = vtable == 0x737DDCu;
         if ( vtable == 0x737C4Cu )
         {
             // The ctor 0x40D880's state: no target (+0xF0 0), no target sector (+0xF4 0), an empty plan (+0x84).
@@ -730,7 +756,8 @@ inline void race_drive_setup( race_session_t& s, const value_t* constant_db )
         h.hull.wake = race_drive_hull_wake;
         s.drives[ k ] = r;
     }
-    race_drive_contact_setup( s );
+    if ( first == 0 )
+        race_drive_contact_setup( s );
     int made = 0;
     for ( const auto& r : s.drives )
         made += r ? 1 : 0;
@@ -962,6 +989,15 @@ inline void race_contact_added( void* user, solver_contact_point_t& cp, solver_r
                         b->target = other;
                 };
             }
+        // VuRampEntity's +0x7C part: 0x43E420 (boat/contact.hxx ramp_contact). The other's owner being a boat is the type walk.
+        for ( const auto& lbp : s.level_bodies )
+            if ( &lbp->body.body == self && static_cast< const entity_t* >( lbp->owner )->m_type == "VuRampEntity" )
+                return [ &s, other ]( contact_record_t& rec ) {
+                    for ( const auto& x : s.boats )
+                        if ( &x->body.body == other )
+                            if ( ramp_contact( rec, other->linear_velocity ) )
+                                race_session_image( *x, 0, 0x228 )[ 0x174 ] = 1;
+                };
         return nullptr;
     };
     const auto any_callback = [ & ]( solver_rigid_t* self, solver_rigid_t* other ) -> std::function< void( contact_record_t& ) > {
@@ -1174,7 +1210,10 @@ inline void race_drive_pfx_frame( race_session_t& s, race_drive_t& r, race_sessi
     pfx_frame_boat_t& e = s.pfx_boats[ r.index ];
     e.address = b.pfx.boat;
     e.view = b.pfx_view.get( );
-    e.records = r.records.empty( ) ? nullptr : r.records.data( );
+    // The engine's +0xF8 records are the ones 0x414760 refills: the thunk's (boat/thunk.hxx). r.records never leave zero: every thrust process with a drive index stood still.
+    std::vector< std::uint8_t >& records = b.thunk && !b.thunk->records.empty( ) ? b.thunk->records : r.records;
+    r.d.records = records.empty( ) ? nullptr : records.data( );
+    e.records = r.d.records;
     std::memcpy( e.position, r.d.transform + 0x80, 12 );
     std::memcpy( e.velocity, r.d.body + 0x140, 12 );
     e.hull = &h;
@@ -1483,7 +1522,7 @@ inline bool race_event_dispatch( race_session_t& s, const std::string& entity, c
         for ( const auto& lb : s.level_bodies )
         {
             const entity_t* o = static_cast< const entity_t* >( lb->owner );
-            if ( !o || ( o->m_type != "VuPropEntity" && o->m_type != "VuBreakablePropEntity" ) )
+            if ( !o || ( o->m_type != "VuPropEntity" && o->m_type != "VuRampEntity" && o->m_type != "VuBreakablePropEntity" ) )
                 continue;
             std::string path;
             for ( const entity_t* e = o; e && e->m_parent; e = e->m_parent )
@@ -1690,10 +1729,13 @@ inline void race_session_game_mode( void* user, float dt )
     {
         race_rules_boat_t& rb = s.rules_boats[ k ];
         rb.sector = nullptr;
-        const race_drive_t* d = k < s.drives.size( ) ? s.drives[ k ].get( ) : nullptr;
+        const std::size_t at = rb.drive >= 0 ? static_cast< std::size_t >( rb.drive ) : k;
+        const race_drive_t* d = at < s.drives.size( ) ? s.drives[ at ].get( ) : nullptr;
         int sector = -1;
         if ( d && d->human )
             sector = d->human_pilot.sector;
+        else if ( d && d->ghost )
+            sector = d->ghost_pilot.sector;
         else if ( d && d->ai && d->pilot >= 0 )
         {
             const fleet_plan_t& plan = s.pilots[ static_cast< std::size_t >( d->pilot ) ].plan;
@@ -1804,4 +1846,17 @@ inline void race_session_game_mode( void* user, float dt )
                       rules_f( rb.boat, 0x4C4 ), rules_f( rb.boat, 0x4B4 ), rules_i32( rb.boat, 0x308 ), rules_f( rb.transform, 0x80 ),
                       rules_f( rb.transform, 0x84 ), rules_f( rb.transform, 0x88 ) );
         }
+}
+
+// The ghost's replay, its two hooks on the Decision composition.
+inline void race_ghost_debris( race_session_t& s, std::size_t k )
+{
+    if ( k < s.drives.size( ) && s.drives[ k ] )
+        s.drives[ k ]->hooks.debris_410FF0( s.drives[ k ].get( ) );
+}
+
+inline void race_ghost_destroyed( race_session_t& s, std::size_t k )
+{
+    if ( k < s.drives.size( ) && s.drives[ k ] )
+        s.drives[ k ]->hooks.boat_41E240( s.drives[ k ].get( ) );
 }

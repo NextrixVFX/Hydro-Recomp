@@ -14,7 +14,7 @@
 // Boosts (37 on Hydroelectric), triggers (3), hidden packages (10; slots 6 0x43DD20, 13 0x43DE20, 15 0x43DE80, on game/packages.hxx's
 // manager: with the saves off no document answers, so they are not made live). Hooks answered here:
 //   an entity id (0x500D50, FNV-1a of the long name) is the boat's index + 1: SUBSTITUTION, the map's key only;
-//   the ApplyPfx (0x52BAC0 + the spring constraint: read to 0x43C02D, tools tmp/b38/d_43BDB0.txt) is logged, not run; gameRelease 0x43BCA0 is not run (the session's teardown drops the bodies).
+//   gameRelease 0x43BCA0: race_powerups_release.
 
 // 0x43C700: a btSphereShape (vtable 0x73ADD4: type 8, +0x10 scaling (1, 1, 1, 0), +0x20 and +0x30 the radius), mass 0, the
 // entity's world, group 0x20, mask 0x10 (the boats), +0xD8 |= 4, +0x2C4 the +0x5C part (a marker word here).
@@ -121,6 +121,13 @@ inline powerup_package_hooks_t race_powerup_package_hooks( race_session_t& s, ra
 }
 
 // slot 13: the boost's 0x43D960 (the "MPBoost" entry with more than one human), every other type's 0x43BD40.
+// Slot 7 0x43BCA0 on each, from the session's end; the body stays the session's to free.
+inline void race_powerups_release( race_session_t& s )
+{
+    for ( const auto& u : s.powerups )
+        powerup_game_release( u->p, false, race_powerup_world_hooks( s, *u ) );
+}
+
 inline void race_powerup_enable( race_session_t& s, race_session_t::powerup_live_t& u )
 {
     const powerup_world_hooks_t h = race_powerup_world_hooks( s, u );
@@ -186,7 +193,39 @@ inline void race_powerup_tick( void* user, float dt )
         if ( x >= 0 )
             pfx_instance_set_scale( s.world.pfx->heap, s.world.pfx_manager->entries[ static_cast< std::size_t >( x ) ].instance, scale );
     };
-    h.apply_pfx = [ &s ]( void* ) { race_unwired( s, "a power-up's ApplyPfx (0x52BAC0 + VuPfxBoatSpringConstraint) - not run" ); };
+    // 0x43BF1F .. 0x43C025: 0x52BAC0 ( the name, 1 ) = createEffect 0x52BCD0 + the handle + slot 10, 0x52BB20 the lookup; setMatrix ( lookAtBasis 0x50CA70 ( the boat's
+    // velocity 0x409700, (0, 0, 1) ) with row 3 the power-up's position ), slot 3 the velocity, start, then the walk 0x43BFE8: VuPfxBoatSpringConstraint +0x14 = the boat.
+    h.apply_pfx = [ &s, &u ]( void* entity ) {
+        if ( u.p.apply_pfx.empty( ) || !s.world.pfx || !s.world.pfx_manager || !s.world.pfx_ops )
+            return;
+        race_session_boat_t& b = *static_cast< race_session_boat_t* >( entity );
+        const transform_component_t* t = entity_transform( *u.entity );
+        pfx_manager_t& m = *s.world.pfx_manager;
+        const boat_pfx_ops_t o = boat_pfx_runtime_ops( *s.world.pfx );
+        const int e = pfx_manager_create( m, u.p.apply_pfx.c_str( ), *s.world.pfx_ops );
+        if ( e < 0 || !t )
+            return;
+        const std::uint32_t handle = pfx_manager_handle( m, e );
+        if ( o.duration )
+            o.duration( o.user, m.entries[ static_cast< std::size_t >( e ) ].instance );
+        const int x = handle ? pfx_manager_lookup( m, handle ) : -1;
+        if ( x < 0 )
+            return;
+        const std::uint8_t* body = reinterpret_cast< const std::uint8_t* >( &b.body );
+        std::uint32_t v[ 4 ];
+        std::memcpy( v, body + 0x140, 16 );
+        float dir[ 4 ], mat[ 16 ];
+        std::memcpy( dir, v, 16 );
+        const float up[ 4 ] = { 0.0f, 0.0f, 1.0f, 0.0f };
+        camera_look_at( dir, up, mat );
+        mat[ 12 ] = t->world[ 12 ];
+        mat[ 13 ] = t->world[ 13 ];
+        mat[ 14 ] = t->world[ 14 ];
+        const std::uint32_t inst = m.entries[ static_cast< std::size_t >( x ) ].instance;
+        o.set_matrix( o.user, inst, mat );
+        o.set_velocity( o.user, inst, v );
+        pfx_bind_spring( s.world.pfx->heap, inst, b.pfx.boat );
+    };
     h.driver_38 = [ ]( void* ) { return true; };   // 0x404BD0 in all five driver vtables
     h.driver_30 = [ &s ]( void* v ) { return race_session_is_human( s, static_cast< race_session_boat_t* >( v )->graph.objects[ 0 ].image.data( ) ); };
     h.sound = [ &s, &u ]( const float* position ) {

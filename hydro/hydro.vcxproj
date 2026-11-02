@@ -153,13 +153,16 @@
     <ClInclude Include="workspace\core\boat\tick.hxx" />
     <ClInclude Include="workspace\core\boat\track.hxx" />
     <ClInclude Include="workspace\core\boat\update.hxx" />
+    <ClInclude Include="workspace\core\game\boxes.hxx" />
     <ClInclude Include="workspace\core\game\docked.hxx" />
     <ClInclude Include="workspace\core\game\game.hxx" />
+    <ClInclude Include="workspace\core\game\identity.hxx" />
     <ClInclude Include="workspace\core\game\input.hxx" />
     <ClInclude Include="workspace\core\game\packages.hxx" />
     <ClInclude Include="workspace\core\game\plugs.hxx" />
     <ClInclude Include="workspace\core\game\scripted.hxx" />
     <ClInclude Include="workspace\core\game\settings.hxx" />
+    <ClInclude Include="workspace\core\game\touches.hxx" />
     <ClInclude Include="workspace\core\game\types.hxx" />
     <ClInclude Include="workspace\core\game\unlock.hxx" />
     <ClInclude Include="workspace\core\light\rig.hxx" />
@@ -238,6 +241,7 @@
     <ClInclude Include="workspace\core\world\effects.hxx" />
     <ClInclude Include="workspace\core\world\emitters.hxx" />
     <ClInclude Include="workspace\core\world\entities.hxx" />
+    <ClInclude Include="workspace\core\world\external.hxx" />
     <ClInclude Include="workspace\core\world\field.hxx" />
     <ClInclude Include="workspace\core\world\foliage.hxx" />
     <ClInclude Include="workspace\core\world\force.hxx" />
@@ -272,12 +276,14 @@
     <ClInclude Include="workspace\core\world\pause.hxx" />
     <ClInclude Include="workspace\core\world\pfx.hxx" />
     <ClInclude Include="workspace\core\world\pfxclass.hxx" />
+    <ClInclude Include="workspace\core\world\pfxdraw.hxx" />
     <ClInclude Include="workspace\core\world\pfxload.hxx" />
     <ClInclude Include="workspace\core\world\pfxmgr.hxx" />
     <ClInclude Include="workspace\core\world\pfxsim.hxx" />
     <ClInclude Include="workspace\core\world\pfxstatic.hxx" />
     <ClInclude Include="workspace\core\world\pickups.hxx" />
     <ClInclude Include="workspace\core\world\primitive.hxx" />
+    <ClInclude Include="workspace\core\world\profile.hxx" />
     <ClInclude Include="workspace\core\world\query.hxx" />
     <ClInclude Include="workspace\core\world\race.hxx" />
     <ClInclude Include="workspace\core\world\rig.hxx" />
@@ -312,6 +318,7 @@
     <ClInclude Include="workspace\core\world\world.hxx" />
     <ClInclude Include="workspace\core\world\wrap.hxx" />
     <ClInclude Include="workspace\utility\checks\boat.hxx" />
+    <ClInclude Include="workspace\utility\checks\boxes.hxx" />
     <ClInclude Include="workspace\utility\checks\device.hxx" />
     <ClInclude Include="workspace\utility\checks\foliage.hxx" />
     <ClInclude Include="workspace\utility\checks\game.hxx" />

@@ -442,6 +442,7 @@ struct ui_bind_hooks_t
     std::function< void( int, const char* ) > m_input_button;
     std::function< void( int, const char*, float ) > m_input_axis;
     std::function< void( const char* ) > m_sound;
+    std::function< void( const char*, float ) > m_category;   // FMOD getCategory + setVolume (the sliders; HOOK)
     std::function< void( ) > m_recover;
     // The GameConfig* screens (batch 19; see ui_bound_config_t): the platform
     // answers (null: VuGameConfigEntity not bound), the OptionDB / TrackDB
@@ -1024,7 +1025,7 @@ private:
             fire_named( e, plug.c_str( ), params );
             return true;
         };
-        h.sound = [ this ]( const char* name ) { trace( ui_trace_kind_t::sound, -1, name, 0u, ui_params_t( ), true ); };
+        h.sound = [ this ]( const char* name ) { sound( name ); };
         h.trophy = [ this ]( const char* model ) { trace( ui_trace_kind_t::hook, -1, std::string( "trophy:" ) + model, 0u, ui_params_t( ), true ); };
         h.draw_add = [ this, index ] { trace( ui_trace_kind_t::hook, index, "draw_add", 0u, ui_params_t( ), true ); };   // g 0x7590B8 +40 (HOOK)
         if ( c.m_boat )
@@ -1072,7 +1073,7 @@ private:
                 const int k = plug_index( e, plug );
                 return sc && k >= 0 ? static_cast< int >( sc->m_plugs[ static_cast< std::size_t >( k ) ].m_links.size( ) ) : 0;
             };
-            b.m_button_hooks.m_sound = [ this ]( const char* name ) { trace( ui_trace_kind_t::sound, -1, name, 0u, ui_params_t( ), true ); };
+            b.m_button_hooks.m_sound = [ this ]( const char* name ) { sound( name ); };
             b.m_button = std::make_unique< c_ui_button >( ui_entity_id( ui_long_name( e ) ), b.m_button_hooks );
             c_ui_button& button = *b.m_button;
             if ( const ui_slot_t* s = ui_bind_slot( e, "Enabled" ) )
@@ -1205,8 +1206,13 @@ private:
                 const int k = plug_index( e, plug );
                 return sc && k >= 0 ? static_cast< int >( sc->m_plugs[ static_cast< std::size_t >( k ) ].m_links.size( ) ) : 0;
             };
-            h.m_sound = [ this ]( const char* name ) { trace( ui_trace_kind_t::sound, -1, name, 0u, ui_params_t( ), true ); };
-            h.m_category = [ this ]( const char* name, float ) { trace( ui_trace_kind_t::category, -1, name, 0u, ui_params_t( ), true ); };
+            h.m_sound = [ this ]( const char* name ) { sound( name ); };
+            h.m_category = [ this ]( const char* name, float v )
+            {
+                trace( ui_trace_kind_t::category, -1, name, 0u, ui_params_t( ), true );
+                if ( m_hooks.m_category )
+                    m_hooks.m_category( name, v );
+            };
             if ( m_hooks.m_touch_count )
                 h.m_touch_count = [ this ]
                 {
@@ -1306,7 +1312,7 @@ private:
                 touch_handlers( bp->m_ladder.get( ), on );   // batch 24: the device's dispatch reaches it
             };
             h.m_delta = [ this ] { return m_hooks.m_delta ? m_hooks.m_delta( ) : 0.0f; };
-            h.m_sound = [ this ]( const char* name ) { trace( ui_trace_kind_t::sound, -1, name, 0u, ui_params_t( ), true ); };
+            h.m_sound = [ this ]( const char* name ) { sound( name ); };
             if ( !h.m_option_db )
                 h.m_option_db = m_hooks.m_option_db;   // gameutil +0x34
             b.m_ladder = std::make_unique< c_ui_leaderboard >( ui_leaderboard_of( e ), h );
@@ -1322,7 +1328,7 @@ private:
                 const int k = plug_index( e, plug );
                 return sc && k >= 0 ? static_cast< int >( sc->m_plugs[ static_cast< std::size_t >( k ) ].m_links.size( ) ) : 0;
             };
-            h.m_sound = [ this ]( const char* name ) { trace( ui_trace_kind_t::sound, -1, name, 0u, ui_params_t( ), true ); };
+            h.m_sound = [ this ]( const char* name ) { sound( name ); };
             h.m_delta = [ this ] { return m_hooks.m_delta ? m_hooks.m_delta( ) : 0.0f; };
             h.m_apply = [ this, bp = &b ]( std::uint32_t vtable, int current )
             {
@@ -1386,6 +1392,14 @@ private:
     // move broadcasts OnUISetFocus inside the dispatch, so a later subscriber of the same OnUIEvent sees
     // the new focus) and OnUITick (the order of the broadcasts / plug fires the ticks emit). OnUISetFocus
     // handlers each test their own name - independent.
+    // FMOD getEvent + start: traced, then the hook.
+    void sound( const char* name )
+    {
+        trace( ui_trace_kind_t::sound, -1, name, 0u, ui_params_t( ), true );
+        if ( m_hooks.m_sound )
+            m_hooks.m_sound( name );
+    }
+
     void broadcast( std::uint32_t hash, const ui_params_t& p )
     {
         trace( ui_trace_kind_t::broadcast, -1, std::string( ), hash, p, true );

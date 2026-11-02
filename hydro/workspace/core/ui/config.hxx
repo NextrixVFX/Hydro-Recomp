@@ -149,7 +149,7 @@ struct ui_game_env_t
     std::function< std::string( const char* ) > string_db;
     // HOOK (platform sign-in): g_vumetrosigninmanager 0x758FB0 +20, the
     // signed-in player's name.
-    std::string player_name;
+    std::string player_name;   // platform_gamer_tag( )
 };
 
 // 0x50FF40 (thiscall on the generator, n, int* out; ret 8): out = 0 .. n-1

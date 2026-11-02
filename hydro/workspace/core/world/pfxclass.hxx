@@ -565,7 +565,8 @@ inline int pfx_quad_fill( const std::uint8_t* draw, const std::uint8_t* node, co
 // the device's +0xA0 state word, dirty byte +0x9C).
 // The record is 0x58D030's (render side, not recreated): +4 the node (+0x3C Trail Type: 0 "2D Trail", else "3D Ribbon"),
 // +8 .. +0x44 the matrix (rows +8 / +0x18 / +0x28, translation +0x38), +0x68 the count, the particles at +0x6C, 0x2C bytes
-// each (+0 position, +0x10 the ribbon axis, +0x20 the colour dword, +0x24 v, +0x28 the half width). The eye: g 0x7594A0.
+// each (+0 position, +0x10 the ribbon axis, +0x20 the particle's +0x54, +0x24 the colour bytes, +0x28 the half width). The eye: g 0x7594A0.
+// (The vertex is { x y z, uv 12, colour 20 } by 0x58CE40's declaration: pfx_trail_vertex_t's `colour` word is the texture's u, `u` its v, `v` the colour.)
 // 2D Trail: P_i = the position through the matrix; per particle d = P_next - P_prev (prev / next clamped to the ends:
 // the first uses P_1 - P_0, the last P_last - P_last-1), e = P_i - eye, c = d x e ((dy ez - dz ey, dz ex - dx ez, dx ey -
 // dy ex)), n = c x (1 / sqrtss( (cy cy + cx cx) + cz cz )) - NO epsilon test (a zero c gives 0 x inf = NaN, as retail);

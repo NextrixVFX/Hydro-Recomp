@@ -8,7 +8,7 @@
 //   m_screen_tick    the root's slot 12 0x629B90 (binding.tick)
 //   m_screen_draw    the root's slot 13 0x629D60 (ui_screen_frame, into the UI pass)
 // The binding's broadcasts reach the mode's event map 0x5156E0 (c_front_end::handle): OnPushScreen, OnSetScreen, OnStartActionGame ...
-// Hooks that answer nothing, named: the audio ones, the title voice-over, analytics, the save check, 0x530BB0, VuProject's reference counts.
+// Hooks that answer nothing, named: the title voice-over, analytics, the save check, 0x530BB0, VuProject's reference counts.
 
 class c_menu_mode final : public game_mode_t
 {
@@ -70,6 +70,7 @@ inline void c_world::action_exit( )
     m_pause_root.reset( );
     if ( m_race.active )
         race_session_end( m_race );
+    m_game_screen_state = screen_state_t{ };
     m_action.reset( );
 }
 
@@ -81,98 +82,24 @@ inline void c_world::action_enter( )
     m_has_chosen = false;
 }
 
-inline float g_menu_dt = 0.0f;   // the tick manager's delta the screen tick sees (UI batch 32; c_world's member when world.hxx takes it)
-
-inline ui_bind_hooks_t c_world::menu_hooks( )
+inline ui_bind_hooks_t c_world::menu_hooks( int id )
 {
     ui_bind_hooks_t hooks;
     hooks.m_root = &m_menu_util;
     hooks.m_broadcast_out = [ this ]( std::uint32_t hash, const ui_params_t& p ) {
+        menu_poster( hash, p );
         if ( m_menu )
             m_menu->handle( hash, p );
     };
     string_db_ready( );
     hooks.m_string_db = [ this ]( const char* key ) { return string_db_get( m_string_db, key ? key : "" ); };
-    // The Screens' logic entities (world/logic.hxx, case logic_plugs): the race's dispatcher on a per-entity state built from the loaded properties
-    // (a Screens project's m_state is the UI's). The services are the saves'; the settings' defaults stay the world's (null: counted, nothing runs).
-    hooks.m_external = [ this ]( entity_t& e, const char* plug, const ui_params_t& params ) {
-        const std::uint32_t vt = logic_vtable_of( e.m_type.c_str( ) );
-        if ( vt == 0u )
-        {
-            LOG_VERBOSE( "front end: the external input %s . %s (a platform hook) - not run", e.m_type.c_str( ), plug );
-            return ui_ret_t{ };
-        }
-        static std::unordered_map< const entity_t*, logic_entity_t > states;
-        static value_t temp;   // the profile's +0x18: this run's
-        static logic_services_t services;
-        static std::string sku;
-        sku = m_archive.pack_sku( );
-        m_logic_game.sku = &sku;
-        m_logic_game.game_data = &m_menu_util;
-        m_logic_game.unrecreated = &m_logic_unrecreated;
-        services.broadcast = [ this ]( const char* event, const ui_params_t& p ) {
-            if ( m_menu )
-                m_menu->handle( fsm_hash( event ), p );
-        };
-        services.champ_data = [ this ] { return ui_progress_champ_active( m_cloud.data ); };
-        services.champ_clear = [ this ] { ui_progress_champ_save( m_cloud.data, value_t{ } ); };
-        services.save_profile = [ this ] {
-            if ( m_saves_on )
-                m_profile.save( [ this ] { saves_profile_listeners( ); } );
-        };
-        services.game_data = &m_menu_util;
-        services.cloud_data = &m_cloud.data;
-        services.profile_saved = &m_profile.data;
-        services.profile_temp = &temp;
-        auto at = states.find( &e );
-        if ( at == states.end( ) )
-        {
-            logic_entity_t s = logic_construct( vt );
-            for ( const char* name : { "SKU", "Name", "Achievement" } )
-                if ( const ui_slot_t* slot = ui_property_value( e, name ) )
-                    s.text = slot->m_text;
-            if ( const ui_slot_t* slot = ui_property_value( e, "Save" ) )
-                s.head[ 0 ] = slot->m_bits[ 0 ] & 0xFFu;
-            at = states.emplace( &e, std::move( s ) ).first;
-        }
-        c_ui_binding* binding = nullptr;
-        for ( auto& p : m_menu_projects )
-            if ( p.second.binding && p.second.binding->bound_index( e ) >= 0 )
-                binding = p.second.binding.get( );
-        struct context_t
-        {
-            c_ui_binding* binding;
-            entity_t* entity;
-        } ctx{ binding, &e };
-        logic_hooks_t h;
-        h.user = &ctx;
-        h.game = &m_logic_game;
-        h.services = &services;
-        h.fire = []( void* user, logic_entity_t&, const char* out_plug, const ui_params_t& p ) -> logic_retval_t {
-            context_t& c = *static_cast< context_t* >( user );
-            logic_retval_t out;
-            if ( c.binding )
-            {
-                const ui_ret_t r = c.binding->fire_plug( *c.entity, out_plug, p );
-                out.type = r.m_words[ 0 ];
-                out.value = r.m_words[ 1 ];
-            }
-            return out;
-        };
-        logic_retval_t out{ };
-        ui_ret_t ret;
-        if ( !logic_dispatch( at->second, plug, out, params, h ) )
-        {
-            LOG_VERBOSE( "front end: the input %s . %s is not in the logic table - not run", e.m_type.c_str( ), plug );
-            return ret;
-        }
-        ret.m_words[ 0 ] = out.type;
-        ret.m_words[ 1 ] = out.value;
-        return ret;
+    hooks.m_external = [ this, id ]( entity_t& e, const char* plug, const ui_params_t& p ) {
+        menu_project_t& project = m_menu_projects[ id ];
+        return screen_external( project.state, *project.binding, e, plug, p );
     };
     hooks.m_input = [ this ]( int pad, const char* name ) { return m_menu_input && m_menu_input->manager.pressed( pad, name ); };
     // A PLATFORM ANSWER, not read from anything: the license manager's "trial" is no (the owner's copy; the retail shot's Main shows Windows 8 Store, the full licence's text).
-    hooks.m_trial = [ ] { return false; };
+    hooks.m_trial = [ ] { return false; };   // the same answer as ui_profile_saved's p.license
 #if HYDRO_UI_PASS && HYDRO_UI_TEXT
     // The ticker's: VuStringDB slot 7, 0x626B80 on its Font, 0x5373D0 on the font with the entity's FontDB params.
     hooks.m_info.m_string = [ this ]( const std::string& id ) { return string_db_get( m_string_db, id ); };
@@ -186,8 +113,6 @@ inline ui_bind_hooks_t c_world::menu_hooks( )
         return font ? ui_font_text_width( *font, text.c_str( ), params, aspect ) : 0.0f;
     };
 #endif
-    // The selectors (UI batch 32): one world per process, so these documents stay here until c_world holds them (world.hxx is the world agent's).
-    static value_t option_db, champ_db, font_db, skin_db;
     const auto db = [ this ]( const char* asset, value_t& out ) -> const value_t* {
         if ( out.tag == 0 )
         {
@@ -198,11 +123,10 @@ inline ui_bind_hooks_t c_world::menu_hooks( )
         }
         return &out;
     };
-    hooks.m_option_db = db( "VuDBAsset/OptionDB", option_db );
-    hooks.m_champ_db = db( "VuDBAsset/ChampDB", champ_db );
-    hooks.m_font_db = db( "VuDBAsset/FontDB", font_db );
-    static value_t page_db;
-    hooks.m_page_db = db( "VuDBAsset/PageLayoutDB", page_db );
+    hooks.m_option_db = db( "VuDBAsset/OptionDB", m_option_db );
+    hooks.m_champ_db = db( "VuDBAsset/ChampDB", m_champ_db );
+    hooks.m_font_db = db( "VuDBAsset/FontDB", m_font_db );
+    hooks.m_page_db = db( "VuDBAsset/PageLayoutDB", m_page_db );
 #if HYDRO_UI_PASS && HYDRO_UI_TEXT
     if ( m_ui_pass )
     {
@@ -211,11 +135,13 @@ inline ui_bind_hooks_t c_world::menu_hooks( )
         hooks.m_page_env.m_default = hooks.m_page_env.m_default_font != 0u;
     }
 #endif
-    hooks.m_skin_db = db( "VuDBAsset/SkinDB", skin_db );
+    hooks.m_skin_db = db( "VuDBAsset/SkinDB", m_skin_db );
     hooks.m_boat_db = &m_boat_db;
     hooks.m_track_db = &m_track_db;
-    hooks.m_platform = ui_platform_of( ui_profile_all_unlocked( ) );   // the declared scaffold profile, as --front-end-defaults (the save-backed one: the world's)
-    hooks.m_delta = [ this ] { return g_menu_dt; };
+    hooks.m_platform = ui_platform_of( menu_profile( ) );   // the saved state (world/external.hxx); --front-end-defaults keeps its test profile
+    hooks.m_delta = [ this ] { return m_menu_dt; };
+    hooks.m_sound = [ this ]( const char* name ) { ui_play( name ); };
+    hooks.m_category = m_settings_hooks.category;
     hooks.m_touch_device = &m_touch;
     hooks.m_settings = &m_settings.ui;
     hooks.m_settings_platform = &m_settings_platform;
@@ -237,6 +163,7 @@ inline void c_world::menu_enter( )
             saves_input( *m_menu_input );
         }
     }
+    m_menu_engine.m_sound = [ this ]( const char* name ) { ui_play( name ); };
     m_menu_engine.m_platform = [ this ]( const char* what, int ) {
         if ( std::strcmp( what, "cloud" ) == 0 )   // 0x4BF96D 0x5547F0, 0x4BF978 0x4ABD60: the pair
             saves_commit( );
@@ -273,7 +200,7 @@ inline void c_world::menu_bind( )
         const int id = ++m_menu_serial;
         menu_project_t& p = m_menu_projects[ id ];
         p.root = std::move( root );
-        p.binding = std::make_unique< c_ui_binding >( *p.root, menu_hooks( ) );
+        p.binding = std::make_unique< c_ui_binding >( *p.root, menu_hooks( id ) );
         LOG_INFO( "front end: screen %s loaded (project %d)", name.c_str( ), id );
         return id;
     };
@@ -282,12 +209,19 @@ inline void c_world::menu_bind( )
         m_menu_projects[ id ].binding->project_initialize( );
     };
     m_menu_engine.m_release_project = [ this ]( int id ) {
-        m_menu_projects[ id ].binding->project_release( );
+        menu_project_t& p = m_menu_projects[ id ];
+        p.binding->project_release( );
+        for ( auto& held : p.state.sounds )   // VuAudioEventEntity's dtor 0x5F4220: the emitter's holder release
+        {
+            audio_emitter_t emitter;
+            emitter.holder = held.second;
+            audio_emitter_destroy( emitter, m_sound );
+        }
         m_menu_projects.erase( id );
     };
     m_menu_engine.m_is_screen = [ this ]( int id ) { return ui_common_is_screen( *m_menu_projects[ id ].root ); };
     m_menu_engine.m_screen_tick = [ this ]( int id, float dt, bool input ) {
-        g_menu_dt = dt;
+        m_menu_dt = dt;
         m_menu_projects[ id ].binding->tick( dt, input );
     };
     m_menu_engine.m_screen_draw = [ this ]( int id, float alpha ) {
@@ -310,6 +244,7 @@ inline void c_world::menu_exit( )
     env.boat_db = dbs.boat_db;
     env.track_db = dbs.track_db;
     env.random = &m_vurandom;
+    env.player_name = platform_gamer_tag( );
     env.string_db = [ this ]( const char* id ) { return string_db_get( m_string_db, id ? id : "" ); };
     const ui_game_config_t config = m_menu->exit( m_menu_util, env );
     LOG_INFO( "front end: exit to %s, GameData builder 0x%X %s", m_menu->m_mode.c_str( ), config.builder, config.built ? "built" : "not built" );
