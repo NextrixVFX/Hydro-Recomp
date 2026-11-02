@@ -963,6 +963,8 @@ inline bool verify_game_split( const unsigned* words, const char* const* texts, 
 // The same against VuSlalomGame slot 15 0x48E500 (case slalom_split: its split vector at +0x750).
 inline bool verify_timetrial_split( ) { return verify_game_split( g_golden_tts_words, g_golden_tts_text, "VuTimeTrialGame slot 15 0x490D70" ); }
 inline bool verify_slalom_split( ) { return verify_game_split( g_golden_sls_words, g_golden_sls_text, "VuSlalomGame slot 15 0x48E500" ); }
+// And VuGhostGame slot 15 0x487640 (case ghost_split: its split vector at +0x728).
+inline bool verify_ghost_split( ) { return verify_game_split( g_golden_gts_words, g_golden_gts_text, "VuGhostGame slot 15 0x487640" ); }
 
 // The course system (world/slalom.hxx slalom_course_start / slalom_gates_tick / slalom_recovered) against retail's
 // VuSlalomGame slot 5 0x48C660, the gates tick 0x48E6E0 (0x43FC70 / 0x48E910 / 0x48EA40 / 0x48EBB0) and OnBoatRecovered
@@ -1867,9 +1869,69 @@ inline bool verify_pause_gate( )
     return failed == 0;
 }
 
+// VuGame's results / awards names (world/awards.hxx) against retail (case game_awards): slot 11 of the four games; Awards' enter
+// 0x484320 whole with slots 9 and 10: the ordered log of every service call with its arguments, and +0x88.
+inline bool verify_game_awards( )
+{
+    int failed = 0;
+    for ( unsigned k = 0; k < g_golden_gaw_name_count; ++k )
+    {
+        const std::string mode = g_golden_gaw_names[ 2 * k ];
+        if ( mode != g_golden_gaw_names[ 2 * k + 1 ] && std::string( vugame_results_project( mode, k % 2 != 0 ) ) != g_golden_gaw_names[ 2 * k + 1 ] )
+            ++failed;
+    }
+    for ( unsigned v = 0; v < g_golden_gaw_count; ++v )
+    {
+        const char* const* t = g_golden_gaw_text + 5 * v;
+        const unsigned* w = g_golden_gaw_words + 6 * v;
+        const std::string mode = t[ 0 ], track = t[ 1 ];
+        vugame_award_boat_t b;
+        b.name = t[ 2 ];
+        b.boat_class = t[ 3 ];
+        b.tier = static_cast< std::int32_t >( w[ 0 ] );
+        std::string log;
+        const auto add = [ & ]( const std::string& e ) { log += log.empty( ) ? e : ";" + e; };
+        const auto joined = []( const std::vector< std::string >& n ) {
+            std::string out;
+            for ( std::size_t k = 0; k < n.size( ); ++k )
+                out += ( k ? "," : "" ) + n[ k ];
+            return out;
+        };
+        vugame_award_hooks_t h;
+        h.hidden_found = [ & ]( const std::string& x ) { add( "hidden|" + x ); return w[ 2 ] != 0u; };
+        h.progress = [ & ]( const std::string& x ) { add( "progress|" + x ); };
+        h.unlock_value = [ & ]( std::uint32_t slot, const std::string& c, std::int32_t tier ) {
+            add( "slot9|" + std::to_string( slot ) + "|" + c + "|" + std::to_string( tier ) );
+            return static_cast< std::int32_t >( w[ 3 ] );
+        };
+        h.unlock_show = [ & ]( std::int32_t value, const std::vector< std::string >& n ) {
+            add( "show|" + std::to_string( value ) + "|" + joined( n ) );
+            return w[ 4 ] != 0u;
+        };
+        h.award_open = [ & ]( const char* project, std::int32_t tier, const std::string& c, std::int32_t value, const std::vector< std::string >& n ) {
+            add( std::string( "screen|" ) + project );
+            add( "open|" + std::to_string( tier ) + "|" + c + "|" + std::to_string( value ) + "|" + joined( n ) );
+            return true;
+        };
+        const bool opened = vugame_awards_enter( mode, track, w[ 1 ] != 0u, b, h );
+        if ( opened != ( w[ 5 ] != 0u ) || log != t[ 4 ] )
+        {
+            if ( failed < 2 )
+                LOG_ERROR( "game_awards run %u: %s vs %s", v, log.c_str( ), t[ 4 ] );
+            ++failed;
+        }
+    }
+    if ( failed == 0 )
+        LOG_SUCCESS( "VuGame's results / awards (slot 11 x4, Awards' enter 0x484320, slots 9 / 10 x4, 0x4830B0) match retail on %u names, %u runs", g_golden_gaw_name_count, g_golden_gaw_count );
+    else
+        LOG_ERROR( "VuGame's awards FAILED on %d (of %u names + %u runs)", failed, g_golden_gaw_name_count, g_golden_gaw_count );
+    return failed == 0;
+}
+
 inline bool verify_session_all( )
 {
     bool ok = true;
+    ok = verify_game_awards( ) && ok;
     ok = verify_pause_gate( ) && ok;
     ok = verify_tire_track( ) && ok;
     ok = verify_slalom_gate_draw( ) && ok;
@@ -1885,6 +1947,7 @@ inline bool verify_session_all( )
     ok = verify_timetrial_results( ) && ok;
     ok = verify_slalom_results( ) && ok;
     ok = verify_timetrial_split( ) && ok;
+    ok = verify_ghost_split( ) && ok;
     ok = verify_slalom_split( ) && ok;
     ok = verify_timetrial_place( ) && ok;
     ok = verify_slalom_place( ) && ok;

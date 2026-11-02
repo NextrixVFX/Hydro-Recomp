@@ -7,6 +7,7 @@
 #include <workspace/core/ui/config.hxx>
 #include <workspace/core/ui/fsm.hxx>
 #include <workspace/core/ui/split.hxx>
+#include <workspace/core/world/awards.hxx>
 
 #include <array>
 #include <cmath>
@@ -422,6 +423,11 @@ struct vugame_screen_hooks_t
     std::function< bool( ) > award_done;
     std::function< bool( ) > personal_best;                       // the game's vt+0x38(&+0x6C4, &+0x6C8) (saves: a platform hook)
     std::function< std::string( const char* key ) > string_db;     // g 0x759078 vt+0x18 (the localised text)
+    // Results' enter 0x484110: new 0x10, the project slot 11 names (0x4B4360), vt+4 0x480A50 (the repository add, gameInitialize,
+    // "OnProjectInitialized") - VuCommonScreen 0x73F588, a UI screen. True when it opened (+0x84).
+    std::function< bool( const char* project ) > results_open;
+    vugame_award_hooks_t award;                                    // Awards' enter 0x484320 (world/awards.hxx)
+    std::function< vugame_award_boat_t( ) > award_boat;            // the boat manager's +0x24 [0]
 };
 
 struct race_rules_t
@@ -436,8 +442,10 @@ struct race_rules_t
     ui_race_split_t split_display;
     std::function< void( std::uint32_t address, const char* what ) > unrecreated;   // a VuGame state handler reached
     vugame_screen_hooks_t screen_hooks;   // what the Results / Awards handlers call that is not theirs
-    bool results_screen = false;     // +0x84 non-null (Results' enter 0x484110 - not recreated: never set here)
-    bool award_screen = false;       // +0x88 non-null (Awards' enter 0x484320 - not recreated: never set here)
+    bool results_screen = false;     // +0x84 non-null (Results' enter 0x484110)
+    bool award_screen = false;       // +0x88 non-null (Awards' enter 0x484320)
+    std::string game_mode = "Race";  // which game's slots 9 / 10 / 11 (the vtable): Race, Slalom, TimeTrial, Ghost
+    bool championship = false;       // +0x80 (GameData "IsChampionship")
     float split_duration = 0.0f;     // +0x674: ConstantDB VuDBAsset / HUD / ChallengeTextDuration (the ctor 0x481630)
     std::int32_t split_kind = 0;     // +0x6A4
     std::string opponent;            // +0x6AC
@@ -807,6 +815,22 @@ inline void vugame_condition_byte( c_fsm& f, const char* name, bool pulse )
         f.m_conditions[ static_cast< std::size_t >( i ) ].m_value = 1;
 }
 
+// Results' enter 0x484110: the screen on slot 11's project.
+inline void vugame_results_enter( race_rules_t& r )
+{
+    if ( !vugame_screen_need( r, static_cast< bool >( r.screen_hooks.results_open ), 0x484110u, "VuGame Results enter: VuCommonScreen 0x73F588 on the results project (UI)" ) )
+        return;
+    r.results_screen = r.screen_hooks.results_open( vugame_results_project( r.game_mode, r.championship ) );
+}
+
+// Awards' enter 0x484320 (world/awards.hxx).
+inline void vugame_awards_enter_state( race_rules_t& r )
+{
+    if ( !vugame_screen_need( r, static_cast< bool >( r.screen_hooks.award_boat ), 0x484320u, "VuGame Awards enter: the services (a platform hook) not wired" ) )
+        return;
+    r.award_screen = vugame_awards_enter( r.game_mode, r.track, r.championship, r.screen_hooks.award_boat( ), r.screen_hooks.award );
+}
+
 inline void vugame_results_exit( race_rules_t& r )
 {
     if ( !r.results_screen )
@@ -915,11 +939,13 @@ inline void vugame_fsms_construct( race_rules_t& r )
     r.event.add_state( "Event" );
     fsm_state_t& results = r.event.add_state( "Results" );
     vugame_fsm_handlers( r, results, 0x484110u, 0x484250u, 0x484280u, 0x4842F0u );
+    results.m_enter = [ &r ] { vugame_results_enter( r ); };
     results.m_exit = [ &r ] { vugame_results_exit( r ); };
     results.m_tick = [ &r ]( float dt ) { vugame_results_tick( r, dt ); };
     results.m_draw = [ &r ] { vugame_results_draw( r ); };
     fsm_state_t& awards = r.event.add_state( "Awards" );
     vugame_fsm_handlers( r, awards, 0x484320u, 0x4844F0u, 0x484520u, 0x484580u );
+    awards.m_enter = [ &r ] { vugame_awards_enter_state( r ); };
     awards.m_exit = [ &r ] { vugame_awards_exit( r ); };
     awards.m_tick = [ &r ]( float dt ) { vugame_awards_tick( r, dt ); };
     awards.m_draw = [ &r ] { vugame_awards_draw( r ); };

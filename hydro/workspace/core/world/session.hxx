@@ -2861,10 +2861,10 @@ inline bool race_session_start( race_session_t& s, const std::string& mode, cons
     else if ( s.start.ghost )
     {
         // VuGhostGame 0x484A20: VuGame's base machines (verified), then ITS machine +0x700 from the ctor's table (game_mode_defs,
-        // case game_ctors) - its state handlers are not recreated yet: each logs UNKNOWN (rules.hxx game_mode_construct), so the
-        // machine sits in GetLeaderboard (no "Success"). Retail's own slots that ARE read: 5 0x485340 (race_rules_start), 13
+        // case game_ctors) - GetLeaderboard runs; LoadGhosts 0x485B50 and behind it log UNKNOWN (rules.hxx game_mode_construct), so the
+        // machine stops there. Retail's own slots that ARE read: 5 0x485340 (race_rules_start), 13
         // 0x487570 (start.hxx race_place_timetrial "Ghost"), 7 0x485380 (race_rules_tick, then the ghosts' matrix copy below),
-        // 12 = nullsub 0x4021A0 (no results written). Slot 15 0x487640 is not read (drive.hxx: UNKNOWN).
+        // 12 = nullsub 0x4021A0 (no results written), 15 0x487640 (drive.hxx: ui_race_checkpoint).
         vugame_fsms_construct( s.rules );
         s.rules.buoys = 0;
         game_mode_construct( s.rules.fsm, game_mode_defs( )[ 2 ], [ &s ]( std::uint32_t address, const char* what ) {
@@ -2955,6 +2955,32 @@ inline bool race_session_start( race_session_t& s, const std::string& mode, cons
     // VuGame's Results tick 0x484280: the game's vt+0x30 = VuRaceGame slot 12 0x489C60 (rules.hxx race_game_write_results)
     // into gameutil +0x50, then that root's "GameResults" type (0x4FBDF0: a non-map root or an absent name = the static
     // null container, type 0).
+    // Awards' enter 0x484320: the services are saves-side (the user's scope: re-made, not copied; none exists yet). No hidden package
+    // found, no unlock (so no award screen and "AwardsDone" on the first tick) - logged once each state entry.
+    s.rules.game_mode = s.start.slalom ? "Slalom" : s.start.timetrial ? "TimeTrial" : s.start.ghost ? "Ghost" : "Race";
+    s.rules.screen_hooks.award.hidden_found = [ ]( const std::string& ) { return false; };
+    s.rules.screen_hooks.award.progress = [ &s ]( const std::string& ) { race_unwired( s, "the progress manager g 0x758FD8 vt+0x80 (saves - a platform hook) - not run" ); };
+    s.rules.screen_hooks.award.unlock_value = [ ]( std::uint32_t, const std::string&, std::int32_t ) { return 0; };
+    s.rules.screen_hooks.award.unlock_show = [ ]( std::int32_t, const std::vector< std::string >& ) { return false; };
+    s.rules.screen_hooks.award.award_open = [ &s ]( const char*, std::int32_t, const std::string&, std::int32_t, const std::vector< std::string >& ) {
+        race_unwired( s, "the award screen 0x47ECC0 (UI) - not built" );
+        return false;
+    };
+    s.rules.championship = s.game.championship;
+    s.rules.screen_hooks.award_boat = [ &s ] {
+        vugame_award_boat_t b;
+        for ( std::size_t k = 0; k < s.rules_boats.size( ) && k < s.boats.size( ); ++k )
+            if ( s.rules_boats[ k ].human )
+            {
+                const race_session_boat_t& rb = *s.boats[ k ];
+                b.name = rb.boat;
+                const auto cls = rb.io.boat_strings.find( 0x160u );
+                b.boat_class = cls == rb.io.boat_strings.end( ) ? std::string( ) : cls->second;
+                b.tier = rules_i32( s.rules_boats[ k ].boat, 0x4CC );
+                break;
+            }
+        return b;
+    };
     s.rules.screen_hooks.game_results_tick = [ &s ]( float dt )
     {
         const auto entry_of = [ &s ]( std::size_t k ) {
