@@ -64,7 +64,8 @@ enum class ui_frame_kind_t
     page,              // VuUIPageLayoutEntity: 0x62E120 (pages.hxx ui_page_layout_draw over its runtime page; needs m_page)
     remap,             // VuInputRemappingEntity / VuThrottleRemappingEntity: 0x45FB90 (remap.hxx ui_remap_draw; needs m_remap)
     champ,             // VuChampionshipEntity: 0x451CA0 (champ.hxx ui_champ_draw over the standings; needs m_champ)
-    results            // VuRaceResultsTableEntity: 0x46A500 (results.hxx ui_results_draw over GameResults; needs m_results)
+    results,           // VuRaceResultsTableEntity: 0x46A500 (results.hxx ui_results_draw over GameResults; needs m_results)
+    slider             // the four VuSliderEntity subclasses: 0x4700E0 (slider.hxx ui_slider_draw over the bound c_ui_slider; needs m_slider)
 };
 
 struct ui_draw_target_t
@@ -133,11 +134,11 @@ inline const ui_draw_target_t k_ui_draw_targets[ ] = {
     { 0x0073DED4u, 0x004390BEu, 0x00475B10u, ui_frame_kind_t::combo_box, 0x00000000u },   // Screens/Settings (2 loaded)
     { 0x0073DF3Cu, 0x004390BEu, 0x00475B10u, ui_frame_kind_t::combo_box, 0x00000000u },   // Screens/Settings (2 loaded)
     { 0x0073DFA4u, 0x004390BEu, 0x00475B10u, ui_frame_kind_t::combo_box, 0x00000000u },   // Screens/Settings (2 loaded)
-    { 0x0073DFF4u, 0x004700E0u, 0x004700E0u, ui_frame_kind_t::other, 0x00000000u },   // Screens/SettingsGraphics (1 loaded)
-    { 0x0073E030u, 0x004700E0u, 0x004700E0u, ui_frame_kind_t::other, 0x00000000u },   // Screens/SettingsAudio (1 loaded)
-    { 0x0073E06Cu, 0x004700E0u, 0x004700E0u, ui_frame_kind_t::other, 0x00000000u },   // Screens/SettingsAudio (1 loaded)
+    { 0x0073DFF4u, 0x004700E0u, 0x004700E0u, ui_frame_kind_t::slider, 0x00000000u },   // Screens/SettingsGraphics (1 loaded)
+    { 0x0073E030u, 0x004700E0u, 0x004700E0u, ui_frame_kind_t::slider, 0x00000000u },   // Screens/SettingsAudio (1 loaded)
+    { 0x0073E06Cu, 0x004700E0u, 0x004700E0u, ui_frame_kind_t::slider, 0x00000000u },   // Screens/SettingsAudio (1 loaded)
     { 0x0073E0BCu, 0x004390BEu, 0x00475B10u, ui_frame_kind_t::combo_box, 0x00000000u },   // Screens/ControlsGamepad (1 loaded)
-    { 0x0073E10Cu, 0x004700E0u, 0x004700E0u, ui_frame_kind_t::other, 0x00000000u },   // Screens/ControlsTiltTouch (1 loaded)
+    { 0x0073E10Cu, 0x004700E0u, 0x004700E0u, ui_frame_kind_t::slider, 0x00000000u },   // Screens/ControlsTiltTouch (1 loaded)
     { 0x0073E15Cu, 0x004390BEu, 0x00475B10u, ui_frame_kind_t::combo_box, 0x00000000u },   // Screens/ControlsTiltTouch (1 loaded)
     { 0x0073F110u, 0x00477240u, 0x00477240u, ui_frame_kind_t::other, 0x00000000u },   // HUDs/GhostPreGameHUD (1 loaded)
     { 0x0073F2C8u, 0x0047A360u, 0x0047A360u, ui_frame_kind_t::leaderboard, 0x00000000u },   // Screens/Leaderboard (1 loaded)
@@ -251,6 +252,7 @@ struct ui_frame_inputs_t
     std::function< bool( const entity_t&, ui_gfx_sort_t&, const ui_font_draw_env_t&, float alpha ) > m_champ;
     // Batch 29: the race results table over the game-data root (c_ui_binding::results; alpha unread by 0x46A500). Null: unrecreated.
     std::function< bool( const entity_t&, ui_gfx_sort_t&, const ui_font_draw_env_t&, float alpha ) > m_results;
+    std::function< bool( const entity_t&, ui_gfx_sort_t&, const ui_font_draw_env_t&, float alpha ) > m_slider;
 };
 
 // A loaded entity's own / its first UI draw component's property bits.
@@ -514,6 +516,8 @@ inline bool ui_frame_emit( ui_gfx_sort_t& sort, const ui_impl_t& impl, const ui_
         return in.m_champ( e, sort, env, d.m_alpha );
     if ( d.m_kind == ui_frame_kind_t::results )
         return in.m_results( e, sort, env, d.m_alpha );
+    if ( d.m_kind == ui_frame_kind_t::slider )
+        return in.m_slider( e, sort, env, d.m_alpha );
     return true;
 }
 
@@ -552,6 +556,8 @@ inline bool ui_frame_ready( ui_frame_kind_t kind, const ui_frame_inputs_t* in )
         return in && in->m_champ;
     case ui_frame_kind_t::results:
         return in && in->m_results;
+    case ui_frame_kind_t::slider:
+        return in && in->m_slider;
     default:
         return true;
     }

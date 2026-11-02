@@ -7,14 +7,18 @@
 #include <workspace/core/ui/results.hxx>
 #include <workspace/core/ui/standings.hxx>
 #include <workspace/core/ui/typeset.hxx>
-#include <workspace/core/ui/savefile.hxx>
+#include <workspace/core/save/cloud.hxx>
 #include <workspace/core/ui/progress.hxx>
 #include <workspace/core/assets/archive.hxx>
 
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <string>
+#include <system_error>
 #include <vector>
 
 // The UI area's race results checks (batch 20; included by checks/leaves.hxx before
@@ -1929,10 +1933,11 @@ inline bool verify_ui_font_draw( )
     return failed == 0;
 }
 
-// core/ui/savefile.hxx against retail's save (oracle case save_file): the VUJB writer's size and every byte (hash, the reference is
-// retail's file inflated), the encoded file's bytes with the stored-deflate SUBSTITUTION (the case had retail's 0x4AC930 load exactly
-// those bytes and dumped the container), ui_save_decode on retail's own files (zlib 1.2.7's output) and on eight refusals, and
-// c_save_manager's flow against VuCloudSaveManager's. Files go to a temp folder through c_save_files::set_root, never %APPDATA%.
+// save/cloud.hxx + writer.hxx + seam.hxx against retail's save (oracle case save_file), the shapes save_cloud does not hold: the VUJB
+// writer's size and every byte (hash, the reference is retail's file inflated), our whole FILE byte for byte against retail's (zlib
+// 1.2.7's output included, c_deflate), cloud_decode on it and on eight refusals (stored-block streams: inflate takes those too), and
+// one c_cloud_save through retail's whole flow on one object, then ui_champ_save_bind's route into the file. Files go to a stamped
+// temp folder through save_seam::redirect, never %APPDATA%. What save_cloud alone holds (damaged headers, status words): verify_save_cloud.
 inline bool verify_ui_save_file( )
 {
     int failed = 0, bytes_total = 0;
@@ -1948,22 +1953,19 @@ inline bool verify_ui_save_file( )
             ui_json_set_string( ui_json_child( doc, "blob" ), std::string( 70000, 'x' ).c_str( ) );
             ui_json_set_string( ui_json_child( doc, "more" ), std::string( 66000, 'y' ).c_str( ) );
         }
-        std::vector< std::uint8_t > raw = { 'V', 'U', 'J', 'B', 0, 0, 0, 1 };
-        ui_vujb_write( raw, doc );
+        std::vector< std::uint8_t > raw;
+        std::uint32_t used = 0;
+        bool same = vujb_document( doc, raw, used );
         const std::string text( raw.begin( ), raw.end( ) );
-        bool same = static_cast< int >( ui_vujb_size( doc ) ) == g.m_size && static_cast< int >( raw.size( ) ) == g.m_raw_size && ui_chl_hash( text ) == g.m_raw;
-        const std::vector< std::uint8_t > file = ui_save_encode( doc );
-        same = same && static_cast< int >( file.size( ) ) == g.m_stored_size && ui_chl_hash( std::string( file.begin( ), file.end( ) ) ) == g.m_stored;
-        value_t back;
-        same = same && ui_save_decode( file, back ) == ( g.m_stored_ok != 0 ) && dump_hash( back ) == g.m_stored_dump;
-        if ( g.m_file[ 0 ] )
-        {
-            value_t retail;
-            same = same && ui_save_decode( ui_fnd_bytes( g.m_file ), retail ) == ( g.m_ok != 0 ) && dump_hash( retail ) == g.m_dump;
-        }
-        bytes_total += g.m_raw_size;
+        same = same && static_cast< int >( vujb_size( doc ) ) == g.m_size && static_cast< int >( used ) == g.m_raw_size && ui_chl_hash( text ) == g.m_raw;
+        const std::vector< std::uint8_t > file = cloud_encode( doc );
+        const std::vector< std::uint8_t > retail_file = ui_fnd_bytes( g.m_file );
+        same = same && static_cast< int >( file.size( ) ) == g.m_file_size && file == retail_file;
+        value_t retail;
+        same = same && cloud_decode( retail_file, retail ) == ( g.m_ok != 0 ) && dump_hash( retail ) == g.m_dump;
+        bytes_total += g.m_file_size;
         if ( !same && ++failed <= 6 )
-            LOG_ERROR( "ui save: document %d differs", static_cast< int >( k ) );
+            LOG_ERROR( "ui save: document %d differs (file %d, retail %d bytes)", static_cast< int >( k ), static_cast< int >( file.size( ) ), g.m_file_size );
     }
     for ( std::size_t k = 0; k < g_golden_svf_refusals_count; ++k )
     {
@@ -1973,40 +1975,51 @@ inline bool verify_ui_save_file( )
         {
             value_t doc;
             ui_json_set_string( ui_json_child( doc, "s" ), std::string( 0x40100u, 'a' ).c_str( ) );
-            file = ui_save_encode( doc );
+            file = cloud_encode( doc );
         }
         value_t out;
-        if ( ui_save_decode( file, out ) != ( g.m_ok != 0 ) && ++failed <= 6 )
+        if ( cloud_decode( file, out ) != ( g.m_ok != 0 ) && ++failed <= 6 )
             LOG_ERROR( "ui save: refusal %s differs", g.m_label );
     }
-    std::filesystem::path folder = std::filesystem::temp_directory_path( ) / "hydro-selftest-saves";
+    const std::filesystem::path folder = std::filesystem::temp_directory_path( ) / ( "hydro_ui_save_" + std::to_string( std::chrono::steady_clock::now( ).time_since_epoch( ).count( ) ) );
     std::error_code ignored;
-    std::filesystem::remove_all( folder, ignored );
-    c_save_files files( folder );
+    std::filesystem::create_directories( folder, ignored );
+    save_seam::redirect( folder );
+    const auto write_file = [ & ]( const std::string& bytes )
+    {
+        std::ofstream out( folder / "cloudsave", std::ios::binary );
+        out.write( bytes.data( ), static_cast< std::streamsize >( bytes.size( ) ) );
+    };
+    const auto read_file = [ & ]( std::string& bytes )
+    {
+        std::ifstream in( folder / "cloudsave", std::ios::binary );
+        if ( !in )
+            return false;
+        bytes.assign( std::istreambuf_iterator< char >( in ), { } );
+        return true;
+    };
     std::string log;
-    ui_save_hooks_t hooks;
     const auto add = [ &log ]( const std::string& line )
     {
         if ( !log.empty( ) )
             log += '\n';
         log += line;
     };
-    hooks.m_broadcast = [ & ]( const char* e ) { add( std::string( "event:" ) + e ); };
-    hooks.m_message = [ & ]( const char* a, const char* b, const char* c ) { add( std::string( "box:" ) + a + ":" + b + ":" + c ); };
-    c_save_manager manager( files, hooks );
-    const auto put = [ & ]( int index ) { manager.document( ) = c_reader( ui_fnd_bytes( g_golden_svf_flow_docs[ index ] ) ).parse( ); };
+    c_cloud_save cloud;
+    cloud.hooks.broadcast = [ & ]( const char* e ) { add( std::string( "event:" ) + e ); };
+    cloud.hooks.corrupt_box = [ & ]( ) { add( std::string( "box:" ) + k_ui_save_corrupt_box[ 0 ] + ":" + k_ui_save_corrupt_box[ 1 ] + ":" + k_ui_save_corrupt_box[ 2 ] ); };
+    const auto put = [ & ]( int index ) { cloud.data = c_reader( ui_fnd_bytes( g_golden_svf_flow_docs[ index ] ) ).parse( ); };
     const auto saved = [ & ]
     {
         // the seam has no log: a write is seen as the file coming back after its removal
-        std::vector< std::uint8_t > held;
-        const bool had = files.read( "cloudsave", held );
+        std::string held, now;
+        const bool had = read_file( held );
         std::filesystem::remove( folder / "cloudsave", ignored );
-        manager.request( );
-        std::vector< std::uint8_t > now;
-        if ( files.read( "cloudsave", now ) )
+        cloud.save( );
+        if ( read_file( now ) )
             add( "write:cloudsave" );
         else if ( had )
-            files.write( "cloudsave", held );
+            write_file( held );
     };
     for ( std::size_t k = 0; k < g_golden_svf_flow_count; ++k )
     {
@@ -2014,12 +2027,11 @@ inline bool verify_ui_save_file( )
         log.clear( );
         const std::string op = g.m_op;
         if ( op == "open missing" || op == "open good" )
-            manager.open( "cloudsave" );
+            cloud.change_file( "cloudsave" );
         else if ( op == "open corrupt" )
         {
-            const char junk[ ] = "junk file that is not a save";
-            files.write( "cloudsave", std::vector< std::uint8_t >( junk, junk + sizeof( junk ) - 1 ) );
-            manager.open( "cloudsave" );
+            write_file( "junk file that is not a save" );
+            cloud.change_file( "cloudsave" );
         }
         else
         {
@@ -2042,13 +2054,26 @@ inline bool verify_ui_save_file( )
                 want += '\n';
             want += line;
         }
-        // retail logs the host's write before nothing else; ours is appended after the event: the same order here
-        if ( ( log != want || manager.status( ) != g.m_status || dump_hash( manager.document( ) ) != g.m_doc ) && ++failed <= 6 )
-            LOG_ERROR( "ui save: flow step %s differs\n  ours   %s\n  retail %s (status %d, %d)", g.m_op, log.c_str( ), want.c_str( ), manager.status( ), g.m_status );
+        if ( ( log != want || cloud.status != g.m_status || dump_hash( cloud.data ) != g.m_doc ) && ++failed <= 6 )
+            LOG_ERROR( "ui save: flow step %s differs\n  ours   %s\n  retail %s (status %d, %d)", g.m_op, log.c_str( ), want.c_str( ), cloud.status, g.m_status );
     }
+    // ROUTING, no retail vector: ui_champ_save_bind's result, state and commit reach the file through the one seam.
+    {
+        c_cloud_save bound;
+        ui_champ_env_t env;
+        ui_champ_save_bind( env, bound );
+        env.m_result( "ChampRoute", 1 );
+        env.m_commit( );
+        c_cloud_save again;
+        again.load( );
+        std::int32_t place = -1;
+        if ( ( !ui_progress_champ_place( again.data, "ChampRoute", place ) || place != 1 ) && ++failed <= 6 )
+            LOG_ERROR( "ui save: the championship's bind did not reach the file" );
+    }
+    save_seam::redirect( { } );
     std::filesystem::remove_all( folder, ignored );
     if ( failed == 0 )
-        LOG_SUCCESS( "ui_vujb_write / ui_save_encode / _decode / c_save_manager match retail's 0x55BDA0 0x55BEA0 0x4ACAB0 0x4AC930 0x4AC480 0x4AC5C0 0x4AC6C0 0x4ABD60 on %d documents (%d bytes), %d refusals, %d flow steps; retail's loader reads ours",
+        LOG_SUCCESS( "cloud_encode / cloud_decode / c_cloud_save match retail's 0x55BDA0 0x55BEA0 0x4ACAB0 0x4AC930 0x4AC480 0x4AC5C0 0x4AC6C0 0x4ABD60 on %d documents (%d file bytes, byte exact), %d refusals, %d flow steps",
                      static_cast< int >( g_golden_svf_docs_count ), bytes_total, static_cast< int >( g_golden_svf_refusals_count ), static_cast< int >( g_golden_svf_flow_count ) );
     else
         LOG_ERROR( "ui save: %d differ from retail", failed );
@@ -2115,6 +2140,68 @@ inline bool verify_ui_progress_champ( )
     return failed == 0;
 }
 
+// core/ui/progress.hxx's records against retail's VuProgressManagerImpl on its own vtable (oracle case progress_records): a seeded op script on
+// five starting documents, each op's answer, the out words' raw bits and the whole document's hash.
+inline bool verify_ui_progress_records( )
+{
+    int failed = 0, ops = 0;
+    const auto hash = [ ]( const value_t& v ) { std::string d; vujb_dump( v, d ); return ui_chl_hash( d ); };
+    const auto bits = [ ]( float f ) { std::uint32_t u; std::memcpy( &u, &f, 4 ); return u; };
+    const auto real = [ ]( std::uint32_t u ) { float f; std::memcpy( &f, &u, 4 ); return f; };
+    static const char* const k_games[ 3 ] = { "Race", "TimeTrial", "Slalom" };
+    for ( std::size_t k = 0; k < g_golden_pgr_runs_count; ++k )
+    {
+        const golden_pgr_run_t& run = g_golden_pgr_runs[ k ];
+        value_t document;
+        if ( run.m_doc[ 0 ] )
+            document = c_reader( ui_fnd_bytes( run.m_doc ) ).parse( );
+        for ( int t = 0; t < run.m_steps; ++t )
+        {
+            const golden_pgr_step_t& g = g_golden_pgr_steps[ run.m_first + t ];
+            const std::string op = g.m_op, game = k_games[ g.m_game ];
+            const std::string none = "None", group = g.m_game == 2 ? g.m_group : none;
+            int ret = 0;
+            std::int32_t ia = 0x11111111, ib = 0x22222222, ic = 0x33333333;
+            float fb = real( 0x22222222u ), fc = real( 0x33333333u ), fa = real( 0x11111111u );
+            bool ints = false, one_float = false;
+            if ( op == "add" )
+                ui_progress_add( document, game, g.m_track, group, g.m_boat, g.m_mode, g.m_place, real( g.m_total ), real( g.m_lap ) );
+            else if ( op == "read" )
+                ret = ui_progress_record( document, game, g.m_track, g.m_boat, g.m_mode, ia, fb, fc ) ? 1 : 0;
+            else if ( op == "best" )
+                ret = ui_progress_best( document, game, g.m_track, group, g.m_mode, ia, fb, fc ) ? 1 : 0;
+            else if ( op == "any" )
+                ret = ui_progress_best_any( document, game, g.m_track, g.m_group, ia, fb, fc ) ? 1 : 0;
+            else if ( op == "count" )
+                ret = ui_progress_count( document, game );
+            else if ( op == "medals" )
+            {
+                ui_progress_medals( document, game, g.m_mode, ia, ib, ic );
+                ints = true;
+            }
+            else if ( op == "ghost" )
+                ui_progress_ghost_add( document, g.m_boat, g.m_place, real( g.m_total ) );
+            else if ( op == "ghostread" )
+            {
+                ret = ui_progress_ghost_time( document, g.m_boat, fa ) ? 1 : 0;
+                one_float = true;
+            }
+            const std::uint32_t a = one_float ? bits( fa ) : static_cast< std::uint32_t >( ia );
+            const std::uint32_t b = ints ? static_cast< std::uint32_t >( ib ) : one_float ? 0x22222222u : bits( fb );
+            const std::uint32_t c = ints ? static_cast< std::uint32_t >( ic ) : one_float ? 0x33333333u : bits( fc );
+            ++ops;
+            if ( ( ret != g.m_ret || a != g.m_a || b != g.m_b || c != g.m_c || hash( document ) != g.m_doc ) && ++failed <= 6 )
+                LOG_ERROR( "ui records: run %d step %d %s %s %s %s %s mode %d differs: %d %08X %08X %08X doc %d, want %d %08X %08X %08X", static_cast< int >( k ), t, g.m_op, game.c_str( ), g.m_track, g.m_group, g.m_boat, g.m_mode,
+                           ret, a, b, c, hash( document ) == g.m_doc ? 1 : 0, g.m_ret, g.m_a, g.m_b, g.m_c );
+        }
+    }
+    if ( failed == 0 )
+        LOG_SUCCESS( "ui_progress_* records match retail's VuProgressManagerImpl slots 5 .. 21, 30, 31 (0x4B1930 .. 0x4B37F0 0x4B3E10 0x4B3F90) on %d ops", ops );
+    else
+        LOG_ERROR( "ui records: %d ops differ from retail", failed );
+    return failed == 0;
+}
+
 inline bool verify_ui_results_all( )
 {
     bool ok = true;
@@ -2131,5 +2218,6 @@ inline bool verify_ui_results_all( )
     ok = verify_ui_font_draw( ) && ok;
     ok = verify_ui_save_file( ) && ok;
     ok = verify_ui_progress_champ( ) && ok;
+    ok = verify_ui_progress_records( ) && ok;
     return ok;
 }

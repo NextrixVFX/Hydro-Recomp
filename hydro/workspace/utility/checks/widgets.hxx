@@ -2582,6 +2582,104 @@ inline bool verify_ui_font_wrap( )
     return failed == 0;
 }
 
+// ROUTING, no retail frame vector (case slider_draw holds the draw itself): the four sliders' frame kind reaches the bound c_ui_slider's value, flags and fields, on the
+// real Screens/SettingsAudio tree; the commands equal the direct draw's.
+inline bool verify_ui_slider_frame( )
+{
+    const ui_loaded_t& loaded = ui_loaded( );
+    entity_t* root = nullptr;
+    for ( std::size_t p = 0; p < g_golden_ui_projects_count; ++p )
+        if ( std::strcmp( g_golden_ui_projects[ p ].m_asset, "Screens/SettingsAudio" ) == 0 && !loaded.trees[ p ].empty( ) )
+            root = const_cast< entity_t* >( loaded.trees[ p ][ 0 ].second );
+    if ( !root )
+    {
+        LOG_ERROR( "slider frame: no Screens/SettingsAudio" );
+        return false;
+    }
+    ui_settings_t settings;
+    settings.m_effect = 0.625f;
+    settings.m_music = 0.25f;
+    ui_touch_device_t device;
+    static const float k_inverse[ 16 ] = { 1.0f, 0, 0, 0, 0, 1.0f, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
+    ui_bind_hooks_t hooks;
+    hooks.m_touch_device = &device;
+    hooks.m_inverse = k_inverse;
+    hooks.m_font_db = &ui_font_db( 0 );
+    hooks.m_settings = &settings;
+    c_ui_binding binding( *root, hooks );
+    const ui_texture_t frame_texture{ 0x1111u, 256, 128 }, selected_texture{ 0x2222u, 128, 64 }, bar_texture{ 0x3333u, 64, 32 };
+    ui_screen_env_t env;
+    env.m_fontdb = &ui_font_db( 0 );
+    env.m_font_asset = []( const std::string& ) { return 0x0F0E0D0Cu; };
+    env.m_string6 = []( const std::string& id ) { return id + "~"; };
+    env.m_slider = [ & ]( const entity_t& )
+    {
+        ui_slider_draw_inputs_t i;
+        i.m_frame = &frame_texture;
+        i.m_selected = &selected_texture;
+        i.m_bar = &bar_texture;
+        return i;
+    };
+    ui_frame_inputs_t in = ui_screen_inputs( binding, env );
+    ui_gfx_sort_t sort, direct;
+    ui_lv_sort( sort );
+    ui_lv_sort( direct );
+    int calls = 0, failed = 0, commands = 0;
+    std::vector< int > sizes;
+    const auto route = in.m_slider;
+    in.m_slider = [ & ]( const entity_t& e, ui_gfx_sort_t& into, const ui_font_draw_env_t& draw, float alpha )
+    {
+        c_ui_slider* slider = binding.slider( e );
+        if ( !slider )
+            return false;
+        ui_slider_draw_inputs_t i = env.m_slider( e );
+        i.m_value = slider->value( );
+        direct.m_key_lo = into.m_key_lo;
+        direct.m_key_hi = into.m_key_hi;
+        const std::size_t before = direct.m_commands[ direct.m_index ].size( );
+        ui_slider_draw( direct, draw, slider->m_s, slider->m_visible, slider->m_latched, i, alpha );
+        sizes.push_back( static_cast< int >( direct.m_commands[ direct.m_index ].size( ) - before ) );
+        ++calls;
+        return route( e, into, draw, alpha );
+    };
+    ui_impl_t impl;
+    const ui_frame_t frame = ui_screen_frame( *root, impl, sort, 1.0f, 4, &in );
+    const auto& a = sort.m_commands[ sort.m_index ];
+    const auto& b = direct.m_commands[ direct.m_index ];
+    int leaves = 0, at = 0;
+    for ( const ui_frame_draw_t& d : frame.m_draws )
+        if ( d.m_kind == ui_frame_kind_t::slider )
+        {
+            const int size = leaves < static_cast< int >( sizes.size( ) ) ? sizes[ static_cast< std::size_t >( leaves ) ] : -1;
+            ++leaves;
+            if ( !d.m_emitted || d.m_commands != size )
+                ++failed;
+            for ( int c = 0; c < d.m_commands && c < size; ++c, ++commands )
+            {
+                const ui_gfx_command_t& x = a[ static_cast< std::size_t >( d.m_first + c ) ];
+                const ui_gfx_command_t& y = b[ static_cast< std::size_t >( at + c ) ];
+                // the record itself: words 4 .. 7, then the payload up to the next command's offset (the sorts' earlier offsets differ)
+                const auto payload = [ ]( const ui_gfx_sort_t& q, const std::vector< ui_gfx_command_t >& all, std::size_t index )
+                {
+                    const auto& buffer = q.m_buffers[ q.m_index ];
+                    const std::size_t from = all[ index ].m_words[ 3 ];
+                    const std::size_t to = index + 1 < all.size( ) ? all[ index + 1 ].m_words[ 3 ] : static_cast< std::size_t >( buffer.m_used );
+                    return std::string( buffer.m_memory.begin( ) + static_cast< std::ptrdiff_t >( from ), buffer.m_memory.begin( ) + static_cast< std::ptrdiff_t >( to ) );
+                };
+                if ( std::memcmp( x.m_words + 4, y.m_words + 4, 16 ) != 0 || payload( sort, a, static_cast< std::size_t >( d.m_first + c ) ) != payload( direct, b, static_cast< std::size_t >( at + c ) ) )
+                    ++failed;
+            }
+            at += size;
+        }
+    if ( leaves != 2 || calls != 2 || commands == 0 )
+        ++failed;
+    if ( failed == 0 )
+        LOG_SUCCESS( "the settings sliders' frame kind routes to ui_slider_draw 0x4700E0: Screens/SettingsAudio, %d leaves, %d commands equal the direct draw (ROUTING)", leaves, commands );
+    else
+        LOG_ERROR( "slider frame: %d differ (%d leaves, %d calls, %d commands)", failed, leaves, calls, commands );
+    return failed == 0;
+}
+
 // Batch 29, ROUTING only (each draw / callback is compared with retail by its own check): ui_screen_inputs over a bound Screens/RaceResults
 // reaches 0x46A500 through ui_screen_frame (the same commands as the direct draw of that leaf, on the golden's document); the page's and
 // the rows' touch callbacks arrive through the device's dispatch (0x62D9A0 / 0x461200 register them, the slot 7s remove them).
@@ -2743,6 +2841,7 @@ inline bool verify_ui_widgets_all( )
     ok = verify_ui_champ_bind( ) && ok;
     ok = verify_ui_font_wrap( ) && ok;
     ok = verify_ui_screen_inputs( ) && ok;
+    ok = verify_ui_slider_frame( ) && ok;
     ok = verify_ui_common_screen( ) && ok;
     ok = verify_ui_message_box_frame( ) && ok;
     ok = verify_ui_control_methods( ) && ok;
