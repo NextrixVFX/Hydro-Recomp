@@ -177,3 +177,33 @@ struct gfx_backend_t final : gfx_sort_hooks_t
     std::int32_t program_sampler( std::uint32_t id, const std::string& name ) override { return m_program_table[ id - 1u ]->sampler( name.c_str( ) ); }
     std::uint32_t asset_get( std::uint32_t kind, const std::string& name ) override { return m_asset ? m_asset( kind, name ) : 0u; }
 };
+
+// VuGfxUtil's UI callbacks, the records core/ui/draw.hxx writes. The program is the bound shader set's: **( VuGfxUtil +4 ), +0xC for the texture, +0 for the rect, each +0x58. Both look gColor and gTransform up
+// by name on every draw, as retail does.
+// 0x507430: +0 the texture, +4 the transform, +0x44 the colour, +0x48 the uv rect, +0x58 the position rect (x, y, w, h): a strip of { x, y, 0, u, v }.
+inline void gfx_quad_draw( gfx_device_t& d, const gfx_program_t& p, const gfx_texture_t* texture, const std::uint8_t* record )
+{
+    float uv[ 4 ], at[ 4 ];
+    std::memcpy( uv, record + 0x48, 16 );
+    std::memcpy( at, record + 0x58, 16 );
+    const float x0 = at[ 0 ], x1 = at[ 2 ] + at[ 0 ], y0 = at[ 1 ], y1 = at[ 3 ] + at[ 1 ];
+    const float u0 = uv[ 0 ], u1 = uv[ 2 ] + uv[ 0 ], v0 = uv[ 1 ], v1 = uv[ 3 ] + uv[ 1 ];
+    gfx_programs_t::set_colour4( d.m_api, p, *p.constant( "gColor" ), record + 0x44 );
+    gfx_programs_t::set_matrix( d.m_api, p, *p.constant( "gTransform" ), record + 4 );
+    d.set_texture( 0u, texture );
+    const float strip[ 20 ] = { x0, y0, 0.0f, u0, v0, x0, y1, 0.0f, u0, v1, x1, y0, 0.0f, u1, v0, x1, y1, 0.0f, u1, v1 };
+    d.draw_dynamic( 4u, 2u, strip, 0x14u );
+}
+
+// 0x507AB0: +0 the transform, +0x40 the colour, +0x44 the rect: no texture, the outline as a line strip of five { x, y, 0 }.
+inline void gfx_rect_draw( gfx_device_t& d, const gfx_program_t& p, const std::uint8_t* record )
+{
+    float at[ 4 ];
+    std::memcpy( at, record + 0x44, 16 );
+    const float x0 = at[ 0 ], x1 = at[ 2 ] + at[ 0 ], y0 = at[ 1 ], y1 = at[ 3 ] + at[ 1 ];
+    gfx_programs_t::set_colour4( d.m_api, p, *p.constant( "gColor" ), record + 0x40 );
+    gfx_programs_t::set_matrix( d.m_api, p, *p.constant( "gTransform" ), record );
+    d.set_texture( 0u, nullptr );
+    const float strip[ 15 ] = { x0, y0, 0.0f, x1, y0, 0.0f, x1, y1, 0.0f, x0, y1, 0.0f, x0, y0, 0.0f };
+    d.draw_dynamic( 2u, 4u, strip, 0xCu );
+}

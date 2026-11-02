@@ -11,6 +11,7 @@
 //   - The texture build is the render thread's 0x607D20 -> 0x607F10, the tick 0x607D00 in the "Build" phase: tick( ) is both, once per game frame.
 // Not recreated: the depth pass 0x595AA0 (only with renderer +0x2AC: the ctor's byte argument, its caller not read).
 
+#include <workspace/core/entity/property.hxx>
 #include <workspace/core/render/direct.hxx>
 #include <workspace/core/render/gfx.hxx>
 #include <workspace/core/render/program.hxx>
@@ -92,7 +93,7 @@ struct water_pass_t final : water_shader_assets_t, water_reflection_source_t
     static water_shader_desc_t default_desc( std::uint8_t fog )
     {
         water_shader_desc_t d;
-        const std::uint8_t ambient[ 4 ] = { 0x2D, 0x3C, 0x42, 0xC0 }, diffuse[ 4 ] = { 0x50, 0x5A, 0xC0, 0x80 }, foam_ambient[ 4 ] = { 0x80, 0x80, 0xFF, 0xFF };
+        const std::uint8_t ambient[ 4 ] = { 0x2D, 0x3C, 0x42, 0xC0 }, diffuse[ 4 ] = { 0x3C, 0x50, 0x5A, 0xC0 }, foam_ambient[ 4 ] = { 0x80, 0x80, 0x80, 0xFF };
         const std::uint8_t foam_diffuse[ 4 ] = { 0xFF, 0xFF, 0xFF, 0xFF }, decal_ambient[ 4 ] = { 0x80, 0x80, 0x80, 0xFF };
         std::memcpy( d.m_ambient, ambient, 4 );
         std::memcpy( d.m_diffuse, diffuse, 4 );
@@ -106,6 +107,33 @@ struct water_pass_t final : water_shader_assets_t, water_reflection_source_t
         d.m_reflect = 1u;
         d.m_complex = 1u;
         d.m_cube = "Proxy_cube";
+        return d;
+    }
+
+    // 0x5DBB80 on the entity's desc (+0xA4, its properties registered by the ctor 0x5DA4F0), then 0x5DB800's gates: VuWater +0x44 and +0x46 are 1, so reflect and complex stay as authored.
+    // The names, their desc fields: OverrideGlobalSettings +0x18, AmbientColor +0x19, DiffuseColor +0x1D, FoamAmbientColor +0x21, FoamDiffuseColor +0x25, FogEnabled +0x29, FoamTextureSize +0x2C,
+    // FoamTextureAsset +0x30, ProceduralReflection +0x48, NormalMapEnabled +0x49 (Complex against Simple), ReflectionCubeTextureAsset +0x4C. The decal fields have no property.
+    static water_shader_desc_t read_desc( const value_t& properties )
+    {
+        water_shader_desc_t d = default_desc( 0u );
+        const auto colour = [ & ]( const char* name, std::uint8_t* bytes )
+        {
+            std::uint32_t fallback, v;
+            std::memcpy( &fallback, bytes, 4 );
+            property_color( properties, name, v, fallback );
+            std::memcpy( bytes, &v, 4 );
+        };
+        property_bool( properties, "OverrideGlobalSettings", d.m_own_colours, d.m_own_colours );
+        colour( "AmbientColor", d.m_ambient );
+        colour( "DiffuseColor", d.m_diffuse );
+        colour( "FoamAmbientColor", d.m_foam_ambient );
+        colour( "FoamDiffuseColor", d.m_foam_diffuse );
+        property_bool( properties, "FogEnabled", d.m_fog, d.m_fog );
+        property_float( properties, "FoamTextureSize", d.m_foam_size, d.m_foam_size, false );
+        property_string( properties, "FoamTextureAsset", d.m_foam_texture, d.m_foam_texture );
+        property_bool( properties, "ProceduralReflection", d.m_reflect, d.m_reflect );
+        property_bool( properties, "NormalMapEnabled", d.m_complex, d.m_complex );
+        property_string( properties, "ReflectionCubeTextureAsset", d.m_cube, d.m_cube );
         return d;
     }
 
@@ -235,7 +263,8 @@ struct water_stage_t
     const water_grid_frame_t* m_frame = nullptr;
     water_pass_view_t m_view;
 
-    void attach( const water_pass_source_t& source, std::uint8_t fog )
+    // `desc`: water_pass_t::read_desc of the surface entity's properties; each surface wants its own when they differ (see m_shader).
+    void attach( const water_pass_source_t& source, const water_shader_desc_t& desc )
     {
         void* device = nullptr;
         void* context = nullptr;
@@ -245,7 +274,7 @@ struct water_stage_t
         m_api.m_context = static_cast< ID3D11DeviceContext* >( context );
         m_pass = std::make_unique< water_pass_t >( m_api );
         m_pass->create( source );
-        m_shader = m_pass->add_shader( water_pass_t::default_desc( fog ) );
+        m_shader = m_pass->add_shader( desc );
         c_engine::water_pass( &water_stage_t::engine_pass, this );
     }
 

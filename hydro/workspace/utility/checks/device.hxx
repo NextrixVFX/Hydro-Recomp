@@ -679,6 +679,35 @@ inline bool verify_water_material( )
             g.eq( d.m_blend_enable, g.take( ) );
         }
     }
+    // 0x5DA350, the default desc, word by word as retail lays it out.
+    const water_shader_desc_t fallback = water_pass_t::default_desc( 0u );
+    std::uint8_t raw[ 0x18 ] = { };
+    raw[ 0 ] = fallback.m_own_colours;
+    std::memcpy( raw + 1, fallback.m_ambient, 4 );
+    std::memcpy( raw + 5, fallback.m_diffuse, 4 );
+    std::memcpy( raw + 9, fallback.m_foam_ambient, 4 );
+    std::memcpy( raw + 13, fallback.m_foam_diffuse, 4 );
+    raw[ 17 ] = fallback.m_fog;
+    std::memcpy( raw + 20, &fallback.m_foam_size, 4 );
+    for ( int i = 0; i < 6; ++i )
+    {
+        std::uint32_t w;
+        std::memcpy( &w, raw + 4 * i, 4 );
+        const std::uint32_t want = g.take( );
+        g.eq( i == 4 ? w & 0xFFFFu : w, i == 4 ? want & 0xFFFFu : want );   // +0x2A .. +0x2B are padding
+    }
+    g.eq( fallback.m_reflect, g.take( ) );
+    g.eq( fallback.m_complex, g.take( ) );
+    std::uint32_t w;
+    std::memcpy( &w, fallback.m_decal_ambient, 4 );
+    g.eq( w, g.take( ) );
+    std::memcpy( &w, fallback.m_decal_diffuse, 4 );
+    g.eq( w, g.take( ) );
+    const auto text = []( const std::string& s ) { return gfx_check_api_t::code_hash( s.data( ), static_cast< std::uint32_t >( s.size( ) ) ); };
+    g.eq( text( fallback.m_foam_texture ), g.take( ) );
+    g.eq( text( fallback.m_cube ), g.take( ) );
+    g.eq( text( fallback.m_decal_texture ), g.take( ) );
+    g.eq( static_cast< std::uint32_t >( fallback.m_name.size( ) ), g.take( ) );
     g.eq( static_cast< std::uint32_t >( g.at ), static_cast< std::uint32_t >( g.size ) );
     if ( !g.failed )
     {
@@ -1106,6 +1135,58 @@ inline bool verify_gfx_backend( )
         return true;
     }
     LOG_ERROR( "gfx_backend FAILED %d of %d words (cursor %zu of %zu)", g.failed, g.compared, g.at, g.size );
+    return false;
+}
+
+// Case gfx_quads: the two UI callbacks.
+inline bool verify_gfx_quads( )
+{
+    anim_cursor_t g;
+    g.w = g_golden_gqd_words;
+    g.size = g_golden_gqd_size;
+    g.where = "gfx_quads";
+    gfx_rig_api_t api;
+    api.m_mapped.resize( 0x10000 );
+    gfx_device_t d( api );
+    d.m_width = d.m_chain_width = 1280;
+    d.m_height = d.m_chain_height = 720;
+    d.m_chain_view = 1;
+    d.m_chain_depth = 2;
+    d.create_dynamic( );
+    gfx_programs_t programs( api );
+    std::vector< std::uint8_t > stream;
+    gfx_check_read_stream( g, stream );
+    const gfx_program_t* prog = programs.load( stream.data( ) );
+    d.set_program( prog );
+    const gfx_texture_t texture{ 0, 12, 11 };
+    const unsigned rows = g.take( );
+    for ( unsigned r = 0; r < rows; ++r )
+    {
+        const unsigned kind = g.take( );
+        std::uint32_t record[ 26 ];
+        const unsigned n = kind ? 21u : 26u;
+        for ( unsigned i = 0; i < n; ++i )
+            record[ i ] = g.take( );
+        d.begin( );
+        api.m_log.clear( );
+        if ( kind )
+            gfx_rect_draw( d, *prog, reinterpret_cast< const std::uint8_t* >( record ) );
+        else
+            gfx_quad_draw( d, *prog, &texture, reinterpret_cast< const std::uint8_t* >( record ) );
+        const unsigned logged = g.take( );
+        g.eq( static_cast< std::uint32_t >( api.m_log.size( ) ), logged );
+        for ( unsigned i = 0; i < logged; ++i )
+            g.eq( i < api.m_log.size( ) ? api.m_log[ i ] : 0xDEADBEEFu, g.take( ) );
+        g.eq( gfx_check_api_t::code_hash( prog->m_vertex->m_memory.data( ), 0x100u ), g.take( ) );
+        g.eq( gfx_check_api_t::code_hash( prog->m_pixel->m_memory.data( ), 0x100u ), g.take( ) );
+    }
+    g.eq( static_cast< std::uint32_t >( g.at ), static_cast< std::uint32_t >( g.size ) );
+    if ( !g.failed )
+    {
+        LOG_SUCCESS( "gfx_quads matches retail's UI callbacks 0x507430 0x507AB0 on %u draws: %d words exact", rows, g.compared );
+        return true;
+    }
+    LOG_ERROR( "gfx_quads FAILED %d of %d words (cursor %zu of %zu)", g.failed, g.compared, g.at, g.size );
     return false;
 }
 
