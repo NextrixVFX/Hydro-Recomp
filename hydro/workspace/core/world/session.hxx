@@ -162,6 +162,10 @@ struct race_world_t
     // An entity's transform moved by a motion component (its owner's draw matrix re-made: the animated prop's 0x61DA50 /
     // the static model's) - the renderer's hand-off (c_world). Null: not redrawn (logged).
     std::function< void( const entity_t& owner ) > prop_moved;
+    // An attach component's slot 14 (world/joints.hxx: c_world's) on its owner's motion. Null: not run (logged).
+    std::function< void( const entity_t& parent, const float* matrix, const float* linear, const float* angular ) > attach_update;
+    // VuAttachEntity's slot 7 / VuRotateMotionEntity's 0x61A4B0 (c_world's). False: not one of them.
+    std::function< bool( const entity_t& e ) > motion_release;
     // The audio platform (FMOD's imports - world/sound.hxx; c_world's). Null: no audio calls made (logged).
     const sound_hooks_t* sound = nullptr;
     std::uint32_t viewports = 1;
@@ -1250,12 +1254,68 @@ inline void race_session_key_tick( void* user, float dt )
         race_unwired( *k.session, "a keyframe motion reached a path not recreated (Curve Type / the key search below every key) - UNKNOWN" );
 }
 
+// A motion target's IF slot 0 after +0x18 / +0x58 / +0x68 were written, by its class: VuAudioEmitterEntity's is 0x5F3D80
+// (world/sound.hxx audio_emitter_motion: setWorldTransform, then set3DAttributes on a held event with the translation and the
+// record's +0x58 velocity); the props' 0x546BD0 (VuPropEntity / VuBreakablePropEntity, IF 0x73A13C) and VuAnimatedPropEntity's
+// 0x5ED4F0 end with the attach component's slot 14 on the same matrix and velocities; any other class's IF is not read (UNKNOWN,
+// not run). 0x546BD0 writes the world inline and walks the children with 0x534C00( 0 ): no watcher (entity_set_world's notify is moot here).
+inline void race_session_motion_update( race_session_t& rs, entity_t& target, bool& stepped, const float* m, const float* linear, const float* angular )
+{
+    const std::string& cls = target.m_type;
+    if ( cls == "VuAudioEmitterEntity" && target.m_state )
+    {
+        if ( !entity_set_world( target, m, true, { } ) )
+        {
+            race_unwired( rs, "an audio emitter motion target whose world is not modelled - setWorldTransform UNKNOWN, not written" );
+            return;
+        }
+        if ( rs.world.sound )
+        {
+            sound_hooks_t h = *rs.world.sound;
+            h.set_world = nullptr;   // done above (the same call, first)
+            float record[ 20 ];
+            std::memcpy( record, m, 64 );
+            std::memcpy( record + 16, linear, 16 );
+            audio_emitter_motion( static_cast< audio_emitter_state_t* >( target.m_state.get( ) )->value, record, h );
+        }
+        return;
+    }
+    if ( cls != "VuPropEntity" && cls != "VuBreakablePropEntity" && cls != "VuAnimatedPropEntity" )
+    {
+        race_unwired( rs, "a motion target of class " + cls + " - its motion IF slot 0 is not read (UNKNOWN, not run)" );
+        return;
+    }
+    if ( !entity_set_world( target, m, false, { } ) )
+    {
+        race_unwired( rs, "a motion target whose world is not modelled - setWorldTransform UNKNOWN, not written" );
+        return;
+    }
+    if ( rs.world.prop_moved )
+        rs.world.prop_moved( target );
+    // The rigid component's kinematic step 0x544C50 on the target's body (none built: retail's +0x100 test - except
+    // a VuAnimatedPropEntity, whose rigid component no level body models here: UNKNOWN).
+    bool body = false;
+    for ( const auto& lb : rs.level_bodies )
+        if ( lb->owner == &target )
+        {
+            race_session_kinematic_step( rs, *lb, m, linear, angular );
+            if ( !body && !stepped )
+                LOG_INFO( "race: keyframe target %s: 0x544C50 %s (in the world %d; sync %d)", target.m_name.c_str( ),
+                          lb->built ? "moves its body" : "finds no body (+0x100 null: bodies_create built none) - nothing",
+                          lb->in_world ? 1 : 0, rs.dynamics ? rs.dynamics->syncs : -1 );
+            body = true;
+        }
+    stepped = true;
+    if ( !body && target.m_type == "VuAnimatedPropEntity" )
+        race_unwired( rs, "a VuAnimatedPropEntity motion target's rigid component (no level body modelled) - 0x544C50 UNKNOWN, not run" );
+    if ( rs.world.attach_update )
+        rs.world.attach_update( target, m, linear, angular );
+}
+
 // VuKeyframeMotionEntity's slot 6 0x5CE9E0 (key_motion_game_init): its VuKeyframeEntity children in order (Time, the
 // transform world), the "Entity" ref (its script component's ref) -> the target entity's VuMotionComponent (vtable
 // 0x74E984; 0x5F5810 answers null without one). The target's IF (VuAnimatedPropEntity's 0x756228 / the props' 0x73A13C
-// shape): slot 0 = setWorldTransform of the owner (race.hxx entity_set_world, notify) then the owner's draw matrix
-// re-made (prop_moved: the animated component 0x61DA50 / the static model's); the rigid component's kinematic step
-// 0x544C50 and the +0x38 call are NOT recreated (counted); slots 1 / 2 (0x546D80 / 0x546DB0: the rigid component's +0xD0
+// shape): slot 0 = race_session_motion_update; slots 1 / 2 (0x546D80 / 0x546DB0: the rigid component's +0xD0
 // bit 1 set / cleared and copied to its body) - no body is built for an animated prop here (UNKNOWN when one is).
 inline void race_session_key_motion( race_session_t& s, entity_t& e )
 {
@@ -1281,59 +1341,7 @@ inline void race_session_key_motion( race_session_t& s, entity_t& e )
         k->target.user = k.get( );
         k->target.update = []( void* u, const float* m, const float* linear, const float* angular ) {
             auto& x = *static_cast< race_session_t::key_live_t* >( u );
-            race_session_t& rs = *x.session;
-            const std::string& cls = x.target_entity->m_type;
-            // The target's motion IF slot 0 by its class: VuAudioEmitterEntity's is 0x5F3D80 (world/sound.hxx
-            // audio_emitter_motion: setWorldTransform, then set3DAttributes on a held event with the translation and the
-            // record's +0x58 velocity); the props' 0x546BD0 (VuPropEntity / VuBreakablePropEntity, IF 0x73A13C) and
-            // VuAnimatedPropEntity's 0x5ED4F0 below; any other class's IF is not read (UNKNOWN, not run).
-            if ( cls == "VuAudioEmitterEntity" && x.target_entity->m_state )
-            {
-                if ( !entity_set_world( *x.target_entity, m, true, { } ) )
-                {
-                    race_unwired( rs, "an audio emitter motion target whose world is not modelled - setWorldTransform UNKNOWN, not written" );
-                    return;
-                }
-                if ( rs.world.sound )
-                {
-                    sound_hooks_t h = *rs.world.sound;
-                    h.set_world = nullptr;   // done above (the same call, first)
-                    float record[ 20 ];
-                    std::memcpy( record, m, 64 );
-                    std::memcpy( record + 16, linear, 16 );
-                    audio_emitter_motion( static_cast< audio_emitter_state_t* >( x.target_entity->m_state.get( ) )->value, record, h );
-                }
-                return;
-            }
-            if ( cls != "VuPropEntity" && cls != "VuBreakablePropEntity" && cls != "VuAnimatedPropEntity" )
-            {
-                race_unwired( rs, "a keyframe motion target of class " + cls + " - its motion IF slot 0 is not read (UNKNOWN, not run)" );
-                return;
-            }
-            if ( !entity_set_world( *x.target_entity, m, true, { } ) )
-            {
-                race_unwired( rs, "a keyframe motion's target whose world is not modelled - setWorldTransform UNKNOWN, not written" );
-                return;
-            }
-            if ( rs.world.prop_moved )
-                rs.world.prop_moved( *x.target_entity );
-            // The rigid component's kinematic step 0x544C50 on the target's body (none built: retail's +0x100 test - except
-            // a VuAnimatedPropEntity, whose rigid component no level body models here: UNKNOWN).
-            bool body = false;
-            for ( const auto& lb : rs.level_bodies )
-                if ( lb->owner == x.target_entity )
-                {
-                    race_session_kinematic_step( rs, *lb, m, linear, angular );
-                    if ( !body && !x.stepped )
-                        LOG_INFO( "race: keyframe target %s: 0x544C50 %s (in the world %d; sync %d)", x.target_entity->m_name.c_str( ),
-                                  lb->built ? "moves its body" : "finds no body (+0x100 null: bodies_create built none) - nothing",
-                                  lb->in_world ? 1 : 0, rs.dynamics ? rs.dynamics->syncs : -1 );
-                    body = true;
-                }
-            x.stepped = true;
-            if ( !body && x.target_entity->m_type == "VuAnimatedPropEntity" )
-                race_unwired( rs, "a VuAnimatedPropEntity motion target's rigid component (no level body modelled) - 0x544C50 UNKNOWN, not run" );
-            race_unwired( rs, "a motion target IF's +0x10 vt+0x38(matrix, linear, angular) (0x546D66 / 0x5ED667: the object not read) - not run" );
+            race_session_motion_update( *x.session, *x.target_entity, x.stepped, m, linear, angular );
         };
     }
     std::vector< key_motion_child_t > kids;
@@ -1666,6 +1674,12 @@ inline bool race_session_dynamic_prop( race_session_t& s, entity_t& e, const bod
         hull_multiply( tr, world, m );
         if ( !entity_set_world( *dp->entity, world, false, { } ) )
             race_unwired( s, "a dynamic prop's setWorldTransform 0x545CF0 on an entity whose world is not modelled - UNKNOWN, not written" );
+        else if ( s.world.attach_update )   // 0x545E5B .. 0x545EA5: its attach component's slot 14 with zero velocities
+        {
+            const float zero[ 4 ] = { };
+            if ( const transform_component_t* t = entity_transform( *dp->entity ) )
+                s.world.attach_update( *dp->entity, t->world, zero, zero );
+        }
     };
     if ( d->init.step_callback )
     {
@@ -1749,6 +1763,9 @@ inline void race_session_level_bodies( race_session_t& s, entity_t& tree, const 
             lens_water_emitter_start( &e, lh );
             return;
         }
+        // c_world's, when the level bound (world/joints.hxx, motion.hxx): FLAGGED, at the end of the load, not in this walk.
+        if ( e.m_type == "VuAttachEntity" || e.m_type == "VuRotateMotionEntity" )
+            return;
         if ( e.m_type == "VuKeyframeMotionEntity" && e.m_state )
         {
             race_session_key_motion( s, e );
@@ -2246,6 +2263,11 @@ inline void race_session_game_release( race_session_t& s )
                     ++released;
                     return;
                 }
+        if ( s.world.motion_release && s.world.motion_release( e ) )
+        {
+            ++released;
+            return;
+        }
         if ( e.m_type == "VuKeyframeMotionEntity" )
             for ( const auto& k : s.key_motions )
                 if ( k->entity == &e )
@@ -2260,7 +2282,7 @@ inline void race_session_game_release( race_session_t& s )
     std::string by;
     for ( const auto& u : unknown )
         by += ( by.empty( ) ? "" : ", " ) + u.first + " x" + std::to_string( u.second );
-    LOG_INFO( "race: the project's gameRelease 0x500B80 - %d slot 7s run (VuControlEntity / VuKeyframeMotionEntity)", released );
+    LOG_INFO( "race: the project's gameRelease 0x500B80 - %d slot 7s run (VuControlEntity / VuKeyframeMotionEntity / VuAttachEntity / VuRotateMotionEntity)", released );
     race_unwired( s, "the project's gameRelease 0x500B80: slot 7 not recreated for " + by + "; " + std::to_string( components ) +
                      " components' vt+0x28 not run; the repository vt+0x24 / +0x1C (hooks)" );
 }

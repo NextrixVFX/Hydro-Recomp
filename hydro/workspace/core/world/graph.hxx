@@ -85,29 +85,30 @@ inline c_world::retval_t c_world::dispatch( const std::string& entity, const std
     // (+148), Time Factor (+152) and Looping (+156): the PROP owns none of
     // that, which is why our play_t is indexed by the target's path and
     // copied onto the prop in bind_animations.
-    // VuAttachEntity's two input plugs, @0x5f5550 and @0x5f5690. Attach
-    // resolves both refs, builds the relative matrix and hands it to the
-    // parent's attach component; Detach calls the component's slot 13.
-    // Both return VuRetVal( 0 ). A second Attach on a claimed child is
-    // refused by the component, which is what `attached` models.
-    for ( attach_t& join : m_attaches )
+    // VuAttachEntity's two input plugs 0x5F5550 / 0x5F5690 (world/joints.hxx); each answers the empty VuRetVal.
+    if ( const auto joint = m_entities.find( entity ); joint != m_entities.end( ) && m_joints.owns( joint->second ) )
     {
-        if ( join.path != entity )
-            continue;
         if ( plug == "Attach" )
-        {
-            join.attached = true;
-            update_attaches( );
-            return retval_t{};
-        }
-        if ( plug == "Detach" )
-        {
-            join.attached = false;
-            return retval_t{};
-        }
-        count_unhandled( entity, plug );
+            m_joints.plug_attach( joint->second );
+        else if ( plug == "Detach" )
+            m_joints.plug_detach( joint->second );
+        else
+            count_unhandled( entity, plug );
         return retval_t{};
     }
+
+    // VuRotateMotionEntity's (VuMotionEntity's) inputs "Activate" 0x61A4F0 / "Deactivate" 0x61A5D0 (motion.hxx).
+    for ( rotator_t& motion : m_rotators )
+        if ( motion.path == entity )
+        {
+            if ( plug == "Activate" )
+                rotator_activate( motion );
+            else if ( plug == "Deactivate" )
+                rotator_deactivate( motion );
+            else
+                count_unhandled( entity, plug );
+            return retval_t{};
+        }
 
     // VuCoronaEntity's two input plugs. @0x5e8be0 and @0x5e8c30 register
     // and unregister the corona's draw component with the global
@@ -1007,12 +1008,7 @@ inline void c_world::audit_graph( ) const
     }
     for ( const auto& pair : by_ref )
         LOG_INFO( "refs: %4d %s", pair.second, pair.first.c_str( ) );
-    // THE ROTATOR AUDIT. update_rotators adopts the placements of the
-    // subtree the motion entity SITS IN - an inference made before the
-    // Refs block was parsed. VuMotionEntity_onActivate @0x61a4f0 drives
-    // the "Entity" ref instead, so the two can now be compared: the
-    // inference is sound exactly when the ref names an ANCESTOR of the
-    // motion entity's own path.
+    // THE ROTATOR AUDIT: every motion entity's "Entity" ref, as the script load bound it.
     int absolute = 0, relative = 0, unresolved = 0, missing = 0;
     for ( const rotator_t& motion : m_rotators )
     {
@@ -1074,56 +1070,8 @@ inline void c_world::audit_graph( ) const
             light.path.c_str( ), light.world[ 12 ], light.world[ 13 ], light.world[ 14 ],
             light.draw_distance, light.fade_distance, light.size,
             light.cone * 57.29578f, light.texture.c_str( ) );
-    // WHAT THE ATTACH TRANSFORM ACTUALLY MOVED, and what it could not.
-    // The composition is only as good as the parent matrix it reads, so
-    // say how many parents were found, how many children landed somewhere
-    // this engine can draw, and - the residual that matters - how many
-    // parents are themselves driven by a rotate motion, because
-    // m_seat_world holds the AUTHORED transform and a spinning parent
-    // would carry its child round with it in retail.
-    int joined = 0;
-    int no_parent = 0;
-    int undrawable = 0;
-    int spun_parent = 0;
-    for ( const attach_t& join : m_attaches )
-    {
-        if ( !join.attached )
-            continue;
-        const std::string parent = ref_target( join.path, "Parent" );
-        const std::string child = ref_target( join.path, "Child" );
-        if ( m_seat_world.count( parent ) == 0 )
-        {
-            ++no_parent;
-            LOG_WARNING( "attach %s: Parent \"%s\" has no placed transform",
-                join.path.c_str( ), parent.c_str( ) );
-            continue;
-        }
-        for ( const rotator_t& motion : m_rotators )
-            if ( ref_target( motion.path, "Entity" ) == parent )
-                ++spun_parent;
-        if ( m_coronas.owns( child ) )
-        {
-            ++joined;
-            // Where the seat actually is. A child that lands on the origin
-            // means the PARENT subtree carries no transform in the level
-            // data, not that the composition is wrong. MEASURED for the
-            // thirteen WarningSiren templates: the instance node's data
-            // holds only ChildEntities, the template root is a bare
-            // VuSceneEntity, and not one entity in the subtree - prop,
-            // rotate motion, attach or corona - has a
-            // VuTransformComponent. Those sirens have no authored position
-            // at all, so something outside the scene file places them.
-            const std::array< float, 16 >& seat = m_seat_world.at( parent );
-            LOG_INFO( "attach %s: parent \"%s\" at %.0f %.0f %.0f, offset %.1f %.1f %.1f",
-                join.path.c_str( ), parent.c_str( ),
-                seat[ 12 ], seat[ 13 ], seat[ 14 ],
-                join.position[ 0 ], join.position[ 1 ], join.position[ 2 ] );
-        }
-        else
-            ++undrawable;
-    }
-    LOG_INFO( "attach transform: %d children seated on their parent, %d parents not placed, %d children this engine cannot move yet, %d parents also driven by a rotate motion",
-        joined, no_parent, undrawable, spun_parent );
+    LOG_INFO( "attach: %u VuAttachEntity, %d records on their parents' components, %d updates of an animated parent not run (UNKNOWN), %d motion children of a class not read",
+        static_cast< unsigned >( m_joints.joins( ).size( ) ), m_joints.attached( ), m_joints.unknown( ), m_motion_unknown );
     LOG_INFO( "template overrides: %d children overridden by their instance, %d of them carrying the instance's transform",
         m_overrides_seen, m_overrides_placed );
     for ( const auto& pair : m_override_components )
@@ -1135,16 +1083,9 @@ inline void c_world::audit_graph( ) const
     // an audio emitter or a pfx emitter cannot until those subsystems
     // exist. Printing both sides' classes is what decides the scope.
     std::map< std::string, int > joins;
-    for ( const attach_t& join : m_attaches )
-    {
-        const std::string parent = ref_target( join.path, "Parent" );
-        const std::string child = ref_target( join.path, "Child" );
-        const auto parent_type = m_entity_type.find( parent );
-        const auto child_type = m_entity_type.find( child );
-        ++joins[ ( child_type == m_entity_type.end( ) ? std::string( "?" ) : child_type->second )
-            + " -> " + ( parent_type == m_entity_type.end( ) ? std::string( "?" ) : parent_type->second )
-            + ( join.node.empty( ) ? std::string( " (no node)" ) : std::string( " (node)" ) ) ];
-    }
+    for ( const c_joints::join_t& join : m_joints.joins( ) )
+        ++joins[ ( join.child ? join.child->m_type : std::string( "?" ) ) + " -> " + ( join.parent ? join.parent->m_type : std::string( "?" ) )
+            + ( join.properties->node_name.empty( ) ? std::string( " (no node)" ) : std::string( " (node)" ) ) ];
     for ( const auto& pair : joins )
         LOG_INFO( "attach: %4d %s", pair.second, pair.first.c_str( ) );
     // Every volume's own outgoing edges. These are the only entry points

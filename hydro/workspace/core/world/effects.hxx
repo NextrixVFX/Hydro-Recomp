@@ -125,6 +125,19 @@ public:
         return inst;
     }
 
+    // The system's vt+8 setMatrix (VuStaticPfxEntity's motion IF 0x5EB4C0 with the motion's matrix).
+    void set_matrix( std::uint32_t instance, const float* world )
+    {
+        if ( !m_ready || instance == 0u )
+            return;
+        std::uint32_t* w = m_rt.heap.find( instance );
+        if ( w == nullptr )
+            return;
+        std::uint32_t bits[ 16 ];
+        std::memcpy( bits, world, 64 );
+        pfx_system_set_matrix( w, bits );
+    }
+
     int systems( ) const
     {
         return static_cast< int >( m_statics.size( ) );
