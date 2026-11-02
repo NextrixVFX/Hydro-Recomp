@@ -4,6 +4,7 @@
 #include <workspace/core/world/gfxsort.hxx>
 #include <workspace/core/world/lights.hxx>
 #include <workspace/core/world/instance.hxx>
+#include <workspace/core/world/meshes.hxx>
 #include <workspace/core/world/primitive.hxx>
 #include <workspace/core/world/drawer.hxx>
 #include <workspace/core/world/skeleton.hxx>
@@ -11,6 +12,7 @@
 #include <array>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <cstring>
 #include <string>
@@ -1591,6 +1593,240 @@ inline bool verify_gfx_static_model( )
     return false;
 }
 
+// Case gfx_real_model: world/meshes.hxx's view of a scene loaded by assets/scene.hxx, field by field against retail's own loaded VuGfxStaticScene; then draw, prefetch, shadow and the ray
+// test 0x520620 over the real meshes.
+inline bool verify_gfx_real_model( )
+{
+    anim_cursor_t g;
+    g.w = g_golden_grm_words;
+    g.size = g_golden_grm_size;
+    g.where = "gfx_real_model";
+    const auto real = []( std::uint32_t u ) { float f; std::memcpy( &f, &u, 4 ); return f; };
+    const auto bits = []( float f ) { std::uint32_t u; std::memcpy( &u, &f, 4 ); return u; };
+    c_archive archive;
+    const std::string pack = world_check_pack( );
+    if ( pack.empty( ) || !archive.open( pack.c_str( ) ) )
+    {
+        LOG_ERROR( "verify_gfx_real_model: Base.apf not found" );
+        return false;
+    }
+    const unsigned models = g.take( );
+    int commands = 0, rays = 0, hits = 0;
+    for ( unsigned model_no = 0; model_no < models; ++model_no )
+    {
+        std::vector< std::uint8_t > blob;
+        scene_t scene;
+        const std::string name = std::string( "VuStaticModelAsset/" ) + g_golden_grm_names[ model_no ];
+        if ( !archive.read( name.c_str( ), blob ) || !scene_load_static( blob.data( ), blob.size( ), scene ) )
+        {
+            LOG_ERROR( "verify_gfx_real_model: '%s' did not load", name.c_str( ) );
+            return false;
+        }
+        gfx_scene_view_t view;
+        gfx_scene_view_build( view, scene, blob.data( ) );
+        gfx_check_hooks_t hooks;
+        hooks.m_materials.resize( g.take( ) );
+        for ( gfx_material_t& m : hooks.m_materials )
+            m.m_key = g.take( );
+        hooks.m_chunks.resize( g.take( ) );
+        for ( gfx_chunk_t& c : hooks.m_chunks )
+            c.m_key = g.take( );
+        gfx_sort_t sort( hooks );
+        sort.m_buffers[ 0 ].m_memory.resize( 0x2C0000 );
+        sort.m_buffers[ 0 ].m_capacity = 0x2C0000;
+        // The layout: every word the walks read, in retail's objects' order.
+        const std::size_t layout_words = g.take( );
+        const std::size_t layout_end = g.at + layout_words;
+        g.eq( static_cast< unsigned >( view.m_rows.size( ) ), g.take( ) );
+        g.eq( static_cast< unsigned >( view.m_meshes.size( ) ), g.take( ) );
+        g.eq( static_cast< unsigned >( view.m_chunks.size( ) ), g.take( ) );
+        for ( const gfx_scene_material_t& r : view.m_rows )
+        {
+            g.eq( r.m_name, g.take( ) );
+            g.eq( r.m_skip, g.take( ) );
+            g.eq( r.m_casts, g.take( ) );
+            g.eq( r.m_flag_1d, g.take( ) );
+            g.eq( r.m_by_depth, g.take( ) );
+            g.eq( r.m_type, g.take( ) );
+        }
+        for ( const gfx_scene_chunk_t& c : view.m_chunks )
+            g.eq( c.m_stride, g.take( ) );
+        for ( const gfx_scene_mesh_t* mesh : view.m_meshes )
+        {
+            g.eq( static_cast< unsigned >( mesh->m_parts.size( ) ), g.take( ) );
+            for ( float f : mesh->m_min )
+                g.eq( bits( f ), g.take( ) );
+            for ( float f : mesh->m_max )
+                g.eq( bits( f ), g.take( ) );
+            for ( const gfx_scene_part_t* p : mesh->m_parts )
+            {
+                g.eq( p->m_id, g.take( ) );
+                g.eq( static_cast< unsigned >( p->m_row - view.m_rows.data( ) ), g.take( ) );
+                g.eq( static_cast< unsigned >( p->m_arrays - view.m_chunks.data( ) ), g.take( ) );
+                g.eq( p->m_first_index, g.take( ) );
+                g.eq( static_cast< unsigned >( p->m_triangles ), g.take( ) );
+                for ( float f : p->m_aabb )
+                    g.eq( bits( f ), g.take( ) );
+            }
+        }
+        const std::function< void( const gfx_scene_node_t& ) > compare_node = [ & ]( const gfx_scene_node_t& n )
+        {
+            for ( float f : n.m_matrix )
+                g.eq( bits( f ), g.take( ) );
+            for ( int k : { 0, 1, 2, 4, 5, 6 } )
+                g.eq( bits( n.m_aabb[ k ] ), g.take( ) );
+            std::uint32_t mesh = 0;
+            for ( std::size_t i = 0; i < view.m_meshes.size( ); ++i )
+                if ( view.m_meshes[ i ] == n.m_mesh )
+                    mesh = static_cast< std::uint32_t >( i ) + 1u;
+            g.eq( mesh, g.take( ) );
+            g.eq( static_cast< unsigned >( n.m_children.size( ) ), g.take( ) );
+            for ( const gfx_scene_node_t* child : n.m_children )
+                compare_node( *child );
+        };
+        g.eq( static_cast< unsigned >( view.m_roots.size( ) ), g.take( ) );
+        for ( const gfx_scene_node_t* root : view.m_roots )
+            compare_node( *root );
+        g.eq( static_cast< unsigned >( g.at ), static_cast< unsigned >( layout_end ) );
+        g.at = layout_end;
+        const auto compare_commands = [ & ]( )
+        {
+            const unsigned count = g.take( );
+            g.eq( static_cast< unsigned >( sort.m_commands[ 0 ].size( ) ), count );
+            commands += static_cast< int >( count );
+            for ( unsigned c = 0; c < count; ++c )
+            {
+                const unsigned words = g.take( );
+                if ( c >= sort.m_commands[ 0 ].size( ) )
+                {
+                    for ( unsigned i = 0; i < words; ++i )
+                        g.eq( 0xDEADBEEFu, g.take( ) );
+                    continue;
+                }
+                const ui_gfx_command_t& cmd = sort.m_commands[ 0 ][ c ];
+                for ( unsigned i = 0; i < 7; ++i )
+                {
+                    std::uint32_t w = cmd.m_words[ i ];
+                    if ( i == 4 || i == 5 )
+                        w -= 1;
+                    if ( i == 6 )
+                        w &= 0xFFFFu;
+                    g.eq( w, g.take( ) );
+                }
+                const std::uint8_t* r = sort.m_buffers[ 0 ].m_memory.data( ) + cmd.m_words[ 3 ];
+                for ( unsigned i = 0; i + 7 < words; ++i )
+                {
+                    std::uint32_t w;
+                    std::memcpy( &w, r + 4 * i, 4 );
+                    if ( i == 0x13 )
+                        w &= 0xFFu;
+                    g.eq( w, g.take( ) );
+                }
+            }
+        };
+        const auto fresh = [ & ]( )
+        {
+            sort.m_commands[ 0 ].clear( );
+            sort.m_buffers[ 0 ].m_used = 0;
+            std::fill( sort.m_buffers[ 0 ].m_memory.begin( ), sort.m_buffers[ 0 ].m_memory.begin( ) + 0x40000, static_cast< std::uint8_t >( 0 ) );
+        };
+        const unsigned draws = g.take( );
+        for ( unsigned d = 0; d < draws; ++d )
+        {
+            sort.m_key_lo = g.take( );
+            sort.m_key_hi = g.take( );
+            gfx_static_model_t model;
+            gfx_scene_view_attach( model, view );
+            model.m_colour = g.take( );
+            model.m_word = g.take( );
+            model.m_lod = real( g.take( ) );
+            model.m_byte_1c = static_cast< std::uint8_t >( g.take( ) );
+            model.m_two_pass = static_cast< std::uint8_t >( g.take( ) );
+            gfx_draw_params_t params;
+            gfx_camera_t camera;
+            params.m_second_depth = static_cast< std::uint8_t >( g.take( ) );
+            params.m_lod = real( g.take( ) );
+            camera.m_far = real( g.take( ) );
+            for ( float& f : camera.m_eye )
+                f = real( g.take( ) );
+            for ( int i = 0; i < 3; ++i )
+                params.m_eye[ i ] = real( g.take( ) );
+            for ( float& f : params.m_clip )
+                f = real( g.take( ) );
+            for ( float& f : camera.m_planes )
+                f = real( g.take( ) );
+            float parent[ 16 ];
+            for ( float& f : parent )
+                f = real( g.take( ) );
+            params.m_camera = &camera;
+            fresh( );
+            model.draw( sort, parent, params );
+            compare_commands( );
+            g.eq( sort.m_key_lo, g.take( ) );
+            g.eq( sort.m_key_hi, g.take( ) );
+            fresh( );
+            model.prefetch( sort );
+            compare_commands( );
+            fresh( );
+            gfx_shadow_params_t shadow;
+            gfx_shadow_volume_t volume;
+            std::vector< gfx_shadow_cascade_t > cascades;
+            for ( int i = 0; i < 3; ++i )
+                shadow.m_eye[ i ] = real( g.take( ) );
+            shadow.m_lod = real( g.take( ) );
+            for ( float& f : shadow.m_clip )
+                f = real( g.take( ) );
+            volume.m_count = static_cast< int >( g.take( ) );
+            for ( int i = 0; i < 4 * volume.m_count; ++i )
+                volume.m_planes[ i ] = real( g.take( ) );
+            cascades.resize( g.take( ) );
+            for ( gfx_shadow_cascade_t& c : cascades )
+            {
+                c.m_volume.m_count = static_cast< int >( g.take( ) );
+                for ( float& f : c.m_matrix )
+                    f = real( g.take( ) );
+                for ( int i = 0; i < 4 * c.m_volume.m_count; ++i )
+                    c.m_volume.m_planes[ i ] = real( g.take( ) );
+            }
+            shadow.m_volume = &volume;
+            shadow.m_cascades = static_cast< int >( cascades.size( ) );
+            shadow.m_cascade = cascades.data( );
+            model.draw_shadow( sort, parent, shadow );
+            compare_commands( );
+            g.eq( sort.m_key_lo, g.take( ) );
+            g.eq( sort.m_key_hi, g.take( ) );
+        }
+        const unsigned count = g.take( );
+        gfx_static_model_t model;
+        gfx_scene_view_attach( model, view );
+        for ( unsigned r = 0; r < count; ++r )
+        {
+            float parent[ 16 ], a[ 3 ], b[ 3 ];
+            for ( float& f : parent )
+                f = real( g.take( ) );
+            for ( float& f : a )
+                f = real( g.take( ) );
+            for ( float& f : b )
+                f = real( g.take( ) );
+            const bool hit = model.ray( parent, a, b );
+            g.eq( hit ? 1u : 0u, g.take( ) );
+            for ( float f : b )
+                g.eq( bits( f ), g.take( ) );
+            ++rays;
+            hits += hit ? 1 : 0;
+        }
+    }
+    g.eq( static_cast< unsigned >( g.at ), static_cast< unsigned >( g.size ) );
+    if ( !g.failed )
+    {
+        LOG_SUCCESS( "gfx_real_model matches retail on shipped models: the scene view field by field (world/meshes.hxx), draw 0x520130, prefetch 0x520200, shadow 0x5201B0, ray test 0x520620 "
+                     "0x520A50 0x520D30 0x520F20: %u models, %d commands, %d rays (%d hits), %d words", models, commands, rays, hits, g.compared );
+        return true;
+    }
+    LOG_ERROR( "gfx_real_model FAILED %d of %d words (cursor %zu of %zu)", g.failed, g.compared, g.at, g.size );
+    return false;
+}
+
 // Case gfx_animated_model: world/instance.hxx against retail's draw 0x532AD0, shadow 0x533060 and prefetch 0x5333A0 on seeded fake meshes.
 inline bool verify_gfx_animated_model( )
 {
@@ -1762,5 +1998,6 @@ inline bool verify_render_all( )
     ok = verify_gfx_primitives( ) && ok;
     ok = verify_gfx_static_model( ) && ok;
     ok = verify_gfx_animated_model( ) && ok;
+    ok = verify_gfx_real_model( ) && ok;
     return ok;
 }
