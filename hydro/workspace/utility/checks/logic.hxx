@@ -2413,3 +2413,171 @@ inline bool verify_json_write( )
         LOG_ERROR( "json_write FAILED %d", bad );
     return bad == 0;
 }
+// The game tier's script entities (game/scripted.hxx) against retail (case game_plugs, cases/gameplug.py): per vector the state as retail had it, the plug dispatched
+// through g_logic_plugs, every output fire, every service call, the VuRetVal, the documents after.
+struct game_plug_log_t
+{
+    std::vector< std::string > names;
+    std::vector< ui_params_t > params;
+    std::vector< std::array< unsigned, 2 > > args;
+};
+
+inline bool verify_game_plugs( )
+{
+    save_words_t c{ g_golden_game_plugs_words };
+    const unsigned n = c.next( );
+    int bad = 0, fires = 0;
+    const auto read_doc = [ ]( const std::string& raw, value_t& out ) {
+        out = value_t{ };
+        if ( !raw.empty( ) )
+            c_reader::read_at_start( std::vector< std::uint8_t >( raw.begin( ), raw.end( ) ), out );
+    };
+    for ( unsigned v = 0; v < n; ++v )
+    {
+        int bad0 = bad;
+        const std::string cls = c.str( ), plug = c.str( );
+        const std::uint32_t vt = logic_vtable_of( cls.c_str( ) );
+        logic_entity_t e = logic_construct( vt );
+        const unsigned kind = c.next( );
+        if ( kind & 1u )
+            e.words[ 0 ] = c.next( );
+        if ( kind & 2u )
+        {
+            const unsigned a = c.next( ), b = c.next( );
+            e.words[ 0 ] = a | b << 8;
+            e.words[ 1 ] = c.next( );
+            e.words[ 2 ] = c.next( );
+        }
+        if ( kind & 4u )
+            e.text = c.str( );
+        const unsigned champ = kind & 8u ? c.next( ) : 0u;
+        if ( kind & 16u )
+        {
+            for ( int k = 0; k < 4; ++k )
+                e.head[ k ] = static_cast< std::uint8_t >( c.next( ) );
+            e.words[ 0 ] = c.next( );
+        }
+        if ( kind & 32u )
+            e.head[ 0 ] = static_cast< std::uint8_t >( c.next( ) );
+        value_t doc, doc2;
+        read_doc( c.str( ), doc );
+        read_doc( c.str( ), doc2 );
+        logic_game_check_t L;
+        const unsigned ne = c.next( );
+        for ( unsigned k = 0; k < ne; ++k )
+        {
+            const std::uint32_t hash = c.next( ), entity = c.next( ), vtable = c.next( ), lap = c.next( );
+            L.hashes.push_back( hash );
+            L.entities.push_back( entity );
+            L.words.push_back( { entity, vtable } );
+            L.words.push_back( { entity + 0x4ACu, lap } );
+        }
+        ui_params_t in{ };
+        in.m_size = static_cast< int >( c.next( ) );
+        std::memcpy( in.m_bytes, c.s, 128 );
+        c.s += 32;
+        const unsigned rt = c.next( ), rv = c.next( );
+        const std::string rtext = c.str( );
+        game_plug_log_t log, fire;
+        logic_game_t g;
+        g.user = &L;
+        g.find = []( void* u, std::uint32_t hash ) -> std::uint32_t {
+            logic_game_check_t& l = *static_cast< logic_game_check_t* >( u );
+            for ( std::size_t k = 0; k < l.hashes.size( ); ++k )
+                if ( l.hashes[ k ] == hash )
+                    return l.entities[ k ];
+            return l.entities.empty( ) ? 0u : l.entities[ 0 ];
+        };
+        g.word = []( void* u, std::uint32_t address ) -> std::uint32_t {
+            for ( const auto& w : static_cast< logic_game_check_t* >( u )->words )
+                if ( w.first == address )
+                    return w.second;
+            return 0u;
+        };
+        const auto note = [ & ]( const char* name, unsigned a = 0u, unsigned b = 0u, const ui_params_t& p = ui_params_t{ } ) {
+            log.names.push_back( name );
+            log.args.push_back( { a, b } );
+            log.params.push_back( p );
+        };
+        logic_services_t s;
+        s.broadcast = [ & ]( const char* event, const ui_params_t& p ) { note( "broadcast", event_hash( event ), static_cast< unsigned >( p.m_size ), p ); };
+        s.champ_data = [ & ] { note( "champ?" ); return static_cast< std::uint8_t >( champ ) != 0u; };
+        s.champ_clear = [ & ] { note( "clear", 0x7593A0u ); };
+        s.defaults = [ & ]( const char* which ) { note( which ); };
+        s.input_defaults = [ & ]( int method ) { note( "input", 0u, static_cast< unsigned >( method ) ); };
+        s.save_profile = [ & ] { note( "save" ); };
+        s.game_data = &doc;
+        s.cloud_data = &doc;
+        s.profile_saved = e.head[ 0 ] ? &doc : &doc2;
+        s.profile_temp = e.head[ 0 ] ? &doc2 : &doc;
+        struct user_t
+        {
+            game_plug_log_t* fire;
+        } user{ &fire };
+        logic_hooks_t h;
+        h.user = &user;
+        h.game = &g;
+        h.services = &s;
+        h.fire = []( void* u, logic_entity_t&, const char* name, const ui_params_t& p ) -> logic_retval_t {
+            game_plug_log_t& f = *static_cast< user_t* >( u )->fire;
+            f.names.push_back( name );
+            f.params.push_back( p );
+            return logic_retval_t{ };
+        };
+        logic_retval_t out{ 0xA5A5A5A5u, 0xA5A5A5A5u, nullptr };
+        if ( plug == "*busy" )
+            logic_award_busy( e, in, h );
+        else
+            bad += !logic_dispatch( e, plug.c_str( ), out, in, h );
+        bad += out.type != rt;
+        if ( rt == 4u )
+            bad += rtext != out.text;
+        else if ( rt == 3u )
+            bad += ( out.value & 0xFFu ) != rv;
+        else if ( rt != 0u && rt != 0xA5A5A5A5u )
+            bad += out.value != rv;
+        const unsigned nf = c.next( );
+        bad += nf != fire.names.size( );
+        for ( unsigned k = 0; k < nf; ++k )
+        {
+            const std::string name = c.str( ), bytes = c.str( );
+            ++fires;
+            if ( k < fire.names.size( ) )
+                bad += name != fire.names[ k ] || bytes.size( ) != static_cast< std::size_t >( fire.params[ k ].m_size ) || std::memcmp( bytes.data( ), fire.params[ k ].m_bytes, bytes.size( ) ) != 0;
+        }
+        const unsigned nl = c.next( );
+        bad += nl != log.names.size( );
+        for ( unsigned k = 0; k < nl; ++k )
+        {
+            const std::string name = c.str( );
+            const unsigned a = c.next( ), b = c.next( );
+            const std::string bytes = c.str( );
+            ++fires;
+            if ( k < log.names.size( ) )
+                bad += name != log.names[ k ] || a != log.args[ k ][ 0 ] || b != log.args[ k ][ 1 ] || bytes.size( ) != static_cast< std::size_t >( log.params[ k ].m_size ) ||
+                       std::memcmp( bytes.data( ), log.params[ k ].m_bytes, bytes.size( ) ) != 0;
+        }
+        const unsigned tail = c.next( );
+        if ( tail & 1u )
+            bad += c.next( ) != e.words[ 0 ];
+        if ( tail & 2u )
+        {
+            std::string d;
+            vujb_dump( doc, d );
+            bad += c.str( ) != d;
+        }
+        if ( tail & 4u )
+        {
+            std::string d;
+            vujb_dump( doc2, d );
+            bad += c.str( ) != d;
+        }
+        if ( bad != bad0 && bad0 < 8 )
+            LOG_ERROR( "game_plugs vector %u (%s %s) differs from retail", v, cls.c_str( ), plug.c_str( ) );
+    }
+    if ( bad == 0 )
+        LOG_SUCCESS( "game/scripted.hxx's plugs match retail: %u vectors, %d fires and service calls", n, fires );
+    else
+        LOG_ERROR( "game_plugs FAILED %d", bad );
+    return bad == 0;
+}
