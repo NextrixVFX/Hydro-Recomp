@@ -248,7 +248,8 @@ struct ui_remap_hooks_t
     // The Sfx +0x1D4 played at the press (FMOD: 0x64C348 / 0x64C354).
     std::function< void( ) > m_sound;
     // 0x461940: the message box (heading = Label String ID, "Control_Mapping_MB_Body", "MessageBox_Cancel", with slot 15 true "MessageBox_Auto").
-    std::function< void( bool can_auto ) > m_open_box;
+    // `done`: the box's callback 0x461900 with its result (+0xC8).
+    std::function< void( const std::string& heading, bool can_auto, std::function< void( std::int32_t ) > done ) > m_open_box;
     // The box's release (+4 - 1, +0xCC = 1).
     std::function< void( ) > m_close_box;
     // g 0x759040: its +8 channel count; pad 0's (slot 6) +0x10 values [ i ] and +0xC button bits.
@@ -262,6 +263,16 @@ struct ui_remap_hooks_t
     // Slot 17 vt+0x44 (byte): 0x4021A0 nothing / the throttle's 0x4629D0 (the setting of Config 0 / 1).
     std::function< void( std::uint8_t ) > m_set_auto;
 };
+
+// 0x461900 (the box's callback at +0x60; ret 4): result 1 (its +0xC8) -> slot 17(1); the box released.
+inline void ui_remap_box_result( ui_remap_runtime_t& s, std::int32_t result, const ui_remap_hooks_t& h )
+{
+    if ( result == 1 && h.m_set_auto )
+        h.m_set_auto( 1 );
+    if ( h.m_close_box )
+        h.m_close_box( );
+    s.m_box = false;
+}
 
 // Slot 12 0x4613A0 (OnUISetFocus): +0x1F1 = the event's id is this row's.
 inline void ui_remap_on_focus( ui_remap_runtime_t& s, bool mine ) { s.m_focus = mine ? 1u : 0u; }
@@ -359,7 +370,7 @@ inline void ui_remap_tick( ui_remap_t& r, ui_remap_runtime_t& s, const ui_remap_
         if ( h.m_sound )
             h.m_sound( );
         if ( h.m_open_box )
-            h.m_open_box( h.m_set_auto != nullptr );
+            h.m_open_box( r.m_label, h.m_set_auto != nullptr, [ &r, &s, &h ]( std::int32_t result ) { ui_remap_box_result( s, result, h ); } );
         s.m_box = true;
         ui_remap_baseline( s, h );
     }
@@ -441,12 +452,3 @@ inline void ui_remap_decision( const ui_remap_t& r, ui_remap_runtime_t& s, const
     s.m_box = false;
 }
 
-// 0x461900 (the box's callback at +0x60; ret 4): result 1 (its +0xC8) -> slot 17(1); the box released.
-inline void ui_remap_box_result( ui_remap_runtime_t& s, std::int32_t result, const ui_remap_hooks_t& h )
-{
-    if ( result == 1 && h.m_set_auto )
-        h.m_set_auto( 1 );
-    if ( h.m_close_box )
-        h.m_close_box( );
-    s.m_box = false;
-}

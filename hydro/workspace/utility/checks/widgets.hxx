@@ -2231,7 +2231,7 @@ inline bool verify_ui_remap_logic( )
             note( "sound Global/UI_and_Menu/menu_browse" );
         };
         h.m_sound = [ & ] { note( std::string( "sound " ) + g.m_sfx ); };
-        h.m_open_box = [ & ]( bool can_auto )
+        h.m_open_box = [ & ]( const std::string&, bool can_auto, std::function< void( std::int32_t ) > )
         {
             note( std::string( "box " ) + g.m_label + "|Control_Mapping_MB_Body|" + ( can_auto ? "MessageBox_Auto" : "" ) + "|MessageBox_Cancel" );
         };
@@ -3124,6 +3124,69 @@ inline bool verify_ui_completion_text( )
     return true;
 }
 
+// loading_text: the five leaves by retail over the case's own documents (they travel as VUJB in the golden), stubs answering what the lambdas here answer.
+inline bool verify_ui_loading_text( )
+{
+    const auto parse = [ ]( const char* hex ) {
+        std::vector< std::uint8_t > bytes;
+        for ( const char* p = hex; p[ 0 ] && p[ 1 ]; p += 2 )
+        {
+            unsigned v = 0;
+            sscanf_s( p, "%2x", &v );
+            bytes.push_back( static_cast< std::uint8_t >( v ) );
+        }
+        return c_reader( bytes ).parse( );
+    };
+    const value_t boat = parse( g_golden_loading_doc_boat ), track = parse( g_golden_loading_doc_track ), round = parse( g_golden_loading_doc_round );
+    const value_t constants[ 3 ] = { parse( g_golden_loading_doc_const_i ), parse( g_golden_loading_doc_const_f ), parse( g_golden_loading_doc_const_n ) };
+    int failed = 0;
+    for ( std::size_t k = 0; k < g_golden_loading_rows_count; ++k )
+    {
+        const golden_loading_row_t& g = g_golden_loading_rows[ k ];
+        value_t root;
+        value_t& data = ui_json_child( root, "GameData" );
+        ui_json_set_string( ui_json_child( data, "GameType" ), g.m_type );
+        ui_json_set_string( ui_json_child( data, "Level" ), g.m_level );
+        ui_json_set_string( ui_json_child( data, "Course" ), g.m_course );
+        value_t& champ = ui_json_child( data, "IsChampionship" );
+        champ.tag = 3;
+        champ.integer = g.m_champ;
+        value_t human;
+        ui_json_set_string( ui_json_child( ui_json_child( human, "Properties" ), "Driver Type" ), "Human" );
+        ui_json_set_string( ui_json_child( ui_json_child( human, "Properties" ), "Boat" ), "BoatA" );
+        value_t& boats = ui_json_child( data, "Boats" );
+        boats.tag = 5;
+        boats.list.push_back( human );
+        ui_loading_env_t env;
+        env.d.m_root = &root;
+        env.d.m_boat_db = &boat;
+        env.d.m_round = [ &round ]( ) -> const value_t& { return round; };
+        env.m_constant_db = &constants[ g.m_const ];
+        env.m_track_db = &track;
+        env.m_string6 = [ ]( const std::string& id ) { return "6|" + id; };
+        env.m_string7 = [ ]( const std::string& id ) { return "7|" + id; };
+        env.m_reward = [ ]( const char* mode, const std::string& key, std::int32_t place ) {
+            const std::string m = mode;
+            const int base = m == "Race" ? 1000 : m == "Championship" ? 2000 : m == "Slalom" ? 3000 : m == "TimeTrial" ? 4000 : m == "RubberDucky" ? 5000 : 6000;
+            const bool right_key = m == "RubberDucky" ? key.empty( ) : m == "Championship" ? key == "MilkRun" : key == "B";
+            return right_key ? base + place : -1;
+        };
+        const std::uint32_t vt = g.m_fn == 0x443EB0u ? k_ui_event_text_vtable : g.m_fn == 0x444160u ? k_ui_penalty_text_vtable : g.m_fn == 0x4445F0u ? k_ui_track_text_vtable
+                                 : g.m_fn == 0x4448C0u ? k_ui_tuning_text_vtable : k_ui_unlock_text_vtable;
+        std::string out;
+        ui_loading_text( env, vt, g.m_place, out );
+        if ( out != g.m_out && ++failed <= 3 )
+            LOG_ERROR( "loading row %d: 0x%X '%s' place %d: '%s', retail '%s'", static_cast< int >( k ), g.m_fn, g.m_type, g.m_place, out.c_str( ), g.m_out );
+    }
+    if ( failed || g_golden_loading_rows_count == 0 )
+    {
+        LOG_ERROR( "verify_ui_loading_text: %d of %d rows differ", failed, static_cast< int >( g_golden_loading_rows_count ) );
+        return false;
+    }
+    LOG_SUCCESS( "verify_ui_loading_text: 0x443EB0, 0x444160, 0x4445F0, 0x4448C0, 0x444D80 match retail on %d runs", static_cast< int >( g_golden_loading_rows_count ) );
+    return true;
+}
+
 // award_leaves: Screens/Award's text listeners on a bound leaf, through c_ui_binding::post. Retail's on a bare object: credits, the two string-id forms. "old" = the ctor's state here.
 inline bool verify_ui_award_leaves( )
 {
@@ -3331,6 +3394,7 @@ inline bool verify_ui_widgets_all( )
     ok = verify_ui_achievement_text( ) && ok;
     ok = verify_ui_crop_update( ) && ok;
     ok = verify_ui_award_leaves( ) && ok;
+    ok = verify_ui_loading_text( ) && ok;
     ok = verify_ui_screen_inputs( ) && ok;
     ok = verify_ui_slider_frame( ) && ok;
     ok = verify_ui_common_screen( ) && ok;

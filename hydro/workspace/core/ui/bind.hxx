@@ -108,6 +108,9 @@ inline constexpr std::uint32_t k_ui_remap_vtable = 0x73D4F4u;
 // Screens/Award's leaves: text bases over +0x10C (ctors 0x443870, 0x446D30, 0x446F00, 0x447060), image bases over +0xB8 (0x440B80, 0x446AE0).
 inline constexpr std::uint32_t k_ui_award_credit_vtable = 0x73B86Cu, k_ui_award_trophy_text_vtable = 0x73C18Cu, k_ui_award_cat_text_vtable = 0x73C25Cu, k_ui_award_info_text_vtable = 0x73C32Cu;
 inline constexpr std::uint32_t k_ui_award_image_vtable = 0x73B5DCu, k_ui_award_trophy_image_vtable = 0x73C0BCu;
+// Screens/Loading*'s leaves (loading.hxx): slot 6 computes +0x10C (the tuning's +0x110), slot 12 hands it over. The track image: 0x440400 / 0x440830.
+inline constexpr std::uint32_t k_ui_event_text_vtable = 0x73BFDCu, k_ui_penalty_text_vtable = 0x73BF9Cu, k_ui_track_text_vtable = 0x73BF1Cu, k_ui_tuning_text_vtable = 0x73BEDCu,
+                               k_ui_unlock_text_vtable = 0x73BE9Cu, k_ui_track_image_vtable = 0x73B4FCu;
 inline constexpr std::uint32_t k_ui_throttle_remap_vtable = 0x73D45Cu;
 inline constexpr std::uint32_t k_ui_set_info_vtable = 0x73E818u;
 
@@ -404,6 +407,11 @@ struct ui_bind_hooks_t
     std::function< std::uint32_t( const entity_t& ) > m_font;
     // Preferred over m_info.m_measure when set: 0x5373D0 needs the entity's own font params (+0xA0).
     std::function< float( const entity_t&, const std::string&, float ) > m_measure_of;
+    // 0x4629D0: the throttle row's slot 17: the setting of Config 0 / 1.
+    std::function< void( std::int32_t config, std::uint8_t value ) > m_remap_auto;
+    // Screens/Loading*'s slot 6 (ui_loading_text) and the track image's 0x440400. Null: those slots stay counted in m_unknown_slots.
+    std::function< void( std::uint32_t vt, std::int32_t place, std::string& out ) > m_loading;
+    std::function< std::string( ) > m_loading_image;
     // The asset factory's test 0x4269D0 on a texture name (0x440CC0). Null: every name exists.
     std::function< bool( const char* ) > m_texture_exists;
     // HOOK: the license manager g 0x758FAC vt+0x18 (footer.hxx). Null: VuLicenseEntity stays an UNKNOWN input.
@@ -646,7 +654,13 @@ private:
 
     static bool shown_vtable( std::uint32_t vt )
     {
-        return vt == k_ui_hud_element_vtable || vt == k_ui_text_vtable || vt == k_ui_hud_toast_vtable || vt == k_ui_image_vtable || award_vtable( vt );
+        return vt == k_ui_hud_element_vtable || vt == k_ui_text_vtable || vt == k_ui_hud_toast_vtable || vt == k_ui_image_vtable || award_vtable( vt ) || loading_vtable( vt );
+    }
+
+    static bool loading_vtable( std::uint32_t vt )
+    {
+        return vt == k_ui_event_text_vtable || vt == k_ui_penalty_text_vtable || vt == k_ui_track_text_vtable || vt == k_ui_tuning_text_vtable || vt == k_ui_unlock_text_vtable ||
+               vt == k_ui_track_image_vtable;
     }
 
     static bool award_vtable( std::uint32_t vt )
@@ -1195,6 +1209,13 @@ private:
         {
             b.m_remap = std::make_unique< ui_remap_t >( ui_remap_of( e, m_hooks.m_font_db ) );
             b.m_remap_hooks = m_hooks.m_remap_hooks;
+            b.m_remap_hooks.m_set_auto = nullptr;   // slot 17 0x4021A0 does nothing: only the throttle's 0x4629D0 writes, and only it offers Auto
+            if ( b.m_vtable == k_ui_throttle_remap_vtable && m_hooks.m_remap_auto )
+            {
+                const std::int32_t config = b.m_remap->m_config;
+                const auto set = m_hooks.m_remap_auto;
+                b.m_remap_hooks.m_set_auto = [ set, config ]( std::uint8_t value ) { set( config, value ); };
+            }
             const std::uint32_t id = ui_entity_id( ui_long_name( e ) );
             b.m_remap_hooks.m_set_focus = [ this, id ]
             {
@@ -1815,6 +1836,8 @@ private:
             known = true;   // batch 30: 0x451370 / 0x451540
         else if ( vt == k_ui_loading_bar_vtable && b && b->m_bar )
             known = true;   // batch 32: slot 6 0x463220, slot 7 the nullsub 0x401560
+        else if ( loading_vtable( vt ) && b && b->m_shown && m_hooks.m_loading )
+            known = true;
         else if ( ui_completion_of_vtable( vt ) >= 0 && b && m_hooks.m_platform )
             known = true;   // batch 33: 0x458500 / 0x458A40 / 0x459060 / 0x4595A0 (completion.hxx)
         else if ( !init && ( vt == k_ui_game_config_vtable || ( vt == k_ui_boat_config_vtable && m_hooks.m_root ) ) && b && b->m_config )
@@ -1823,6 +1846,17 @@ private:
         if ( !known )
         {
             ++m_unknown_slots;
+            return;
+        }
+        if ( loading_vtable( vt ) )
+        {
+            if ( vt == k_ui_track_image_vtable )
+                b->m_shown->m_award = init && m_hooks.m_loading_image ? m_hooks.m_loading_image( ) : std::string( );
+            else if ( init )
+            {
+                const ui_slot_t* place = ui_bind_slot( e, "Place" );
+                m_hooks.m_loading( vt, place ? static_cast< std::int32_t >( place->m_bits[ 0 ] ) : 0, b->m_shown->m_award );
+            }
             return;
         }
         if ( ui_completion_of_vtable( vt ) >= 0 )
@@ -2003,7 +2037,7 @@ public:
     {
         const int index = index_of( e );
         const ui_bound_t* b = index >= 0 ? m_bound[ static_cast< std::size_t >( index ) ].get( ) : nullptr;
-        return b && b->m_shown && award_vtable( b->m_vtable ) ? &b->m_shown->m_award : nullptr;
+        return b && b->m_shown && ( award_vtable( b->m_vtable ) || ( loading_vtable( b->m_vtable ) && m_hooks.m_loading ) ) ? &b->m_shown->m_award : nullptr;
     }
     // The String ID a SetStringID left on a button (0x442980) or a text base (0x62F480), or null.
     const std::string* runtime_string( const entity_t& e ) const
