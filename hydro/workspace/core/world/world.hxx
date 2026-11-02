@@ -1245,6 +1245,8 @@ public:
                 LOG_ERROR( "race: --input-script %s did not load (no keys) - the device answers", script );
         }
         m_race.autopilot = c_engine::option( "autopilot" ) != nullptr;
+        if ( const char* size = c_engine::option( "window-size" ) )
+            sscanf_s( size, "%dx%d", &m_race.world.display_w, &m_race.world.display_h );
         if ( const char* keys = c_engine::option( "keys" ) )
         {
             std::istringstream list( keys );

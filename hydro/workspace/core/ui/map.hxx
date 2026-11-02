@@ -12,9 +12,7 @@
 // vtable 0x738E10). Its VuUIDrawComponent's delegate (vtable 0x738DF0 ->
 // 0x4077ED, jmp [vt+0x34]) runs slot 13 0x427BD0 with the HUD's alpha - which
 // it never reads. Transliterated from the disassembly: two records in
-// VuGfxSort's memory and their commands. Their callbacks 0x428060 / 0x428070
-// (the map and the boat icons' shader draws at submit time) are the GPU side
-// and are NOT recreated.
+// VuGfxSort's memory and their commands. Their callbacks 0x428060 / 0x428070: world/hudpass.hxx ui_record_map / ui_record_icons.
 
 // What 0x427BD0 reads of one boat (VuBoatManager g 0x758FB8). UNKNOWN on the
 // boat side: nothing recreated fills these yet - an input.
@@ -47,6 +45,16 @@ struct ui_minimap_t
     std::uint32_t m_material = 0;                          // +0x8C the pipeline state (0x53A440) handed to the sort
     std::uint32_t m_material_key = 0;                      // its +0x6C8
     std::uint32_t m_icon = 0;                              // +0xB0 the icon texture asset's +0x58 (opaque)
+    std::uint32_t m_map = 0;                               // +0xB8's +0x58 ("Texture"), or VuGfxUtil +0x1C's white
+    std::int32_t m_map_size[ 2 ] = { };                    // its +0xC, +0x10
+    std::uint32_t m_frame = 0;                             // +0xA8 "UI/HUD_MapFrame"
+    std::int32_t m_frame_size[ 2 ] = { };
+    std::uint32_t m_mask = 0;                              // +0xAC "UI/HUD_MapMask"
+    float m_origin[ 2 ] = { 0.5f, 0.5f };                  // +0xBC TrackDB [ track ].MiniMap "Origin"
+    float m_scale = 1.0f;                                  // +0xC4 "Scale"
+    float m_view = 250.0f;                                 // +0xC8 "ViewDist"
+    float m_softness = 0.0f;                               // +0xCC "Softness"
+    std::uint8_t m_water[ 4 ] = { };                       // +0xD0 "WaterColor"
     float m_depth = 0.0f;                                  // the draw component (+0x5C) +0x14 "Depth"
     std::uint32_t m_self = 0;                              // the entity (both records' +0)
 };

@@ -132,7 +132,11 @@ int c_engine::run( const char* title )
         || c_engine::option( "background" ) != nullptr;
 
     c_window window{};
-    if ( !window.create( 1280, 720, title, background ) )
+    // Ours (a test driver): --window-size WxH, the window a comparison with a retail shot needs.
+    int window_w = 1280, window_h = 720;
+    if ( const char* size = c_engine::option( "window-size" ) )
+        sscanf_s( size, "%dx%d", &window_w, &window_h );
+    if ( !window.create( window_w, window_h, title, background ) )
         return 1;
 
     c_device device{};

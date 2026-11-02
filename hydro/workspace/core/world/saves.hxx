@@ -101,6 +101,11 @@ inline void c_world::settings_start( )
     m_unlock.store_beta = [ ] { return false; };
     m_unlock.init( m_unlock_db.tag ? &m_unlock_db : nullptr, false, m_cloud.data );
     unlock_bind( );
+    {
+        float fov = 0.0f;
+        ui_json_float( member( member( member( m_constant_db, "VuDBAsset" ), "Camera" ), "VerticalFOV" ), fov );
+        LOG_INFO( "settings: ConstantDB Camera VerticalFOV %.3f degrees (engine viewport's fov_y 1.05 rad = 60.16 degrees)", fov );
+    }
     LOG_INFO( "settings: fidelity %s, display %.2f, flip %d, auto throttle pad %d keys %d, steering %.2f, vibration %d; %d credits", m_settings.ui.m_fidelity.c_str( ), m_settings.ui.m_display,
               m_settings.ui.m_flip_interval, m_settings.auto_throttle_pad ? 1 : 0, m_settings.auto_throttle_keys ? 1 : 0, m_settings.ui.m_steering, m_settings.ui.m_vibration ? 1 : 0, m_unlock.total );
 }

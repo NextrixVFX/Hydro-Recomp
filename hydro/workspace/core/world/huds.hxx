@@ -439,6 +439,7 @@ inline void c_world::hud_env( hud_project_t& h )
     env.m_track_built = m_race.track && track_is_built( *m_race.track );
     env.m_track_circuit = env.m_track_built && track_is_circuit( *m_race.track );
     env.m_control_method = m_race.world.control_method;
+    env.m_manager_28 = static_cast< std::uint32_t >( m_race.manager.lists.humans.boats.size( ) );   // g 0x758FB8 +0x28: the human list's size (0x426330: the pause button)
     // The gauges' inputs (core/ui overlay.hxx ui_hud_gauges_t): the speedometer 0x42BA00's local boat - its body
     // (+0x21C) linear velocity +0x140 / +0x144, +0x31C, +0x320, +0x32C, +0x310, the animation object's (+0x230) +0x78,
     // +0x32D - and the minimap 0x427BD0's boats: the transform's (+0x50) world row 3 (+0x80 / +0x84) and row 1
@@ -468,6 +469,37 @@ inline void c_world::hud_env( hud_project_t& h )
             s.m_flash = at( "UI/HUD_Speed_BoostInactiveFlash" );
             m_ui_pass->boost_material( s.m_material, s.m_material_key );
             s.m_self = m_ui_pass->boost_add( s );
+        };
+    // The minimap ctor 0x426D70: its textures by name, TrackDB [ track ].MiniMap. No "Texture": VuGfxUtil +0x1C's white (0x4280B6), none on this tree: 0.
+    if ( m_ui_pass && !g.m_minimap )
+        g.m_minimap = [ this ]( const entity_t&, ui_minimap_t& m ) {
+            const auto at = [ this ]( const std::string& name ) {
+                const ui_texture_t* t = m_ui_pass->texture_asset( name );
+                return t ? *t : ui_texture_t{ };
+            };
+            const value_t& mini = member( member( member( m_track_db, "VuDBAsset" ), m_race.game.track.c_str( ) ), "MiniMap" );
+            const value_t& origin = member( mini, "Origin" );
+            ui_json_float( member( origin, "X" ), m.m_origin[ 0 ] );
+            ui_json_float( member( origin, "Y" ), m.m_origin[ 1 ] );
+            ui_json_float( member( mini, "Scale" ), m.m_scale );
+            ui_json_float( member( mini, "ViewDist" ), m.m_view );
+            ui_json_float( member( mini, "Softness" ), m.m_softness );
+            std::uint32_t water = 0;
+            if ( ui_json_colour( member( mini, "WaterColor" ), water ) )
+                std::memcpy( m.m_water, &water, 4 );
+            const value_t& texture = member( mini, "Texture" );
+            const ui_texture_t map = texture.tag == 4 ? at( texture.text ) : ui_texture_t{ };
+            m.m_map = map.m_handle;
+            m.m_map_size[ 0 ] = map.m_width;
+            m.m_map_size[ 1 ] = map.m_height;
+            const ui_texture_t frame = at( "UI/HUD_MapFrame" );
+            m.m_frame = frame.m_handle;
+            m.m_frame_size[ 0 ] = frame.m_width;
+            m.m_frame_size[ 1 ] = frame.m_height;
+            m.m_mask = at( "UI/HUD_MapMask" ).m_handle;
+            m.m_icon = at( "UI/HUD_MapPlayer" ).m_handle;
+            m_ui_pass->map_material( m.m_material, m.m_material_key );
+            m.m_self = m_ui_pass->map_add( m );
         };
 #endif
     g.m_display[ 0 ] = m_race.world.display_w;

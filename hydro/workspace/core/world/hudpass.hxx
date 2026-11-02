@@ -8,7 +8,6 @@
 // 1 Basic/2dXyzUv. Each callback reads its program from the entry's asset (+0x58): the same program the material bound, except that
 // the walk's material is the entry's own +8.
 //
-// NOT recreated: the minimap's 0x428060 / 0x428070 (0x428080, 0x4284F0): read, a command with such a callback counts in gfx_ui_pass_t::m_unknown.
 
 #include <impl/engine/engine.hxx>
 #include <workspace/core/assets/texture.hxx>
@@ -141,6 +140,123 @@ inline void ui_record_boost( ui_boost_device_t& d, const ui_speedometer_t& s, bo
     d.boost_draw( 4u, 2u, v, 0x10u );
 }
 
+// What 0x428080 reaches: the shader "MiniMap" (+0x88), its handles gMapTransform +0x90, gWaterColor +0x94, gDistMinMax +0x98; samplers gMapTexture +0x9C, gFrameTexture
+// +0xA0, gMaskTexture +0xA4.
+struct ui_map_device_t
+{
+    virtual ~ui_map_device_t( ) = default;
+    virtual void map_matrix( const float* m ) = 0;                       // program vt+0x1C
+    virtual void map_colour( const std::uint8_t* rgba ) = 0;             // vt+0x30
+    virtual void map_range( const float* v ) = 0;                        // vt+0x20
+    virtual void map_texture( int which, std::uint32_t handle ) = 0;     // g 0x75907C vt+0xB4
+    virtual void map_draw( const float* vertices ) = 0;                  // vt+0xC0 ( 4, 2, v, 0x18 )
+};
+
+// 0x428060 -> 0x428080 (thiscall the entity = the record's +0; the record): the frame's quad, its first uv inside the frame's 38-pixel edge, its second the map around
+// the boat at (+0x54, +0x58), turned by +0x5C.
+inline void ui_record_map( ui_map_device_t& d, const ui_minimap_t& m, const std::uint8_t* r )
+{
+    const float half = 0.5f;
+    const float soft = m.m_softness * half;
+    const float range[ 2 ] = { half - soft, soft + half };
+    float matrix[ 16 ], rect[ 4 ], position[ 2 ], angle;
+    std::memcpy( matrix, r + 4, 64 );
+    std::memcpy( rect, r + 0x44, 16 );
+    std::memcpy( position, r + 0x54, 8 );
+    std::memcpy( &angle, r + 0x5C, 4 );
+    d.map_matrix( matrix );
+    d.map_colour( m.m_water );
+    d.map_range( range );
+    d.map_texture( 0, m.m_map );
+    d.map_texture( 1, m.m_frame );
+    d.map_texture( 2, m.m_mask );
+    const float x1 = rect[ 2 ] + rect[ 0 ], y1 = rect[ 3 ] + rect[ 1 ];
+    const float a = 38.0f / static_cast< float >( m.m_frame_size[ 0 ] ), b = 38.0f / static_cast< float >( m.m_frame_size[ 1 ] );   // 0x6F77B8
+    const float w = static_cast< float >( m.m_map_size[ 0 ] ) * m.m_scale, h = static_cast< float >( m.m_map_size[ 1 ] ) * m.m_scale;
+    const float cu = ( 1.0f / w ) * ( position[ 0 ] - ( -m.m_origin[ 0 ] * w ) );
+    const float cv = ( 1.0f / h ) * ( position[ 1 ] - ( -m.m_origin[ 1 ] * h ) );
+    const float ru = ( 1.0f / w ) * m.m_view, rv = ( 1.0f / h ) * m.m_view;
+    float c, s;
+    x87_sincos( angle, &c, &s );
+    const auto turn = [ & ]( float* v, float p, float q ) {
+        v[ 4 ] = ( p * c - q * s ) + cu;
+        v[ 5 ] = cv + ( p * s + q * c );
+    };
+    float v[ 24 ] = { rect[ 0 ], rect[ 1 ], a, b, 0, 0, rect[ 0 ], y1, a, 1.0f - b, 0, 0, x1, rect[ 1 ], 1.0f - a, b, 0, 0, x1, y1, 1.0f - a, 1.0f - b, 0, 0 };
+    turn( v, -ru, rv );
+    turn( v + 6, -ru, -rv );
+    turn( v + 12, ru, rv );
+    turn( v + 18, ru, -rv );
+    d.map_draw( v );
+}
+
+// 0x428070 -> 0x4284F0: each boat within 0.8 of the view (a clipped entry +0x10 kept on that rim), the quad of Basic/2dXyzUv at its map place, faded past 0.8 by 20, turned
+// by the view less its heading when +0x11 is set. `size` the icon texture's +0xC, +0x10.
+inline void ui_record_icons( ui_record_device_t& d, const ui_minimap_t& m, const std::function< void( std::uint32_t, std::int32_t*, std::int32_t* ) >& size, const std::uint8_t* r )
+{
+    float record_matrix[ 16 ], rect[ 4 ], view[ 2 ], angle, icon_scale;
+    std::int32_t count;
+    std::memcpy( record_matrix, r + 4, 64 );
+    std::memcpy( rect, r + 0x44, 16 );
+    std::memcpy( view, r + 0x54, 8 );
+    std::memcpy( &angle, r + 0x5C, 4 );
+    std::memcpy( &icon_scale, r + 0x60, 4 );
+    std::memcpy( &count, r + 0x64, 4 );
+    for ( std::int32_t k = 0; k < count; ++k )
+    {
+        const std::uint8_t* e = r + 0x68 + 24 * k;
+        float p[ 2 ], heading;
+        std::uint32_t texture;
+        std::memcpy( p, e, 8 );
+        std::memcpy( &heading, e + 8, 4 );
+        std::memcpy( &texture, e + 0xC, 4 );
+        const bool clip = e[ 0x10 ] != 0, rotate = e[ 0x11 ] != 0;
+        const float inv = 1.0f / m.m_view;
+        const float x = inv * ( p[ 0 ] - view[ 0 ] ), y = inv * ( p[ 1 ] - view[ 1 ] );
+        const float dist = _mm_cvtss_f32( _mm_sqrt_ss( _mm_set_ss( y * y + x * x ) ) );
+        const float rim = std::bit_cast< float >( 0x3F4CCCCDu );   // 0x6F7688
+        if ( !( rim > dist ) && !clip )
+            continue;
+        d.texture( 0u, texture );
+        float ax = x, ay = y;
+        if ( clip && dist > rim )
+        {
+            const float pull = rim / dist;
+            ax = pull * x;
+            ay = pull * y;
+        }
+        float c, s;
+        x87_sincos( angle, &c, &s );
+        const float along = ( c * ay - s * ax ) * -1.0f, across = s * ay + c * ax;
+        const float px = rect[ 2 ] * 0.5f + rect[ 0 ] + rect[ 2 ] * 0.5f * across;
+        const float py = rect[ 3 ] * 0.5f + rect[ 1 ] + rect[ 3 ] * 0.5f * along;
+        std::int32_t w = 0, h = 0;
+        size( texture, &w, &h );
+        const float sx = icon_scale * ( static_cast< float >( w ) / m.m_screen_scale[ 0 ] );
+        const float sy = icon_scale * ( static_cast< float >( h ) / m.m_screen_scale[ 1 ] );
+        float fade = 1.0f;
+        if ( !clip )
+            fade = _mm_cvtss_f32( _mm_min_ss( _mm_set_ss( ( rim - dist ) * std::bit_cast< float >( 0x419FFFFEu ) ), _mm_set_ss( 1.0f ) ) );   // 0x6F779C
+        std::uint8_t colour[ 4 ];
+        std::memcpy( colour, e + 0x12, 4 );
+        colour[ 3 ] = static_cast< std::uint8_t >( _mm_cvtss_si32( _mm_set_ss( fade * 255.0f ) ) );
+        float mat[ 16 ], t[ 16 ];
+        ui_matrix_translation( mat, px, py, 0.0f );
+        ui_matrix_scale( t, sx, sy, 1.0f );
+        scene_multiply( t, mat, mat );
+        if ( rotate )
+        {
+            ui_matrix_rotation_z( t, angle - heading );
+            scene_multiply( t, mat, mat );
+        }
+        scene_multiply( mat, mat, record_matrix );
+        d.colour( 1, "gColor", colour );
+        d.matrix( 1, "gTransform", mat );
+        const float quad[ 20 ] = { -0.5f, -0.5f, 0.0f, 0.0f, 0.0f, -0.5f, 0.5f, 0.0f, 0.0f, 1.0f, 0.5f, -0.5f, 0.0f, 1.0f, 0.0f, 0.5f, 0.5f, 0.0f, 1.0f, 1.0f };
+        d.draw( 4u, 2u, quad, 0x14u );
+    }
+}
+
 // ---- the pass ---------------------------------------------------------------------------------------------------------------------
 //
 // One VuGfxSort for the UI: the frame's draws fill it, flip runs its walk 0x53ADC0 with the table's type 17 (blend on, depth off) over
@@ -168,12 +284,12 @@ inline void ui_record_boost( ui_boost_device_t& d, const ui_speedometer_t& s, bo
 
 #if HYDRO_UI_PASS
 
-struct gfx_ui_pass_t final : gfx_sort_hooks_t, ui_record_device_t, ui_boost_device_t
+struct gfx_ui_pass_t final : gfx_sort_hooks_t, ui_record_device_t, ui_boost_device_t, ui_map_device_t
 {
     using read_t = std::function< bool( const std::string& asset, std::vector< std::uint8_t >& out ) >;
 
     // VuGfxUtil +4's records (0x541DD0): the program, its declaration, its material. Then the three font sets (0x538840).
-    enum { k_flat, k_textured, k_font, k_outline, k_image, k_boost, k_sets };
+    enum { k_flat, k_textured, k_font, k_outline, k_image, k_boost, k_map, k_sets };
     struct set_t
     {
         gfx_program_t* m_program = nullptr;
@@ -209,6 +325,12 @@ struct gfx_ui_pass_t final : gfx_sort_hooks_t, ui_record_device_t, ui_boost_devi
             boost_uv.m_type = 1u;
             boost_uv.m_usage = 6u;
             load( k_boost, "BoostMeter", { xy, boost_uv } );
+            gfx_vertex_element_t map_uv;            // the ctor 0x426D70's third row
+            map_uv.m_offset = 0x10u;
+            map_uv.m_type = 1u;
+            map_uv.m_usage = 6u;
+            map_uv.m_index = 1u;
+            load( k_map, "MiniMap", { xy, boost_uv, map_uv } );
         }
 #if HYDRO_UI_TEXT
         // 0x538840's lookups (the handles here are 1 + the record's index in m_handles), 0x536A.. order: plain, outline, images.
@@ -289,6 +411,27 @@ struct gfx_ui_pass_t final : gfx_sort_hooks_t, ui_record_device_t, ui_boost_devi
             ui_record_solid( *this, record );
         else if ( callback == k_ui_rect_callback )
             ui_record_outline( *this, record );
+        else if ( callback == k_ui_map_callback || callback == k_ui_icons_callback )
+        {
+            std::uint32_t self;
+            std::memcpy( &self, record, 4 );
+            if ( !m_sets[ k_map ].m_program || self >= m_maps.size( ) )
+            {
+                ++m_unknown;
+                return;
+            }
+            if ( callback == k_ui_map_callback )
+                ui_record_map( *this, m_maps[ self ], record );
+            else
+                ui_record_icons( *this, m_maps[ self ], [ this ]( std::uint32_t h, std::int32_t* w, std::int32_t* t ) {
+                    const auto at = m_sizes.find( h );
+                    if ( at != m_sizes.end( ) )
+                    {
+                        *w = at->second.first;
+                        *t = at->second.second;
+                    }
+                }, record );
+        }
         else if ( callback == k_ui_boost_callback )
         {
             std::uint32_t self;
@@ -354,6 +497,43 @@ struct gfx_ui_pass_t final : gfx_sort_hooks_t, ui_record_device_t, ui_boost_devi
         key = m_sets[ k_boost ].m_material ? m_sets[ k_boost ].m_material->m_key : 0u;
     }
 
+    // ---- ui_map_device_t -------------------------------------------------------------------------------------------------------
+    void map_matrix( const float* m ) override
+    {
+        const gfx_program_t& p = *m_sets[ k_map ].m_program;
+        if ( const gfx_constant_slot_t* c = p.constant( "gMapTransform" ) )
+            gfx_programs_t::set_matrix( m_direct, p, *c, m );
+    }
+    void map_colour( const std::uint8_t* rgba ) override
+    {
+        const gfx_program_t& p = *m_sets[ k_map ].m_program;
+        if ( const gfx_constant_slot_t* c = p.constant( "gWaterColor" ) )
+            gfx_programs_t::set_colour4( m_direct, p, *c, rgba );
+    }
+    void map_range( const float* v ) override
+    {
+        const gfx_program_t& p = *m_sets[ k_map ].m_program;
+        if ( const gfx_constant_slot_t* c = p.constant( "gDistMinMax" ) )
+            gfx_programs_t::set_vec2( m_direct, p, *c, v );
+    }
+    void map_texture( int which, std::uint32_t handle ) override
+    {
+        static const char* const names[ 3 ] = { "gMapTexture", "gFrameTexture", "gMaskTexture" };
+        bind( static_cast< std::uint32_t >( m_sets[ k_map ].m_program->sampler( names[ which ] ) ), handle );
+    }
+    void map_draw( const float* vertices ) override { m_gfx.draw_dynamic( 4u, 2u, vertices, 0x18u ); }
+
+    void map_material( std::uint32_t& id, std::uint32_t& key ) const
+    {
+        id = m_material_ids[ k_map ];
+        key = m_sets[ k_map ].m_material ? m_sets[ k_map ].m_material->m_key : 0u;
+    }
+    std::uint32_t map_add( const ui_minimap_t& m )
+    {
+        m_maps.push_back( m );
+        return static_cast< std::uint32_t >( m_maps.size( ) - 1u );
+    }
+
     // The entity behind a boost record (the record's +0), this frame's copy: ours for its address.
     std::uint32_t boost_add( const ui_speedometer_t& s )
     {
@@ -373,12 +553,13 @@ struct gfx_ui_pass_t final : gfx_sort_hooks_t, ui_record_device_t, ui_boost_devi
         image_t image;
         if ( !m_read( "VuTextureAsset/" + name, bytes ) || !decode_texture( bytes, image ) )
         {
-            LOG_WARNING( "UI pass: texture %s did not load (UNKNOWN: not drawn)", name.c_str( ) );
+            LOG_WARNING( "UI pass: texture %s did not load, %zu bytes, format word 0x%X (UNKNOWN: not drawn)", name.c_str( ), bytes.size( ), bytes.size( ) >= 36 ? bytes[ 32 ] | bytes[ 33 ] << 8 : 0 );
             return nullptr;
         }
         out.m_handle = upload( image.width, image.height, 4u, image.rgba.data( ), 0 );
         out.m_width = image.width;
         out.m_height = image.height;
+        m_sizes[ out.m_handle ] = { image.width, image.height };
         return &out;
     }
 
@@ -503,6 +684,7 @@ struct gfx_ui_pass_t final : gfx_sort_hooks_t, ui_record_device_t, ui_boost_devi
         m_direct.set_viewport( v );
         m_sort.flip( );
         m_boosts.clear( );
+        m_maps.clear( );
     }
 
 #  if HYDRO_HOST_WINDOWS
@@ -528,7 +710,9 @@ struct gfx_ui_pass_t final : gfx_sort_hooks_t, ui_record_device_t, ui_boost_devi
     ui_impl_t m_impl;
     std::int32_t m_width = 0, m_height = 0;
     std::vector< ui_speedometer_t > m_boosts;
-    int m_unknown = 0;   // commands whose callback is not recreated: the minimap
+    std::vector< ui_minimap_t > m_maps;
+    std::map< std::uint32_t, std::pair< std::int32_t, std::int32_t > > m_sizes;
+    int m_unknown = 0;   // commands whose callback is not recreated
 };
 
 #endif

@@ -138,6 +138,21 @@ inline bool decode_texture( const std::vector< std::uint8_t >& blob, image_t& im
     const unsigned format = blob[ 32 ] | ( blob[ 33 ] << 8 ) | ( blob[ 34 ] << 16 ) | ( blob[ 35 ] << 24 );
     if ( width <= 0 || height <= 0 || width > 8192 || height > 8192 )
         return false;
+    if ( format == 0x3Du )   // DXGI R8_UNORM (the minimap's Maps/*): the byte in the red lane, as the device reads it
+    {
+        const std::size_t texels = static_cast< std::size_t >( width ) * height;
+        if ( blob.size( ) < 56 + texels )
+            return false;
+        image.width = width;
+        image.height = height;
+        image.rgba.assign( texels * 4, 0 );
+        for ( std::size_t k = 0; k < texels; ++k )
+        {
+            image.rgba[ k * 4 ] = blob[ 56 + k ];
+            image.rgba[ k * 4 + 3 ] = 0xFF;
+        }
+        return true;
+    }
     if ( format != 0x47u && format != 0x4Du )
         return false;
 
