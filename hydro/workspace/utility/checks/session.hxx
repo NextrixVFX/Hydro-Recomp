@@ -2041,10 +2041,59 @@ inline bool verify_profile_saved( )
     return true;
 }
 
+// ROUTING (no retail side: 0x458500 and its three kin are completion_text, the slots progress_records / progress_champ): the record keys, through ui_platform_of and
+// ui_profile_saved, on a save the writers filled. Place 3 is a record but not a completion.
+inline bool verify_completion_saved( )
+{
+    value_t tracks, champs;
+    for ( value_t* db : { &tracks, &champs } )
+        for ( const char* key : { "T0", "T1" } )
+            ui_json_set_string( ui_json_child( ui_json_child( ui_json_child( *db, "VuDBAsset" ), key ), "AssetDB" ), key );
+    value_t unlock_db, save;
+    c_unlock_manager unlock;
+    unlock.init( &unlock_db, value_t{ }, value_t{ } );
+    const auto platform = ui_platform_of( ui_profile_saved( unlock, save ) );
+    ui_progress_add( save, "Race", "T0", "None", "C", 0, 0, 90.0f, 45.0f );
+    ui_progress_add( save, "Race", "T1", "None", "C", 0, 3, 90.0f, 45.0f );
+    ui_progress_add( save, "TimeTrial", "T1", "None", "C", 0, 1, 90.0f, 45.0f );
+    ui_progress_add( save, "Slalom", "T0", "CourseB", "C", 0, 2, 90.0f, 45.0f );
+    ui_progress_add( save, "Slalom", "T1", "CourseA", "C", 0, 3, 90.0f, 45.0f );
+    ui_progress_champ_result( save, "T0", 0 );
+    static const char* const want[ 4 ] = { "1/2 ", "1/6 ", "1/2 ", "1/2 " };
+    int failed = 0;
+    for ( int k = 0; k < 4; ++k )
+    {
+        ui_completion_t c;
+        c.m_kind = static_cast< ui_completion_kind_t >( k );
+        ui_completion_env_t env;
+        env.m_track_db = &tracks;
+        env.m_champ_db = &champs;
+        env.m_package = [ ]( const std::string& ) { return true; };
+        env.m_record = [ & ]( ui_completion_kind_t kind, const std::string& track, const std::string& course, std::int32_t& place ) {
+            const std::pair< bool, int > a = platform( ui_completion_record_key( kind, track, course ) );
+            place = a.second;
+            return a.first;
+        };
+        env.m_open = [ ]( ui_completion_kind_t, const std::string&, const std::string& ) { return false; };
+        env.m_string6 = [ ]( const char* ) { return std::string( ); };
+        ui_completion_initialize( c, env );
+        if ( c.m_text != want[ k ] || c.m_locked )
+        {
+            LOG_ERROR( "completion on the save, kind %d: '%s' locked %d, want '%s' 0", k, c.m_text.c_str( ), static_cast< int >( c.m_locked ), want[ k ] );
+            ++failed;
+        }
+    }
+    if ( failed )
+        return false;
+    LOG_SUCCESS( "completion texts on a filled save: 4 kinds (ROUTING onto completion_text and the record slots)" );
+    return true;
+}
+
 inline bool verify_session_all( )
 {
     bool ok = true;
     ok = verify_profile_saved( ) && ok;
+    ok = verify_completion_saved( ) && ok;
     ok = verify_prop_plugs( ) && ok;
     ok = verify_game_awards( ) && ok;
     ok = verify_pause_gate( ) && ok;

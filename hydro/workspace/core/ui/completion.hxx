@@ -52,6 +52,17 @@ inline int ui_completion_of_vtable( std::uint32_t vt )
     return -1;
 }
 
+inline constexpr const char* k_ui_completion_modes[ 4 ] = { "Race", "Slalom", "TimeTrial", "Championship" };
+
+// The record each kind asks ui_platform_of for. Race vt+0x18 = slot 6 0x4B1B70 and TimeTrial vt+0x20 = slot 8 0x4B1EB0 take no group: each fixes "None" itself, which is
+// what the writers store under. Slalom vt+0x28 = slot 10 0x4B21F0 passes its course. Championship vt+0x58 = 0x4B3980. The open test's "" course is a different argument.
+inline std::string ui_completion_record_key( ui_completion_kind_t k, const std::string& track, const std::string& course )
+{
+    if ( k == ui_completion_kind_t::championship )
+        return "88|" + track;
+    return "48|" + std::string( k_ui_completion_modes[ static_cast< int >( k ) ] ) + "|" + track + "|" + ( k == ui_completion_kind_t::slalom ? course : std::string( "None" ) );
+}
+
 inline void ui_completion_initialize( ui_completion_t& c, const ui_completion_env_t& env )
 {
     const bool champ = c.m_kind == ui_completion_kind_t::championship;
