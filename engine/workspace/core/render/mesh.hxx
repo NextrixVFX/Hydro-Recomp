@@ -281,7 +281,7 @@ int c_geometry::place( int geometry, int texture, int index_start, int index_cou
         item.color[ 0 ] = color[ 0 ];
         item.color[ 1 ] = color[ 1 ];
         item.color[ 2 ] = color[ 2 ];
-        if ( alpha_test == 11 || surface != nullptr )
+        if ( alpha_test == 11 || alpha_test == 14 || surface != nullptr )
             item.color[ 3 ] = color[ 3 ];
     }
     if ( surface != nullptr )
@@ -817,7 +817,7 @@ void c_geometry::draw( )
         constants.color[ 0 ] = item.color[ 0 ];
         constants.color[ 1 ] = item.color[ 1 ];
         constants.color[ 2 ] = item.color[ 2 ];
-        constants.color[ 3 ] = item.alpha_test == 11 || item.alpha_test == 2 ? item.color[ 3 ] : item.alpha_test >= 8 ? static_cast< float >( item.alpha_test - 7 ) : 1.0f;
+        constants.color[ 3 ] = item.alpha_test == 11 || item.alpha_test == 2 || item.alpha_test == 14 ? item.color[ 3 ] : item.alpha_test >= 8 ? static_cast< float >( item.alpha_test - 7 ) : 1.0f;
         const bool retail_blend = item.layer >= 5 && item.alpha_test == 0;   // shader.hxx's branch 5: retail's mode 12 pixel shader
         if ( retail_blend )
             constants.color[ 3 ] = item.diffuse_alpha;

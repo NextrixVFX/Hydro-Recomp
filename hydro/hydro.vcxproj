@@ -230,6 +230,9 @@
     <ClInclude Include="workspace\core\world\entities.hxx" />
     <ClInclude Include="workspace\core\world\field.hxx" />
     <ClInclude Include="workspace\core\world\foliage.hxx" />
+    <ClInclude Include="workspace\core\world\hudpass.hxx" />
+    <ClInclude Include="workspace\core\world\menu.hxx" />
+    <ClInclude Include="workspace\core\world\mode.hxx" />
     <ClInclude Include="workspace\core\world\force.hxx" />
     <ClInclude Include="workspace\core\world\front.hxx" />
     <ClInclude Include="workspace\core\world\frontcam.hxx" />
@@ -295,6 +298,7 @@
     <ClInclude Include="workspace\utility\checks\boat.hxx" />
     <ClInclude Include="workspace\utility\checks\device.hxx" />
     <ClInclude Include="workspace\utility\checks\foliage.hxx" />
+    <ClInclude Include="workspace\utility\checks\hudpass.hxx" />
     <ClInclude Include="workspace\utility\checks\game.hxx" />
     <ClInclude Include="workspace\utility\checks\input.hxx" />
     <ClInclude Include="workspace\utility\checks\leaves.hxx" />

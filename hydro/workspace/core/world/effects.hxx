@@ -211,6 +211,7 @@ public:
     void draw( const float* eye, const float* target, Texture&& texture, Model&& model, const std::vector< std::uint32_t >* systems = nullptr )
     {
         c_engine::drop( 11 );
+        c_engine::drop( 14 );
         if ( !m_ready || eye == nullptr || target == nullptr )
             return;
         if ( m_card < 0 )
@@ -379,7 +380,9 @@ private:
                     continue;
                 float placed_node[ 16 ];
                 math_multiply( placed_node, placed, part.node );
-                c_engine::place( part.geometry, part.texture, part.index_start, part.index_count, placed_node, color, 11, nullptr, part.detail );
+                // 0x5903A0's tail is the model instance's draw 0x520130: the model's own material, lit, with the particle's colour. 14: a lit
+                // placement this class drops each frame (the pfx quad's 11 is the unlit branch: user item 1, the windmill rotors).
+                c_engine::place( part.geometry, part.texture, part.index_start, part.index_count, placed_node, color, 14, nullptr, part.detail );
             }
         }
     }
