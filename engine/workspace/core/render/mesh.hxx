@@ -43,6 +43,8 @@ public:
         m_water_done = true;
     }
     void stage_pass( void ( *pass )( void*, bool ), void* user ) { m_stage_pass = pass; m_stage_user = user; }
+    void post_pass( bool ( *pass )( void*, void*, int, int ), void* user ) { m_post_pass = pass; m_post_user = user; }
+    bool post_now( void* view, int width, int height ) { return m_post_pass != nullptr && m_post_pass( m_post_user, view, width, height ); }
     void* view_of( int texture ) const;
     void draw( );
     void release( );
@@ -158,6 +160,8 @@ private:
     void* m_water_user = nullptr;
     void ( *m_stage_pass )( void*, bool ) = nullptr;
     void* m_stage_user = nullptr;
+    bool ( *m_post_pass )( void*, void*, int, int ) = nullptr;
+    void* m_post_user = nullptr;
     bool m_ready = false;
     void ( *m_sorted )( void*, const sorted_pass_t& ) = nullptr;
     void* m_sorted_user = nullptr;
@@ -1089,6 +1093,11 @@ void c_engine::stage_pass( void ( *pass )( void*, bool ), void* user )
     g_geometry( ).stage_pass( pass, user );
 }
 
+void c_engine::post_pass( bool ( *pass )( void*, void*, int, int ), void* user )
+{
+    g_geometry( ).post_pass( pass, user );
+}
+
 void c_engine::water_pass( void ( *pass )( void* ), void* user )
 {
     g_geometry( ).water_pass( pass, user );
@@ -1111,6 +1120,11 @@ void c_engine::device( void*& device, void*& context, void*& mirror )
     context = g_device( ).context( );
     mirror = g_target( ).mirror_view( );
 #endif
+}
+
+void c_engine::reflection_enabled( bool on )
+{
+    g_target( ).reflection_enabled = on;
 }
 
 void c_engine::reflection_plane( float z )

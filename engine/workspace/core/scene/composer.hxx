@@ -69,7 +69,8 @@ void c_composer::tick( )
     size_targets( );
     g_viewport( ).build( g_swap( ).width( ), g_swap( ).height( ) );
     g_sort( ).add( &c_composer::submit_main, this );
-    reflect( );
+    if ( g_target( ).reflection_enabled )
+        reflect( );
     g_sort( ).flush( );
     blit( );
 
@@ -138,9 +139,13 @@ void c_composer::blit( )
     ID3D11ShaderResourceView* unbound = nullptr;
     g_swap( ).bind( g_device( ) );
     g_device( ).context( )->RSSetState( nullptr );
-    g_shader( ).bind_blit( );   // retail's copy 0x5BC6F0: VuPostProcess 0x57BF10 holds Copy, GaussBlur5x5, RadialBlur, Effect; no FXAA in the image
-    g_target( ).bind_color( );
-    g_device( ).context( )->Draw( 3, 0 );
+    // 0x5588B0's radial step, when the game has an amount; its program is the pack's, world/stage.hxx.
+    if ( !g_geometry( ).post_now( g_target( ).colour_view( ), g_swap( ).width( ), g_swap( ).height( ) ) )
+    {
+        g_shader( ).bind_blit( );   // retail's copy 0x5BC6F0: VuPostProcess 0x57BF10 holds Copy, GaussBlur5x5, RadialBlur, Effect; no FXAA in the image
+        g_target( ).bind_color( );
+        g_device( ).context( )->Draw( 3, 0 );
+    }
     g_device( ).context( )->PSSetShaderResources( 0, 1, &unbound );
 #endif
 }

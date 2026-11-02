@@ -1482,6 +1482,7 @@ public:
         {
             water_pass_source_t source;
             source.m_read = [ this ]( const std::string& entry, std::vector< std::uint8_t >& out ) { return m_archive.read( entry.c_str( ), out ); };
+            source.m_cube = [ this ]( const std::string& name ) -> const gfx_texture_t* { return m_retail ? m_retail->cube_named( name ) : nullptr; };
             m_stage.attach( source );
             m_stage_attached = true;
         }
@@ -1489,7 +1490,7 @@ public:
         {
             for ( const water_built_t::entity_ref_t& ref : m_water.entities )
                 if ( ref.surface >= 0 )
-                    m_stage.surface( ref.surface, static_cast< const water_entity_state_t* >( static_cast< const entity_t* >( ref.entity )->m_state.get( ) )->shader_loads );
+                    m_stage.surface( ref.surface, static_cast< const water_entity_state_t* >( static_cast< const entity_t* >( ref.entity )->m_state.get( ) )->shader_loads, m_water.render_flags );
             m_stage_bound = true;
             LOG_INFO( "water: %d surfaces on %d retail shaders", static_cast< int >( m_stage.m_surface_shader.size( ) ), static_cast< int >( m_stage.m_pass->m_shaders.size( ) ) );
         }
@@ -1514,12 +1515,15 @@ public:
         std::memcpy( &view.m_statics.m_foam_size, &record[ 14 ], 4 );
         std::memcpy( view.m_statics.m_decal_ambient, &record[ 15 ], 4 );
         std::memcpy( view.m_statics.m_decal_diffuse, &record[ 16 ], 4 );
-        m_stage.frame( dt, m_grid_frame, view );
+        m_stage.frame( dt, m_grid_frame, view, m_water.render_flags[ 2 ] != 0u );
         c_engine::clear_colour( &record[ 1 ] );
         water_reflection_plane_tick( m_reflection_plane, &m_water, m_eye );
         c_engine::reflection_plane( m_reflection_plane.m_plane );
         if ( m_retail )
+        {
             m_retail->m_plane = m_reflection_plane.m_plane;
+            m_retail->m_blur = m_race.active ? m_race.viewport_blur : 0.0f;
+        }
         if ( m_retail )
             m_retail->frame( dt, record, m_far, m_lights );
     }
@@ -1560,6 +1564,8 @@ public:
                 item.retail->m_bones = m_retail->palette_id( palette->data( ) );
                 item.retail->draw( sort, item.world, p );
             }
+            if ( m_race.active )
+                race_session_debris_draw( m_race, sort, p );
             if ( !p.m_reflecting )
                 for ( retail_geom_t& g : m_retail_geoms )
                 {
@@ -1620,6 +1626,7 @@ public:
             m_retail_coronas.push_back( c );
         };
         c_engine::stage_pass( &gfx_retail_t::engine_pass, m_retail.get( ) );
+        c_engine::post_pass( &gfx_retail_t::engine_post, m_retail.get( ) );
     }
     const track_manager_t* track( ) const
     {
@@ -1644,6 +1651,7 @@ public:
         m_race.world.pfx_ops = m_pfx.manager_ops( );
         m_race.world.view = &m_water_view;
         m_race.world.water_tick = [ this ]( float step ) { water_frame( step ); };
+        m_race.world.debris_model = [ this ]( const std::string& asset ) { return m_retail ? m_retail->model( asset ) : nullptr; };
         m_race.world.triggers = [ this ] { race_triggers( ); };
         m_race.world.prop_draw = [ this ]( const entity_t& owner ) { prop_draw( owner ); };
         m_race.world.prop_drawn = [ this ]( const entity_t& owner, bool on ) {

@@ -1452,7 +1452,11 @@ inline void race_drive_viewports( race_session_t& s )
     };
     hooks.viewport_camera = [ &s ]( const std::uint8_t* ) { race_unwired( s, "the boat manager's override camera +0x2C0 (who sets it is not established)" ); };
     hooks.debug_camera = [ &s ] { race_unwired( s, "the boat manager's debug camera (dev layer)" ); };
-    hooks.lens_scale = [ &s ]( float ) { race_unwired( s, "the viewport's lens scale +0x278 (not consumed)" ); };
+    hooks.lens_scale = [ &s ]( float v ) {
+        if ( v > 0.0f && !( s.viewport_blur > 0.0f ) )
+            LOG_INFO( "race: the radial blur's amount rose to %.4f", v );
+        s.viewport_blur = v;
+    };
     hooks.lens_water = [ &s ]( float x ) { lens_water_set_push( s.lens, x ); };   // g 0x759048 vt+0x2C = slot 11 0x513620
     hooks.local = []( const void* boat, std::uint8_t local ) { const_cast< std::uint8_t* >( static_cast< const std::uint8_t* >( boat ) )[ 0x467 ] = local; };
     hooks.listener = [ &s ] { race_unwired( s, "the FMOD listener + the ActiveCameraTrigger's position (0x534830 / 0x534C00) (not wired)" ); };

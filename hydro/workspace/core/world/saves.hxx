@@ -129,6 +129,8 @@ inline void c_world::water_fidelity( )
     m_water.render_flags[ 0 ] = m_settings_platform.m_water_44;
     m_water.render_flags[ 1 ] = m_settings_platform.m_water_45;
     m_water.render_flags[ 2 ] = m_settings_platform.m_water_46;
+    m_stage_bound = false;                                       // "OnWaterSettingsChanged" 0x5DB3F0: 0x5DB800 on every surface
+    c_engine::reflection_enabled( m_water.render_flags[ 0 ] != 0u );   // 0x558C00's test of +0x44
 }
 
 // The award screen's and the championship's slots over the managers (ui/award.hxx, ui/standings.hxx). The unlock row (0x47F790's VuJsonContainer) reaches
