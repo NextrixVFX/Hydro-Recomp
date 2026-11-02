@@ -844,11 +844,25 @@ inline void c_world::on_animation_event( const std::string& owner, const std::st
         generic_event( carried, 0 );
         return;
     }
+    // "Show" / "Hide" (the prop's vtable slots 12 and 13, 0x5ECF90 / 0x5ECFE0): the draw component on / off the draw manager
+    // (its +0x1E guards it) and the prop's visible byte +0x7D, then the body in / out of the world. Our draw item is the
+    // component; the rigid part 0x544100 is not built for an animated prop (open), so there is no body to move.
+    if ( name == "Show" || name == "Hide" )
+    {
+        const auto e = m_entities.find( owner );
+        if ( e == m_entities.end( ) )
+        {
+            count_unhandled( owner, name );
+            return;
+        }
+        for ( static_draw_item_t& item : m_static_draws )
+            if ( item.owner == e->second )
+                item.off = name == "Hide";
+        return;
+    }
     // UNBUILT, named rather than guessed: PlayAudioEvent (FMOD event at
     // json Pos through the prop's matrix and scale), PlayPfxModelSpace
-    // (json PfxName/Pos/Rot), Show and Hide (the prop's vtable slots 12
-    // and 13, @0x5ecf90 / @0x5ecfe0, unread). Any other name does nothing
-    // in retail either.
+    // (json PfxName/Pos/Rot). Any other name does nothing in retail either.
     // PlayAudioEvent (world/sound.hxx prop_play_audio_event, the water agent's): json EventName / Pos through the prop's
     // transform +0x50 and its +0xB0 scale, on the audio platform.
     if ( name == "PlayAudioEvent" )
