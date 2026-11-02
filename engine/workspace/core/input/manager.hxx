@@ -186,6 +186,11 @@ public:
         m_method = method;
     }
 
+    int method( ) const
+    {
+        return m_method;
+    }
+
     // Slot 6 0x510E80: the smoothed value; 0 for an unknown name.
     float value( int controller, const char* name ) const
     {

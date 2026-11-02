@@ -1257,6 +1257,21 @@ inline std::uint32_t db_entry_property_destroy( const asset_words_t& w, std::uin
 // (0x55B560: a failed read answers false, the position left after the size word), then the +0x68 word. Both words are
 // little-endian (memcpy_s of 4). The caller's pack record guarantees the bytes; retail does no bounds check, past the
 // end this answers false.
+// VuXmlAsset's load, slot 5 0x5C7C40: the text's length, the static TiXmlBase condense byte 0x73579A cleared, TinyXML's Parse
+// ( text, 0, 1 ) at +0x58's vt+8; the position moves past the text only when that answers non-zero. The parse is a hook: TinyXML
+// (0x5A9..0x5AB, 0x60A..0x60B) is not recreated, the shipped pack holds no VuXmlAsset (batch 31), so nothing reaches it.
+inline bool xml_asset_load( const std::uint8_t* data, std::size_t& position, std::uint8_t& condense, bool ( *parse )( void* user, const std::uint8_t* text ), void* user )
+{
+    std::uint32_t size = 0;
+    std::memcpy( &size, data + position, 4 );
+    position += 4;
+    condense = 0;
+    if ( !parse( user, data + position ) )
+        return false;
+    position += size;
+    return true;
+}
+
 inline bool project_asset_load( const std::vector< std::uint8_t >& data, std::size_t& position, value_t& document, std::uint32_t& word )
 {
     std::uint32_t size = 0;
