@@ -166,7 +166,6 @@ inline void c_world::unlock_bind( )
         race_broadcast( "OnAwardScreenBusy", &p );
         award_busy( p );
     };
-    a.m_event = [ this ]( const char* name, const ui_params_t& p ) { award_event( name, p ); };
     a.m_input = [ this ]( const char* name ) { return m_race.input && m_race.input->manager.pressed( 0, name ); };
     a.m_touches = [ ] { return 0x7FFF; };   // g 0x759070 +0x1C: no finger down
     a.m_play = [ this ]( const char* event ) {

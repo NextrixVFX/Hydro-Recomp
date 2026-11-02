@@ -185,6 +185,8 @@ inline ui_frame_inputs_t ui_screen_inputs( c_ui_binding& binding, ui_screen_env_
         if ( id )
             return env.m_string7( *id );
         const std::uint32_t vt = e.m_ctor ? e.m_ctor->m_vtable : 0u;
+        if ( const std::string* award = b->award_state( e ) )   // slot 12: 0x443920 +0x10C as it is; 0x446DE0 VuStringDB slot 7 on it
+            return vt == k_ui_award_credit_vtable || !env.m_string7 ? *award : env.m_string7( *award );
         if ( vt == k_ui_achievement_name_vtable || vt == k_ui_achievement_value_vtable )
         {
             const ui_slot_t* key = ui_property_value( e, "Achievement" );
@@ -200,9 +202,11 @@ inline ui_frame_inputs_t ui_screen_inputs( c_ui_binding& binding, ui_screen_env_
         return env.m_text ? env.m_text( e ) : std::string( );
     };
     // The button's three (0x443280: Selected / Unselected / Pressed Texture), the boat stat's two (Tick Off / On Texture); else the image's.
-    in.m_texture = [ env ]( const entity_t& e, int which ) -> const ui_texture_t*
+    in.m_texture = [ env, b ]( const entity_t& e, int which ) -> const ui_texture_t*
     {
         const ui_frame_kind_t kind = ui_frame_kind_of( e );
+        if ( const std::string* award = b->award_state( e ) )   // slot 18 0x440EA0: +0xB8's handle
+            return award->empty( ) || !env.m_asset_texture ? nullptr : env.m_asset_texture( *award );
         if ( kind == ui_frame_kind_t::button && env.m_asset_texture )
         {
             static const char* const names[ 3 ] = { "Selected Texture", "Unselected Texture", "Pressed Texture" };
@@ -260,8 +264,13 @@ inline ui_frame_inputs_t ui_screen_inputs( c_ui_binding& binding, ui_screen_env_
         const ui_remap_t* row = b->remap( e );
         if ( !row || !env.m_remap )
             return false;
-        // The two VuUIFonts (0x626B80 on each). The row's six textures +0x208..+0x21C stay 0: the ctor 0x45FD30's asset creates are not read.
+        // The row's six textures: 0x460E26 .. 0x460FD5 ask the asset factory 0x426A90 for fixed names, each handle = the asset's +0x58. The two VuUIFonts (0x626B80 on each).
         ui_remap_t r = *row;
+        static const char* const k_textures[ 6 ] = { "UI/Gamepad_Axis", "UI/Gamepad_Button", "UI/Gamepad_Key", "UI/Gamepad_InputMapping", "UI/Gamepad_InputMapping_Selected", "UI/Gamepad_InputMapping_Pressed" };
+        if ( env.m_asset_texture )
+            for ( int k = 0; k < 6; ++k )
+                if ( const ui_texture_t* t = env.m_asset_texture( k_textures[ k ] ) )
+                    r.m_textures[ k ] = t->m_handle;
         r.m_label_font.m_asset_font = ui_screen_font( e, "Label Font", env );
         r.m_label_font.m_asset = r.m_label_font.m_asset_font != 0u;
         r.m_control_font.m_asset_font = ui_screen_font( e, "Control Font", env );

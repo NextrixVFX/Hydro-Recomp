@@ -14,6 +14,7 @@
 #include <workspace/core/ui/standings.hxx>
 #include <workspace/core/ui/ticker.hxx>
 #include <workspace/core/ui/footer.hxx>
+#include <workspace/core/world/latch.hxx>
 #include <workspace/core/ui/completion.hxx>
 #include <workspace/core/ui/wired.hxx>
 #include <workspace/core/ui/wiring.hxx>
@@ -104,6 +105,9 @@ inline constexpr std::uint32_t k_ui_page_vtable = 0x6F72C4u;
 inline constexpr std::uint32_t k_ui_results_vtable = 0x73DA38u;
 inline constexpr std::uint32_t k_ui_champ_vtable = 0x73C998u;
 inline constexpr std::uint32_t k_ui_remap_vtable = 0x73D4F4u;
+// Screens/Award's leaves: text bases over +0x10C (ctors 0x443870, 0x446D30, 0x446F00, 0x447060), image bases over +0xB8 (0x440B80, 0x446AE0).
+inline constexpr std::uint32_t k_ui_award_credit_vtable = 0x73B86Cu, k_ui_award_trophy_text_vtable = 0x73C18Cu, k_ui_award_cat_text_vtable = 0x73C25Cu, k_ui_award_info_text_vtable = 0x73C32Cu;
+inline constexpr std::uint32_t k_ui_award_image_vtable = 0x73B5DCu, k_ui_award_trophy_image_vtable = 0x73C0BCu;
 inline constexpr std::uint32_t k_ui_throttle_remap_vtable = 0x73D45Cu;
 inline constexpr std::uint32_t k_ui_set_info_vtable = 0x73E818u;
 
@@ -328,6 +332,7 @@ struct ui_bound_config_t
 struct ui_hud_shown_t
 {
     bool m_visible = true;     // +0x64 (image +0x6C) "Visible"
+    std::string m_award;       // Screens/Award's leaves: text +0x10C, image: the asset of +0xB8 ("": none)
     float m_alpha = 1.0f;      // +0x108 (image +0xB4)
     std::string m_string_id;   // VuUITextEntity +0x10C "String ID"
 };
@@ -399,6 +404,8 @@ struct ui_bind_hooks_t
     std::function< std::uint32_t( const entity_t& ) > m_font;
     // Preferred over m_info.m_measure when set: 0x5373D0 needs the entity's own font params (+0xA0).
     std::function< float( const entity_t&, const std::string&, float ) > m_measure_of;
+    // The asset factory's test 0x4269D0 on a texture name (0x440CC0). Null: every name exists.
+    std::function< bool( const char* ) > m_texture_exists;
     // HOOK: the license manager g 0x758FAC vt+0x18 (footer.hxx). Null: VuLicenseEntity stays an UNKNOWN input.
     std::function< bool( ) > m_trial;
     // The sliders': HOOKS the touch device g 0x759070 (slot 6 count, slot 7 point),
@@ -639,9 +646,47 @@ private:
 
     static bool shown_vtable( std::uint32_t vt )
     {
-        // 0x73B5DC .. 0x73C32C: Screens/Award's image and text leaves, whose Show / Hide / SetAlpha are their bases' (ctors 0x6284E0, 0x627070).
-        return vt == k_ui_hud_element_vtable || vt == k_ui_text_vtable || vt == k_ui_hud_toast_vtable || vt == k_ui_image_vtable || vt == 0x73B5DCu || vt == 0x73C0BCu ||
-               vt == 0x73B86Cu || vt == 0x73C18Cu || vt == 0x73C25Cu || vt == 0x73C32Cu;
+        return vt == k_ui_hud_element_vtable || vt == k_ui_text_vtable || vt == k_ui_hud_toast_vtable || vt == k_ui_image_vtable || award_vtable( vt );
+    }
+
+    static bool award_vtable( std::uint32_t vt )
+    {
+        return vt == k_ui_award_credit_vtable || vt == k_ui_award_trophy_text_vtable || vt == k_ui_award_cat_text_vtable || vt == k_ui_award_info_text_vtable ||
+               vt == k_ui_award_image_vtable || vt == k_ui_award_trophy_image_vtable;
+    }
+
+    // The six leaves' listeners (footer.hxx).
+    // 0x440CC0: the old texture released; a non-empty name the factory has (0x4269D0): created into +0xB8, +0x6C = 1.
+    void bind_award( ui_bound_t& b )
+    {
+        ui_hud_shown_t* s = b.m_shown.get( );
+        const std::uint32_t vt = b.m_vtable;
+        if ( vt == k_ui_award_credit_vtable )
+        {
+            s->m_award = "0";   // the ctor's 0x6F36D4
+            add( b, "OnCreditsChanged", 0x443930u, [ this, s ]( const ui_params_t& p ) {
+                ui_params_reader_t r( p );
+                const std::int32_t value = ui_params_read_int( r ), earned = ui_params_read_int( r );
+                s->m_award = ui_award_credit_text( value, earned, [ this ]( const char* id ) { return m_hooks.m_string_db ? m_hooks.m_string_db( id ) : std::string( ); } );
+            } );
+        }
+        else if ( vt == k_ui_award_trophy_text_vtable )
+            add( b, "OnSetTrophyStringID", 0x446E00u, [ s ]( const ui_params_t& p ) { ui_params_reader_t r( p ); ui_award_string_id( s->m_award, s->m_visible, r.read_string( ) ); } );
+        else if ( vt == k_ui_award_cat_text_vtable )
+            add( b, "OnSetUnlockCatStringID", 0x446E00u, [ s ]( const ui_params_t& p ) { ui_params_reader_t r( p ); ui_award_string_id( s->m_award, s->m_visible, r.read_string( ) ); } );
+        else if ( vt == k_ui_award_info_text_vtable )
+            add( b, "OnSetUnlockInfoStringID", 0x447110u, [ s ]( const ui_params_t& p ) { ui_params_reader_t r( p ); ui_award_info_id( s->m_award, s->m_visible, r.read_string( ) ); } );
+        else
+            add( b, vt == k_ui_award_image_vtable ? "OnAwardImageChange" : "OnTrophyImageChange", 0x440CC0u, [ this, s ]( const ui_params_t& p ) {
+                ui_params_reader_t r( p );
+                const char* name = r.read_string( );
+                s->m_award.clear( );
+                if ( name && *name && ( !m_hooks.m_texture_exists || m_hooks.m_texture_exists( name ) ) )
+                {
+                    s->m_award = name;
+                    s->m_visible = true;
+                }
+            } );
     }
 
     static void make_shown( ui_bound_t& b )
@@ -662,6 +707,20 @@ private:
         if ( shown_vtable( b.m_vtable ) && b.m_vtable != k_ui_hud_element_vtable && b.m_vtable != k_ui_hud_toast_vtable )
         {
             make_shown( b );
+            if ( award_vtable( b.m_vtable ) )
+                bind_award( b );
+            return true;
+        }
+        // VuGenericEventEntity on a screen (Screens/Award's Show / HideTrophy): the listener 0x5F0420 on the project's own events.
+        if ( b.m_vtable == 0x75674Cu )
+        {
+            entity_t& e = *b.m_entity;
+            const ui_slot_t* name = ui_bind_slot( e, "Event Name" );
+            const std::string own = name ? name->m_text : std::string( );
+            add( b, "OnGenericEvent", 0x5F0420u, [ this, &e, own ]( const ui_params_t& p ) {
+                if ( generic_receive( own, p.m_bytes, p.m_size ) )
+                    fire_named( e, "OnReceived", ui_params_t( ) );
+            } );
             return true;
         }
         // Batch 33: the Screens hold this entity too (Main's license / sign-in branches run off it): as the HUD's, 0x5EFA60 fires "Trigger".
@@ -1938,6 +1997,13 @@ public:
         visible = s->m_visible ? 1 : 0;
         alpha = s->m_alpha;
         return true;
+    }
+    // Screens/Award's leaves: what their listeners left (text +0x10C, image the asset of +0xB8), or null: not one.
+    const std::string* award_state( const entity_t& e ) const
+    {
+        const int index = index_of( e );
+        const ui_bound_t* b = index >= 0 ? m_bound[ static_cast< std::size_t >( index ) ].get( ) : nullptr;
+        return b && b->m_shown && award_vtable( b->m_vtable ) ? &b->m_shown->m_award : nullptr;
     }
     // The String ID a SetStringID left on a button (0x442980) or a text base (0x62F480), or null.
     const std::string* runtime_string( const entity_t& e ) const

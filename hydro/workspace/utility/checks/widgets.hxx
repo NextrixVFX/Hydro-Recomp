@@ -3124,6 +3124,62 @@ inline bool verify_ui_completion_text( )
     return true;
 }
 
+// award_leaves: Screens/Award's text listeners on a bound leaf, through c_ui_binding::post. Retail's on a bare object: credits, the two string-id forms. "old" = the ctor's state here.
+inline bool verify_ui_award_leaves( )
+{
+    int failed = 0;
+    for ( std::size_t k = 0; k < g_golden_award_rows_count; ++k )
+    {
+        const golden_award_row_t& g = g_golden_award_rows[ k ];
+        std::string out = "old";
+        unsigned visible = 1;
+        if ( g.m_fn == 0x443930u )
+            out = ui_award_credit_text( g.m_a, g.m_b, [ ]( const char* ) { return std::string( "," ); } );
+        else
+        {
+            bool shown = g.m_a != 0;
+            if ( g.m_fn == 0x447110u )
+                ui_award_info_id( out, shown, g.m_text );
+            else
+                ui_award_string_id( out, shown, g.m_text );
+            visible = shown ? 1u : 0u;
+        }
+        if ( ( out != g.m_out || visible != g.m_visible ) && ++failed <= 3 )
+            LOG_ERROR( "award row %d: 0x%X '%s' %u, retail '%s' %u", static_cast< int >( k ), g.m_fn, out.c_str( ), visible, g.m_out, g.m_visible );
+    }
+    if ( failed || g_golden_award_rows_count == 0 )
+    {
+        LOG_ERROR( "verify_ui_award_leaves: %d of %d rows differ", failed, static_cast< int >( g_golden_award_rows_count ) );
+        return false;
+    }
+    LOG_SUCCESS( "verify_ui_award_leaves: 0x443930, 0x446E00, 0x447110 match retail on %d runs", static_cast< int >( g_golden_award_rows_count ) );
+    return true;
+}
+
+// crop_update: 0x4CC110 by retail: 300 (size, aspect) pairs: the crop, its inverse, +0x8C.
+inline bool verify_ui_crop_update( )
+{
+    int failed = 0;
+    for ( std::size_t k = 0; k < g_golden_crop_rows_count; ++k )
+    {
+        const golden_crop_row_t& g = g_golden_crop_rows[ k ];
+        ui_impl_t impl;
+        std::memcpy( &impl.m_aspect, &g.m_aspect, 4 );
+        ui_crop_update( impl, g.m_w, g.m_h );
+        bool same = std::memcmp( impl.m_crop.m_matrix, g.m_words, 64 ) == 0 && std::memcmp( impl.m_inverse, g.m_words + 16, 64 ) == 0;
+        same = same && std::memcmp( &impl.m_float, g.m_words + 32, 4 ) == 0;
+        if ( !same && ++failed <= 3 )
+            LOG_ERROR( "crop %dx%d aspect %08X differs", g.m_w, g.m_h, g.m_aspect );
+    }
+    if ( failed || g_golden_crop_rows_count == 0 )
+    {
+        LOG_ERROR( "verify_ui_crop_update: %d of %d rows differ from retail's 0x4CC110", failed, static_cast< int >( g_golden_crop_rows_count ) );
+        return false;
+    }
+    LOG_SUCCESS( "verify_ui_crop_update: 0x4CC110 matches retail on %d sizes x aspects (crop, inverse, +0x8C)", static_cast< int >( g_golden_crop_rows_count ) );
+    return true;
+}
+
 // achievement_text: 0x4458F0 / 0x445C50 by retail over a synthetic AchievementDB: one row per key, the DB built from the row.
 inline bool verify_ui_achievement_text( )
 {
@@ -3273,6 +3329,8 @@ inline bool verify_ui_widgets_all( )
     ok = verify_ui_footer_text( ) && ok;
     ok = verify_ui_completion_text( ) && ok;
     ok = verify_ui_achievement_text( ) && ok;
+    ok = verify_ui_crop_update( ) && ok;
+    ok = verify_ui_award_leaves( ) && ok;
     ok = verify_ui_screen_inputs( ) && ok;
     ok = verify_ui_slider_frame( ) && ok;
     ok = verify_ui_common_screen( ) && ok;

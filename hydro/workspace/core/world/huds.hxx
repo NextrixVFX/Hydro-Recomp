@@ -1,5 +1,7 @@
 #pragma once
 
+#include <workspace/core/ui/crop.hxx>
+
 // c_world's race HUD projects - member definitions (one class, split by concern).
 //
 // VuRaceGame's ctor 0x489030 loads three projects through 0x4B4360 (the same
@@ -315,6 +317,14 @@ inline void c_world::bind_game_screens( )
     // g 0x759038 slot 9( pad, name ): the manager's "pressed" (Results' Select).
     hooks.m_input = [ this ]( int pad, const char* name ) { return m_race.input && m_race.input->manager.pressed( pad, name ); };
     hooks.m_touch_device = &m_touch;
+    hooks.m_texture_exists = [ this ]( const char* name ) { return !m_archive.names( std::string( "VuTextureAsset/" ) + name ).empty( ); };
+#if HYDRO_UI_PASS
+    if ( m_ui_pass )
+    {
+        hooks.m_crop = &m_ui_pass->m_impl.m_crop;
+        hooks.m_inverse = m_ui_pass->m_impl.m_inverse;
+    }
+#endif
     g.m_hooks = hooks;
     m_race.rules.screen_hooks.results_open = [ this ]( const char* project ) { return m_race.screens.results_open( project ); };
     m_race.rules.screen_hooks.screen = [ this ]( int screen, int verb, float dt ) {
@@ -325,7 +335,6 @@ inline void c_world::bind_game_screens( )
     };
     m_race.rules.screen_hooks.award_done = [ this ] { return m_race.screens.award_done( ); };
     m_race.rules.screen_hooks.award.award_open = [ this ]( const char* project, std::int32_t tier, const std::string& boat_class, std::int32_t value, const std::vector< std::string >& names ) {
-        m_award_view = award_view_t{ };
         return m_race.screens.award_open( project, tier, boat_class, value, names );
     };
     m_race.rules.screen_hooks.paused = [ this ] { return m_boxes.drawing( ); };
@@ -426,11 +435,6 @@ inline ui_frame_inputs_t c_world::ui_inputs( )
     in.m_fontdb = &m_font_db;
     in.m_string = [ this ]( const std::string& id ) { return string_db_get( m_string_db, id ); };
     in.m_texture = [ this ]( const entity_t& e, int which ) -> const ui_texture_t* {
-        if ( e.m_type == "VuBarracudaUITrophyImageEntity" || e.m_type == "VuBarracudaUIAwardImageEntity" )
-        {
-            const std::string& image = e.m_type[ 13 ] == 'T' ? m_award_view.trophy_image : m_award_view.award_image;   // 0x440EA0: +0xB8's texture
-            return image.empty( ) ? nullptr : m_ui_pass->texture_asset( image );
-        }
         static const char* const names[ 3 ] = { "Texture Asset", "Selected Texture Asset", "Pressed Texture Asset" };
         const ui_slot_t* s = ui_property_value( e, names[ which < 3 ? which : 0 ] );
         return s && !s->m_text.empty( ) ? m_ui_pass->texture_asset( s->m_text ) : nullptr;
@@ -480,14 +484,6 @@ inline ui_screen_env_t c_world::ui_screen_environment( )
     env.m_text = [ this ]( const entity_t& e ) {
         if ( e.m_type == "VuGamerTagUITextEntity" )   // slot 12 0x445DE0
             return platform_gamer_tag( );
-        if ( e.m_type == "VuBarracudaUICreditTextEntity" )   // slot 12 0x443920: +0x10C itself
-            return m_award_view.credits;
-        if ( e.m_type == "VuBarracudaUITrophyTextEntity" )   // 0x446DE0, the three: VuStringDB slot 7 on +0x10C
-            return m_award_view.trophy_id.empty( ) ? std::string( ) : string_db_get( m_string_db, m_award_view.trophy_id );
-        if ( e.m_type == "VuBarracudaUIUnlockCatTextEntity" )
-            return m_award_view.cat_id.empty( ) ? std::string( ) : string_db_get( m_string_db, m_award_view.cat_id );
-        if ( e.m_type == "VuBarracudaUIUnlockInfoTextEntity" )
-            return m_award_view.info_id.empty( ) ? std::string( ) : string_db_get( m_string_db, m_award_view.info_id );
         const ui_slot_t* id = ui_property_value( e, "String ID" );
         return id && !id->m_text.empty( ) ? string_db_get( m_string_db, id->m_text ) : std::string( );
     };
@@ -605,7 +601,12 @@ inline void c_world::ui_frame( )
 #if HYDRO_UI_PASS
     if ( !m_ui_pass || !m_modes.m_mode )
         return;
+    // g 0x75907C slot 16 is the swap chain's size in every mode; m_race is rebuilt by a load, so the window's answer is taken here too.
+    if ( const char* size = c_engine::option( "window-size" ) )
+        sscanf_s( size, "%dx%d", &m_race.world.display_w, &m_race.world.display_h );
     m_ui_pass->begin( m_race.world.display_w, m_race.world.display_h );
+    m_ui_pass->m_impl.m_aspect = 1.5f;   // boot 0x4023DE stores 0x3FC00000 over the ctor's 16 / 9: the screens are authored 1080 x 720
+    ui_crop_update( m_ui_pass->m_impl, m_race.world.display_w, m_race.world.display_h );   // 0x4CC0F0's first call
     m_modes.draw( );
     ghost_labels( );
     boxes_draw( );
