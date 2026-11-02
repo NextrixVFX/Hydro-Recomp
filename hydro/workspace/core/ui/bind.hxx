@@ -1290,7 +1290,8 @@ private:
         }
         else if ( ui_is_slider_vtable( b.m_vtable ) )
         {
-            const ui_slider_t s = ui_bind_slider( e, b.m_vtable );
+            ui_slider_t s = ui_bind_slider( e, b.m_vtable );
+            s.m_ours = ui_ours_tag( e.m_name );   // ours, not retail
             ui_slider_hooks_t& h = b.m_slider_hooks;
             h.m_broadcast = [ this ]( std::uint32_t hash, const ui_params_t& p ) { broadcast( hash, p ); };
             h.m_fire = [ this, &e ]( const char* plug, const ui_params_t& p ) { fire_named( e, plug, p ); };
@@ -1441,6 +1442,7 @@ private:
             };
             b.m_combo = std::make_unique< c_ui_combo_box >( ui_entity_id( ui_long_name( e ) ), b.m_vtable, h );
             c_ui_combo_box& c = *b.m_combo;
+            c.m_ours = ui_ours_tag( e.m_name );   // ours, not retail
             ui_combo_box_fill( c, e );
             // 0x474590 registers OnUISetFocus / OnUITick / OnUIEvent through the slot thunks
             add( b, "OnUISetFocus", 0x404AB2u, [ &c ]( const ui_params_t& p ) { c.on_set_focus( p ); } );

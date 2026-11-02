@@ -97,6 +97,10 @@ public:
     static void reflection_enabled( bool on );
     static void lens( float tan_half, float near_plane );
     static void flip_interval( int interval );   // g 0x75907C vt+0x28: the Present's sync interval
+    static void frame_limit( int hertz );        // ours, not retail: 0 unlimited; ignored in --bench
+    static void vsync( bool on );                // ours, not retail: Present interval 1; ignored in --bench
+    static void display_scale_source( const float* scale );   // the settings' g 0x758F94 +0xC, read every frame
+    static float display_scale( );
     static void matrices( float* view, float* projection, float* eye );
     // Six square RGBA faces in asset order; returns a cube handle for place().
     static int cube( const unsigned char* const* faces, int face );

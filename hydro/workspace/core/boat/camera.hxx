@@ -5,6 +5,7 @@
 #include <workspace/core/boat/math.hxx>
 #include <workspace/core/boat/state.hxx>
 
+#include <algorithm>
 #include <cfloat>
 #include <climits>
 #include <cmath>
@@ -39,6 +40,12 @@
 // object) is what boat_decision_tick's camera_tick hook stands for (0x41EFF0
 // calls 0x409900 there); then read the eye +0x00, target +0x10, view +0x70,
 // projection +0x30.
+
+// OURS, NOT RETAIL: the user's Video settings, defaults exact; what each scales is told at the shake below.
+inline float g_camera_ours_shake = 1.0f;
+inline float g_camera_ours_zoom = 1.0f;
+inline float g_camera_ours_fov = 0.0f;       // degrees, 0: ConstantDB's
+inline float g_camera_ours_shake_peak = 0.0f;   // the largest eye move since a --camera-log line read it
 
 // What the tick reads through its boat (camera +0x240), each read by the
 // caller where retail reads it: world = *(boat +0x50) +0x50 (the transform
@@ -297,7 +304,7 @@ inline void camera_chase( std::uint8_t* cam, const camera_boat_t& boat, float dt
     const bool snap = cam[ 0x2C4 ] != 0;
     camera_velocity( cam, boat, dt );
     const float top = camera_top( boat );
-    const float lag = state_f( cam, 0x264 );
+    const float lag = state_f( cam, 0x264 ) * g_camera_ours_zoom;
     const float scale = lag / ( top * -0.44703999f );
     const float vx = state_f( cam, 0x2D4 ), vy = state_f( cam, 0x2D8 ), vz = state_f( cam, 0x2DC );
     const float speed = std::sqrt( ( vx * vx + vy * vy ) + vz * vz );
@@ -337,7 +344,7 @@ inline void camera_variant( std::uint8_t* cam, const camera_boat_t& boat, float 
     state_put_f( cam, 0x2B0, 0.0f );   // stale stack in retail
     const bool snap = cam[ 0x2C4 ] != 0;
     camera_velocity( cam, boat, dt );
-    const float scale = state_f( cam, 0x264 ) / ( camera_top( boat ) * -0.44703999f );
+    const float scale = ( state_f( cam, 0x264 ) * g_camera_ours_zoom ) / ( camera_top( boat ) * -0.44703999f );
     const float lz = state_f( cam, 0x2DC ) * scale;
     eye[ 0 ] = scale * state_f( cam, 0x2D4 ) + state_f( cam, 0x2A4 );
     eye[ 1 ] = state_f( cam, 0x2A8 ) + state_f( cam, 0x2D8 ) * scale;
@@ -367,6 +374,10 @@ inline void camera_fixed( const std::uint8_t* cam, const camera_boat_t& boat, in
     near_plane = near_value;
 }
 
+// OURS, NOT RETAIL: the user's Video settings; at their defaults every product below is exact, and the camera is retail's.
+// Shake: scales the amplitude where 0x40AEB0 reads it, so every source that writes +0x2E4 (OnCameraShake, the big splash, the
+// event's) follows. Zoom: scales the lag distance +0x264, the only input of the speed and falling offsets of 0x409D00 and 0x40A4D0.
+// Fov: replaces VerticalFOV in the race camera (drive.hxx); the reflection mirrors that camera, the front end keeps ConstantDB's.
 // 0x40AEB0 (VuBoatCamera_helper; __userpurge ecx camera, xmm1 dt; eye*,
 // target*; retn 8), the shake: s = sin(+0x2F0 x +0x2E8) (x87 - SUBSTITUTION:
 // fsin served by x87_sincos's sine on this FPU), v = (+0x2F4.. x +0x2E4) x s,
@@ -377,7 +388,7 @@ inline void camera_shake( std::uint8_t* cam, float dt, float* eye, float* target
 {
     float c, s;
     x87_sincos( state_f( cam, 0x2F0 ) * state_f( cam, 0x2E8 ), &c, &s );
-    const float amp = state_f( cam, 0x2E4 ), duration = state_f( cam, 0x2EC ), timer = state_f( cam, 0x2E8 );
+    const float amp = state_f( cam, 0x2E4 ) * g_camera_ours_shake, duration = state_f( cam, 0x2EC ), timer = state_f( cam, 0x2E8 );
     float vx = ( state_f( cam, 0x2F4 ) * amp ) * s;
     float vy = ( state_f( cam, 0x2F8 ) * amp ) * s;
     float vz = ( state_f( cam, 0x2FC ) * amp ) * s;
@@ -388,6 +399,7 @@ inline void camera_shake( std::uint8_t* cam, float dt, float* eye, float* target
         vy = vy * k;
         vz = vz * k;
     }
+    g_camera_ours_shake_peak = ( std::max )( g_camera_ours_shake_peak, std::sqrt( vx * vx + vy * vy + vz * vz ) * 0.5f );
     const float dx = target[ 0 ] - eye[ 0 ], dz = target[ 2 ] - eye[ 2 ], dy = target[ 1 ] - eye[ 1 ];
     const float len = std::sqrt( ( dy * dy + dx * dx ) + dz * dz );
     eye[ 0 ] = vx * 0.5f + eye[ 0 ];

@@ -56,7 +56,12 @@ inline const logic_services_t& c_world::logic_services( )
                 settings_float( member( metro, "SteeringSensitivity" ), t.ui.m_steering );
             }
             else
+            {
                 settings_defaults_display( t, metro, m_settings_hooks, m_settings_platform );
+                settings_ours_defaults( t.ui.m_ours );   // ours, not retail: Default covers the whole screen
+                if ( t.ui.m_ours_changed )
+                    t.ui.m_ours_changed( );
+            }
         };
         s.input_defaults = [ this ]( int method ) {
             platform_input_t* in = m_race.input ? m_race.input.get( ) : m_menu_input.get( );

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <workspace/core/world/video.hxx>
+
 // c_world's front end - member definitions (world batch 37): VuFrontEndGameMode (ui/flow.hxx) driven from the loaded Screens/* projects,
 // through the mode manager (world/mode.hxx). Nothing here is a retail function: it binds c_front_end's hooks to OUR objects:
 //   m_load_project   0x4B4360 through the UI's world (ui_hud_load), a c_ui_binding per project
@@ -320,7 +322,12 @@ inline std::unique_ptr< entity_t > c_world::menu_load_root( const std::string& n
         LOG_WARNING( "front end: %s not in the pack", asset.c_str( ) );
         return nullptr;
     }
-    const value_t document = c_reader( bytes ).parse( );
+    value_t document = c_reader( bytes ).parse( );
+    if ( name == "Screens/SettingsGraphics" )   // ours, not retail: world/video.hxx
+    {
+        video_screen_patch( document );
+        video_strings( m_string_db );
+    }
     const value_t* project = find( document, "VuProject" );
     if ( !project )
         return nullptr;

@@ -41,8 +41,10 @@ private:
 
 c_swap& g_swap( );
 
-// The flip interval g 0x75907C vt+0x28 writes (retail's device +8, the Present's first argument). Held, NOT applied: the user asked for vsync always off (present( ) passes 0), so retail's interval is ignored here.
+// The flip interval g 0x75907C vt+0x28 writes (retail's device +8, the Present's first argument). Held, NOT applied: the user asked for vsync off unless they turn it on, so retail's interval is ignored here.
 inline std::uint32_t g_swap_interval = 1u;
+// Ours, not retail: the user's VSync setting, default off. On: Present interval 1, and no tearing flag (DXGI refuses it with an interval).
+inline bool g_swap_vsync = false;
 
 #include <workspace/utility/logger.hxx>
 
@@ -260,7 +262,7 @@ void c_swap::present( )
     if ( m_swap )
     {
         const double present_start = trace::now( );
-        m_swap->Present( 0u, m_tearing ? DXGI_PRESENT_ALLOW_TEARING : 0u );
+        m_swap->Present( g_swap_vsync ? 1u : 0u, m_tearing && !g_swap_vsync ? DXGI_PRESENT_ALLOW_TEARING : 0u );
         trace::frame( ).present += trace::now( ) - present_start;
     }
     trace::report( );

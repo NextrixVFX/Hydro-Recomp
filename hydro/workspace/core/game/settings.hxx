@@ -187,6 +187,42 @@ inline void settings_save( const settings_t& s, value_t& profile, const settings
     json_set_string( json_member( graphics, "Units" ), s.ui.m_units );
 }
 
+// ---- OURS, NOT RETAIL: the user's Video settings (ui/slider.hxx). Their own "Settings/Ours" member, so 0x4B4870 / 0x4B5240 stay 1:1 ------
+// `fov_default` is ConstantDB's VerticalFOV; a value the profile lacks keeps its default.
+inline void settings_ours_defaults( ui_settings_ours_t& o )
+{
+    const float fov = o.fov_default;
+    o = ui_settings_ours_t{ };
+    o.fov_default = fov;
+    o.fov = fov;
+}
+
+inline void settings_ours_load( ui_settings_ours_t& o, const value_t& profile )
+{
+    const value_t& ours = member( member( profile, "Settings" ), "Ours" );
+    unlock_int( member( ours, "FrameLimit" ), o.frame_limit );
+    const value_t& vsync = member( ours, "VSync" );
+    if ( vsync.tag == 3 )
+        o.vsync = vsync.integer != 0;
+    settings_float( member( ours, "FieldOfView" ), o.fov );
+    settings_float( member( ours, "CameraShake" ), o.shake );
+    settings_float( member( ours, "CameraZoomOut" ), o.zoom );
+}
+
+inline void settings_ours_save( const ui_settings_ours_t& o, value_t& profile )
+{
+    value_t& ours = json_member( json_member( profile, "Settings" ), "Ours" );
+    json_set_int( json_member( ours, "FrameLimit" ), o.frame_limit );
+    value_t& vsync = json_member( ours, "VSync" );
+    json_clear( vsync );
+    vsync.tag = 3;
+    vsync.kind = value_t::kind_t::integer;
+    vsync.integer = o.vsync ? 1 : 0;
+    json_set_float( json_member( ours, "FieldOfView" ), o.fov );
+    json_set_float( json_member( ours, "CameraShake" ), o.shake );
+    json_set_float( json_member( ours, "CameraZoomOut" ), o.zoom );
+}
+
 // ---- VuCloudManager, the profile's "Cloud" member ------------------------------------------------------------------
 
 // A VuDateTime, six u16s: year, month, day, hour, minute, second.

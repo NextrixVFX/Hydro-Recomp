@@ -819,6 +819,7 @@ struct gfx_retail_t final : gfx_composer_hooks_t
         m_device.m_chain_depth = reinterpret_cast< gfx_handle_t >( depth );
         m_display_w = width;
         m_display_h = height;
+        m_composer.m_scale = c_engine::display_scale( );   // retail's setter 0x46D280 writes g 0x758F94 +0xC = the composer's +8; 0x559100 sizes the targets, 0x5BC600's copy brings them to the display
         float look[ 16 ], projection[ 16 ], eye[ 4 ] = { }, target[ 4 ] = { };
         const float up[ 4 ] = { 0.0f, 0.0f, 1.0f, 0.0f };
         c_engine::matrices( look, projection, eye );

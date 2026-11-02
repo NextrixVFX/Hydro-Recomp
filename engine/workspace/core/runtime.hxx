@@ -86,6 +86,33 @@ void c_engine::flip_interval( int interval )
     g_swap_interval = static_cast< std::uint32_t >( interval );
 }
 
+// Ours, not retail: the Frame Rate Limit (0 unlimited, retail's behaviour here). --bench ignores it and vsync: its timings must stay the game's own cost.
+namespace
+{
+    int g_frame_limit = 0;
+    const float* g_display_scale = nullptr;
+}
+
+void c_engine::frame_limit( int hertz )
+{
+    g_frame_limit = c_engine::option( "bench" ) != nullptr ? 0 : hertz;
+}
+
+void c_engine::vsync( bool on )
+{
+    g_swap_vsync = on && c_engine::option( "bench" ) == nullptr;
+}
+
+void c_engine::display_scale_source( const float* scale )
+{
+    g_display_scale = scale;
+}
+
+float c_engine::display_scale( )
+{
+    return g_display_scale != nullptr && *g_display_scale > 0.0f ? *g_display_scale : 1.0f;
+}
+
 void c_engine::sun( const float* direction )
 {
     g_light( ).aim( direction );
@@ -219,6 +246,7 @@ int c_engine::run( const char* title )
         }
     std::size_t resize_next = 0;
     long resize_frame = 0;
+    double limit_next = trace::now( );   // ours: the Frame Rate Limit's next deadline, ms
 
     while ( window.pump( ) )
     {
@@ -256,6 +284,23 @@ int c_engine::run( const char* title )
         {
             const spikes::scope_t spike( spikes::k_present );
             swap.present( );
+        }
+        // Ours, not retail: sleep to within 2 ms of the deadline, then spin. A deadline already missed restarts from now, so a slow frame is not paid back by a burst.
+        if ( g_frame_limit > 0 )
+        {
+            limit_next += 1000.0 / g_frame_limit;
+            double now = trace::now( );
+            if ( now >= limit_next )
+                limit_next = now;
+#if HYDRO_HOST_WINDOWS
+            while ( limit_next - now > 2.0 )
+            {
+                Sleep( 1 );
+                now = trace::now( );
+            }
+#endif
+            while ( now < limit_next )
+                now = trace::now( );
         }
         const double phase_present = trace::now( );
         spikes::count( spikes::c_draws, drawstats::total_draws( ) );
