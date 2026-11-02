@@ -111,6 +111,17 @@ void c_engine::guard( )
 #endif
 }
 
+// g 0x75907C vt+0x40 0x5409D0: the chain's size. Before the chain exists the caller's values stand.
+void c_engine::display( int& width, int& height )
+{
+#if HYDRO_HOST_WINDOWS
+    if ( g_swap_instance == nullptr )
+        return;
+#endif
+    width = g_swap( ).width( );
+    height = g_swap( ).height( );
+}
+
 void c_engine::screen( const unsigned char* rgba, int width, int height )
 {
     g_screen( ).pixels = rgba;
@@ -186,8 +197,48 @@ int c_engine::run( const char* title )
     if ( frame_log )
         frame_rows.reserve( 400000 );
 
+    // Ours (a test driver): --resize-at F:WxH,F:WxH,... sizes the window at those frames, 0x0 minimizing. The count runs while minimized, or nothing could restore it.
+    struct resize_row_t
+    {
+        long at;
+        int width, height;
+    };
+    std::vector< resize_row_t > resize_rows;
+    if ( const char* script = c_engine::option( "resize-at" ) )
+        for ( const char* at = script; at != nullptr && *at != '\0'; )
+        {
+            resize_row_t r{};
+            if ( sscanf_s( at, "%ld:%dx%d", &r.at, &r.width, &r.height ) == 3 )
+                resize_rows.push_back( r );
+            at = std::strchr( at, ',' );
+            at = at != nullptr ? at + 1 : nullptr;
+        }
+    std::size_t resize_next = 0;
+    long resize_frame = 0;
+
     while ( window.pump( ) )
     {
+        while ( resize_next < resize_rows.size( ) && resize_rows[ resize_next ].at <= resize_frame )
+        {
+            window.script_size( resize_rows[ resize_next ].width, resize_rows[ resize_next ].height );
+            ++resize_next;
+        }
+        ++resize_frame;
+
+        // Nothing to draw into, and the chain must not go to size 0: the frame loop waits for a message. The game's clock takes one dt (at most 0.1, game.hxx) when it comes back.
+        if ( window.minimized( ) )
+        {
+#if HYDRO_HOST_WINDOWS
+            MsgWaitForMultipleObjects( 0, nullptr, FALSE, 50, QS_ALLINPUT );
+#endif
+            continue;
+        }
+
+        // At the top of a frame, so nothing below sees a size change mid-frame: the targets follow in c_composer::size_targets, the views and the viewport with the frame (gfx_retail_t::engine_frame), the display size through c_engine::display.
+        if ( window.width( ) != swap.width( ) || window.height( ) != swap.height( ) )
+            if ( !swap.resize( device, window.width( ), window.height( ) ) )
+                return 1;
+
         const double phase_pump = trace::now( );
         const int lines_before = logger::g_lines;
         g_draw( ).tick( );
@@ -225,6 +276,11 @@ int c_engine::run( const char* title )
         if ( exit_after && ++frames >= std::atol( exit_after ) )
             break;
     }
+
+#if HYDRO_HOST_WINDOWS
+    if ( !resize_rows.empty( ) )
+        LOG_INFO( "resize script: %u steps, device removed reason 0x%08x", static_cast< unsigned >( resize_next ), static_cast< unsigned >( device.device( )->GetDeviceRemovedReason( ) ) );
+#endif
 
     if ( frame_log )
     {

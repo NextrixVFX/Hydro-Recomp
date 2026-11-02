@@ -1329,8 +1329,7 @@ public:
         }
         m_race.autopilot = c_engine::option( "autopilot" ) != nullptr;
         m_race.autopilot_keys = c_engine::option( "autopilot-keys" ) != nullptr;
-        if ( const char* size = c_engine::option( "window-size" ) )
-            sscanf_s( size, "%dx%d", &m_race.world.display_w, &m_race.world.display_h );
+        c_engine::display( m_race.world.display_w, m_race.world.display_h );
         if ( const char* keys = c_engine::option( "keys" ) )
         {
             std::istringstream list( keys );
@@ -1531,7 +1530,7 @@ public:
     // nothing about ordering.
     // The water surfaces on screen: 0x5979C0's body for our one viewport (grid.hxx water_grid_frame), then our
     // draw. The frustum block is 0x50C550's, fed from OUR camera (the dev vantage: eye / target, the
-    // viewport's fov_y 1.05, near 0.5, the 1280x720 aspect; retail's +384 is tanf of the horizontal half
+    // viewport's fov_y 1.05, near 0.5, the display's aspect; retail's +384 is tanf of the horizontal half
     // angle).
     void water_draw( float dt )
     {
@@ -1553,7 +1552,7 @@ public:
         else
             rt[ 0 ] = 1.0f;
         const float up[ 3 ] = { rt[ 1 ] * fw[ 2 ] - rt[ 2 ] * fw[ 1 ], rt[ 2 ] * fw[ 0 ] - rt[ 0 ] * fw[ 2 ], rt[ 0 ] * fw[ 1 ] - rt[ 1 ] * fw[ 0 ] };
-        const float aspect = 1280.0f / 720.0f;
+        const float aspect = static_cast< float >( m_race.world.display_w ) / static_cast< float >( m_race.world.display_h );
         const water_frustum_t cam = water_frustum_build( m_eye, rt, fw, up, aspect, m_lens_near, m_far, m_lens_tan * aspect );
         water_grid_frame( m_grid, cam, m_water, &m_water_view, m_grid_frame );
         water_stage_frame( dt );
@@ -1745,6 +1744,7 @@ public:
     }
     void scene_frame( float dt )
     {
+        c_engine::display( m_race.world.display_w, m_race.world.display_h );   // g 0x75907C vt+0x40 is live: a resize lands at the top of a frame
         boxes_tick( dt );
         // A race from the menus: VuActionGameMode's LoadingScreen before LoadLevel (front.hxx action_start). Slot 4 alone: the level is not there yet.
         if ( m_action && m_action_level )

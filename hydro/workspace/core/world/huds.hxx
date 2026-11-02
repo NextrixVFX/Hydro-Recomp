@@ -606,8 +606,7 @@ inline void c_world::ui_frame( )
     if ( !m_ui_pass || !m_modes.m_mode )
         return;
     // g 0x75907C slot 16 is the swap chain's size in every mode; m_race is rebuilt by a load, so the window's answer is taken here too.
-    if ( const char* size = c_engine::option( "window-size" ) )
-        sscanf_s( size, "%dx%d", &m_race.world.display_w, &m_race.world.display_h );
+    c_engine::display( m_race.world.display_w, m_race.world.display_h );
     m_ui_pass->begin( m_race.world.display_w, m_race.world.display_h );
     m_ui_pass->m_impl.m_aspect = 1.5f;   // boot 0x4023DE stores 0x3FC00000 over the ctor's 16 / 9: the screens are authored 1080 x 720
     ui_crop_update( m_ui_pass->m_impl, m_race.world.display_w, m_race.world.display_h );   // 0x4CC0F0's first call

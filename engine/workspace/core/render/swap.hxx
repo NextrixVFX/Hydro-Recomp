@@ -15,6 +15,8 @@ public:
     ~c_swap( );
 
     bool create( c_device& device, c_window& window );
+    // The platform side of 0x540890 (gfx.hxx gfx_device_t::resize): keeps our tearing flag, and the chain has no depth of its own here (the scene's is the target's).
+    bool resize( c_device& device, int width, int height );
     void bind( c_device& device );
     void clear( c_device& device, float red, float green, float blue, float alpha );
     void present( );
@@ -172,6 +174,53 @@ bool c_swap::create( c_device& device, c_window& window )
     ( void )device;
     ( void )window;
     LOG_ERROR( "swap create is unimplemented on %s", host::name( ) );
+    return false;
+#endif
+}
+
+bool c_swap::resize( c_device& device, int width, int height )
+{
+#if HYDRO_HOST_WINDOWS
+    if ( width <= 0 || height <= 0 || ( width == m_width && height == m_height ) )
+        return true;
+
+    // ResizeBuffers refuses while anything holds the back buffer: the bound view and the view itself, and the release must reach the driver first.
+    device.context( )->OMSetRenderTargets( 0, nullptr, nullptr );
+    m_target->Release( );
+    m_target = nullptr;
+    device.context( )->Flush( );
+
+    HRESULT result = m_swap->ResizeBuffers( 2u, static_cast< UINT >( width ), static_cast< UINT >( height ), DXGI_FORMAT_R8G8B8A8_UNORM,
+        m_tearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0u );
+    if ( FAILED( result ) )
+        LOG_ERROR( "ResizeBuffers %dx%d failed: 0x%08x", width, height, static_cast< unsigned >( result ) );
+    else
+    {
+        m_width = width;
+        m_height = height;
+    }
+
+    // On a failure the old buffers stand, at the old size: the view comes back either way.
+    ID3D11Texture2D* backbuffer = nullptr;
+    const HRESULT buffer = m_swap->GetBuffer( 0, __uuidof( ID3D11Texture2D ), reinterpret_cast< void** >( &backbuffer ) );
+    if ( FAILED( buffer ) )
+    {
+        LOG_ERROR( "GetBuffer failed: 0x%08x", static_cast< unsigned >( buffer ) );
+        return false;
+    }
+    const HRESULT view = device.device( )->CreateRenderTargetView( backbuffer, nullptr, &m_target );
+    backbuffer->Release( );
+    if ( FAILED( view ) )
+    {
+        LOG_ERROR( "CreateRenderTargetView failed: 0x%08x", static_cast< unsigned >( view ) );
+        return false;
+    }
+    LOG_SUCCESS( "swap %dx%d", m_width, m_height );
+    return SUCCEEDED( result );
+#else
+    ( void )device;
+    ( void )width;
+    ( void )height;
     return false;
 #endif
 }
