@@ -311,11 +311,12 @@ inline void c_world::bind_game_screens( )
     hooks.m_string_db = [ this ]( const char* key ) { return string_db_get( m_string_db, key ? key : "" ); };
     hooks.m_external = [ this ]( entity_t& e, const char* plug, const ui_params_t& p ) {
         ui_game_award_t* award = m_race.screens.m_award.get( );
-        c_ui_binding* binding = award && award->m_binding ? award->m_binding.get( ) : m_race.screens.m_binding.get( );
+        c_ui_binding* binding = m_pause_binding ? m_pause_binding.get( ) : award && award->m_binding ? award->m_binding.get( ) : m_race.screens.m_binding.get( );
         return binding ? screen_external( m_game_screen_state, *binding, e, plug, p ) : ui_ret_t{ };
     };
     // g 0x759038 slot 9( pad, name ): the manager's "pressed" (Results' Select).
     hooks.m_input = [ this ]( int pad, const char* name ) { return m_race.input && m_race.input->manager.pressed( pad, name ); };
+    hooks.m_trial = [ ] { return false; };   // the same answer as ui_profile_saved's p.license. A Screens project's VuOnProjectInitializedEntity binds on it (bind_shown): the Pause menu's OnEnter -> ResumeButton SetFocus
     hooks.m_touch_device = &m_touch;
     hooks.m_texture_exists = [ this ]( const char* name ) { return !m_archive.names( std::string( "VuTextureAsset/" ) + name ).empty( ); };
 #if HYDRO_UI_PASS
