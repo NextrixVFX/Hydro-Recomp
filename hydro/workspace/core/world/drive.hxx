@@ -1203,12 +1203,18 @@ inline void race_drive_contact_setup( race_session_t& s )
     // +0xD4 = the compound; the compound ctor 0x5269C0 writes +8 = 0, nothing in 0x420A70 sets it after) - no
     // mesh; a level body's (createRigidBody 0x544100) is 0 for the convex hull 6 (+8 = 0 before 0x526380) and the
     // collision mesh asset for the triangle mesh 7 (0x5445C0: +8 = the asset property's +0x4C, the asset +0xC0
-    // also holds). Any other object: not known (UNKNOWN).
+    // also holds). A boat's VuPiece: its compound, built by the same ctor 0x5269C0, 0x412270 writing no +8 after - no mesh.
+    // Any other object: not known (UNKNOWN).
     s.contact_user->mesh = [ &s ]( const solver_rigid_t* object, bool& known ) -> const collision_mesh_asset_t* {
         known = true;
         for ( const auto& b : s.boats )
+        {
             if ( &b->body.body == object )
                 return nullptr;
+            for ( const std::unique_ptr< race_piece_t >& q : b->debris.pieces )
+                if ( &q->body.body.body == object )
+                    return nullptr;
+        }
         for ( const auto& lb : s.level_bodies )
             if ( &lb->body.body == object )
                 return race_contact_level_mesh( *lb );
@@ -1220,6 +1226,59 @@ inline void race_drive_contact_setup( race_session_t& s )
 
 // ---- per frame ---------------------------------------------------------------
 
+// Ours (a test driver, not retail): --wreck-frame N destroys the human boat at sync N through the hard hit +0x469 the Decision tick turns into 0x41E010, then
+// prints each piece's body origin, speed and contact points every 15 syncs: how a wreck is measured against a wall.
+inline void race_drive_wreck_test( race_session_t& s, race_drive_t& r, std::size_t boat )
+{
+    static const char* const wreck = c_engine::option( "wreck-frame" );
+    if ( !wreck || !s.dynamics )
+        return;
+    bool human = false;
+    for ( const void* h : s.manager.lists.humans.boats )
+        human = human || h == s.boats[ boat ]->graph.objects[ 0 ].image.data( );
+    if ( !human )
+        return;
+    const int at = std::atoi( wreck ), n = s.dynamics->syncs;
+    static int last = -1;
+    if ( n == last )
+        return;
+    last = n;
+    if ( n == at )
+        r.d.boat[ 0x469 ] = 1;
+    if ( n < at )
+        return;
+    const auto& manifolds = s.dynamics->collision.dispatcher.manifolds;
+    static std::map< unsigned, int > touched[ 8 ];   // the other body's group << 16 | mask << 1 | static: syncs in contact
+    int k = 0;
+    for ( const std::unique_ptr< race_piece_t >& q : race_drive_boat( r ).debris.pieces )
+    {
+        const solver_rigid_t& b = q->body.body.body;
+        int contacts = 0;
+        for ( const solver_manifold_t* m : manifolds )
+            if ( ( m->body0 == &b || m->body1 == &b ) && m->num_contacts > 0 )
+            {
+                contacts += m->num_contacts;
+                const solver_rigid_t* other = m->body0 == &b ? m->body1 : m->body0;
+                std::uint16_t group, mask;
+                std::memcpy( &group, reinterpret_cast< const std::uint8_t* >( other ) + 0x2CA, 2 );
+                std::memcpy( &mask, reinterpret_cast< const std::uint8_t* >( other ) + 0x2CC, 2 );
+                if ( k < 8 )
+                    ++touched[ k ][ ( unsigned( group ) << 17 ) | ( unsigned( mask ) << 1 ) | ( other->collision_flags & 1 ) ];
+            }
+        if ( ( n - at ) % 15 == 0 )
+        {
+            const std::uint8_t* image = reinterpret_cast< const std::uint8_t* >( &b );
+            const float vx = state_f( image, 0x140 ), vy = state_f( image, 0x144 ), vz = state_f( image, 0x148 );
+            LOG_INFO( "wreck test: sync %d piece %d at %.2f %.2f %.2f speed %.2f contacts %d", n, k, b.origin[ 0 ], b.origin[ 1 ], b.origin[ 2 ],
+                      std::sqrt( vx * vx + vy * vy + vz * vz ), contacts );
+            if ( k < 8 )
+                for ( const auto& e : touched[ k ] )
+                    LOG_INFO( "wreck touch: sync %d piece %d group 0x%X mask 0x%X static %d syncs %d", n, k, e.first >> 17, ( e.first >> 1 ) & 0xFFFFu, e.first & 1, e.second );
+        }
+        ++k;
+    }
+}
+
 inline void race_drive_decision( race_session_t& s, std::size_t boat, float dt )
 {
     race_drive_t& r = *s.drives[ boat ];
@@ -1230,6 +1289,7 @@ inline void race_drive_decision( race_session_t& s, std::size_t boat, float dt )
     r.d.local_players = s.world.viewports;
     r.human_driver.env.control_method = s.world.control_method;
     r.d.proxy = race_drive_proxy( r );
+    race_drive_wreck_test( s, r, boat );
     boat_decision_tick( r.d, dt, r.hooks );
 }
 
@@ -2029,7 +2089,7 @@ inline void race_session_game_mode( void* user, float dt )
             for ( std::size_t q = 0; q < tm.sectors.size( ); ++q )
                 if ( tm.sectors[ q ].image == rb.sector )
                     sector = static_cast< int >( q );
-            LOG_INFO( "race progress tick %d: %s sector %d lap %d place %d next checkpoint %d race done %.1f / left %.1f, time %.2f, input-off %d, "
+            LOG_VERBOSE( "race progress tick %d: %s sector %d lap %d place %d next checkpoint %d race done %.1f / left %.1f, time %.2f, input-off %d, "
                       "at (%.1f %.1f %.1f)", s.rules_frames, s.boats[ k ]->name.c_str( ), sector, rules_i32( rb.boat, 0x4AC ),
                       rules_i32( rb.boat, 0x4CC ), rb.checkpoint >= 0 ? track_checkpoint_index( tm, rb.checkpoint ) : -1, rules_f( rb.boat, 0x4C8 ),
                       rules_f( rb.boat, 0x4C4 ), rules_f( rb.boat, 0x4B4 ), rules_i32( rb.boat, 0x308 ), rules_f( rb.transform, 0x80 ),

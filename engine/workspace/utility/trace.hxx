@@ -93,7 +93,7 @@ namespace trace
         if ( time - last < 1000.0 || count == 0 )
             return;
         const double scale = 1.0 / static_cast< double >( count );
-        LOG_INFO(
+        LOG_VERBOSE(   // a console line a second is a hitch a second: only on request
             "trace ocean %.2f mesh %.2f upload %.2f normal %.2f pfx %.2f ensure %.2f draw %.2f present %.2f gpu %.2f draws %.0f tex %.1f places %.0f reflect %.0f spec %.0f",
             sum.ocean * scale,
             sum.mesh * scale,
