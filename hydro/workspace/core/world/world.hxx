@@ -687,6 +687,13 @@ private:
             c_engine::drop( alpha );
         m_foliage = foliage_manager_t{ };
         m_foliage_entities.clear( );
+        if ( m_retail )
+        {
+            for ( gfx_light_t& l : m_retail->m_dynamic_lights )
+                m_retail->m_dynamic.light_off( l );
+            m_retail->m_dynamic_lights.clear( );
+        }
+        m_light_of.clear( );
         m_pfx.clear( );
         m_draws = 0;
         m_stack.clear( );
@@ -1925,6 +1932,7 @@ private:
     }
     bool m_stage_attached = false, m_stage_bound = false;
     std::unique_ptr< gfx_retail_t > m_retail;
+    std::map< std::string, gfx_light_t* > m_light_of;   // VuDynamicLightEntity by path, for TurnOn / TurnOff
     struct retail_corona_t
     {
         float position[ 3 ];

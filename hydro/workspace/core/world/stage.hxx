@@ -8,7 +8,7 @@
 // - The reflection's camera and clip plane take the viewport's plane (0x530F10, surface.hxx water_reflection_plane_tick).
 // - The six planes come from the engine's view-projection, normalised, not from the camera's 0x57CBA0: inward and unit length as retail's, order near / far / sides differs (only a sign OR reads them).
 // - m_depth_material and m_shadow_material hold the colour material: VuGfxUtil's depth and shadow programs (g 0x75902C +8 / +0xC) are not made; nothing submits those passes yet (no depth pre-pass, no shadow pass).
-// NOT RECREATED: the dynamic lights' gather (0x562C40) answers no light until lights.hxx is fed; retain / release never free: the models live as long as the stage.
+// NOT RECREATED: retain / release never free: the models live as long as the stage.
 
 #include <impl/engine/engine.hxx>
 #include <workspace/core/assets/scene.hxx>
@@ -20,6 +20,7 @@
 #include <workspace/core/world/corona.hxx>
 #include <workspace/core/world/drawing.hxx>
 #include <workspace/core/world/foliage.hxx>
+#include <workspace/core/world/lights.hxx>
 #include <workspace/core/world/gfxsort.hxx>
 #include <workspace/core/world/meshes.hxx>
 #include <workspace/core/world/livery.hxx>
@@ -74,6 +75,7 @@ struct gfx_retail_t
         m_sort.reserve( );
         m_sort.m_single_thread = false;
         m_backend.m_has_light = true;
+        m_backend.m_light_flip = [ this ]( ) { m_dynamic.m_fill ^= 1u; m_dynamic.m_render ^= 1u; };
         m_backend.m_asset = [ this ]( std::uint32_t kind, const std::string& name ) { return texture( kind, name ); };
         m_backend.m_source = [ this ]( std::uint32_t name ) { return source( name ); };
         const auto colour = [ this ]( gfx_model_pass_t pass ) { return [ this, pass ]( std::uint8_t* r ) { model_record( r, pass ); }; };
@@ -134,6 +136,8 @@ struct gfx_retail_t
     std::vector< const float* > m_palettes;   // this pass's skinned draws
     std::vector< std::uint16_t > m_quad_indices;   // VuGfxUtil +0x48
     float m_plane = 0.0f;                          // the reflection plane, viewport +0x268
+    gfx_light_manager_t m_dynamic;                 // g 0x759094's lists and tree
+    std::deque< gfx_light_t > m_dynamic_lights;    // the VuDynamicLightEntity lights, +0x70
     // The quad renderer's table (0x14 each: 0x58CCC0) and the trail renderer's.
     struct pfx_quad_program_t
     {
@@ -575,6 +579,14 @@ struct gfx_retail_t
             m_device.cull( 1u );
     }
 
+    // 0x562C40 for the command being drawn: the block's count at +0x140.
+    void gather( const gfx_model_record_t& r, float* block )
+    {
+        std::memset( block, 0, 81 * 4 );
+        const std::int32_t count = m_dynamic.gather( r.m_matrix, r.m_part->m_aabb, m_sort.m_drawn_hi, block );
+        std::memcpy( block + 80, &count, 4 );
+    }
+
     void model_record( std::uint8_t* record, gfx_model_pass_t pass )
     {
         gfx_model_record_t r;
@@ -585,7 +597,7 @@ struct gfx_retail_t
         std::memcpy( &id, record + 0x48, 4 );
         r.m_part = &m_parts[ id - 1u ];
         r.m_lit = record[ 0x4C ];
-        gfx_model_draw( m_device, r, pass, false, []( float* block ) { std::memset( block, 0, 81 * 4 ); } );
+        gfx_model_draw( m_device, r, pass, false, [ & ]( float* block ) { gather( r, block ); } );
     }
 
     // 0x533C90 0x533D40 0x533E30: the 0x58-byte record, +0x4C the bone count, +0x50 the palette (here m_palettes' index + 1), +0x54 the lit byte.
@@ -602,7 +614,7 @@ struct gfx_retail_t
         r.m_part = &m_parts[ id - 1u ];
         r.m_palette = m_palettes[ bones - 1u ];
         r.m_lit = record[ 0x54 ];
-        gfx_model_draw( m_device, r, pass, true, []( float* block ) { std::memset( block, 0, 81 * 4 ); } );
+        gfx_model_draw( m_device, r, pass, true, [ & ]( float* block ) { gather( r, block ); } );
     }
 
     // The instance's current palette (+0x1C + 4 x +0x28) as a record word.
@@ -687,8 +699,13 @@ struct gfx_retail_t
                 clip[ r ] = ( ( inverse[ r * 4 + 1 ] + inverse[ r * 4 ] ) * 0.0f + inverse[ r * 4 + 2 ] ) + inverse[ r * 4 + 3 ] * -m_plane;   // 0x558C00's row
         }
         m_device.clip_plane( clip );
+        // 0x562B10 for this view: the seventh plane is the reflection's.
+        float planes[ 28 ];
+        std::memcpy( planes, m_camera.m_planes, 96 );
+        std::memcpy( planes + 24, p.m_clip, 16 );
         m_sort.set_layer( 1u );
         m_sort.set_screen( 8u );
+        m_dynamic.submit( m_eye, planes, p.m_reflecting, m_sort.m_key_hi );
         m_palettes.clear( );
         if ( m_sky != nullptr && ( !reflecting || m_sky_reflect ) )
             gfx_sky_draw( m_sort, m_eye, m_sky );
