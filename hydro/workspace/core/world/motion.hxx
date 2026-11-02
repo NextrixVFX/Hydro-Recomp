@@ -69,6 +69,18 @@ inline bool c_world::motion_release( const entity_t& e )
         m_joints.plug_detach( &e );
         return true;
     }
+    // VuAnimatedPropEntity's slot 7 0x5ECB40: Hide (vt+0x34, 0x5ECFE0: the draw off), 0x544A20 the rigid part (not built for an animated
+    // prop, no shipped one authors it), its tick unregistered (vt+0x28 on g 0x759008).
+    if ( e.m_type == "VuAnimatedPropEntity" )
+    {
+        for ( animated_t& item : m_animated )
+            if ( item.entity == &e )
+            {
+                item.visible = false;
+                item.playing = false;
+            }
+        return true;
+    }
     if ( e.m_type == "VuRotateMotionEntity" )
     {
         for ( rotator_t& motion : m_rotators )
@@ -104,8 +116,8 @@ inline void c_world::motions_game_initialize( )
     }
 }
 
-// The instance of an animated prop that has attach records (joints.hxx), made on first use: 0x5EC300's model component loads "Model
-// Asset" as the boat's does (world/skeleton.hxx skel_model_create), its clip the prop's VuPlayAnimationEntity's.
+// The instance of an animated prop (the draw's palette, joints.hxx's attach records), made on first use: 0x5EC300's model component
+// loads "Model Asset" as the boat's does (world/skeleton.hxx skel_model_create).
 inline skel_instance_t* c_world::prop_instance( entity_t& e )
 {
     const auto found = m_prop_skels.find( &e );
@@ -123,13 +135,6 @@ inline skel_instance_t* c_world::prop_instance( entity_t& e )
         if ( !skel_model_create( s->model, blob.data( ), blob.size( ) ) || s->model.instance.skeleton == nullptr )
             return nullptr;
         skel_animated_init( s->animated, *s->model.instance.skeleton );
-        std::vector< std::uint8_t > clip;
-        if ( !item.clip.empty( ) && m_archive.read( item.clip.c_str( ), clip ) &&
-             skel_animation_load( clip.data( ), clip.size( ), s->clip ) )
-        {
-            s->control.animation = &s->clip;
-            s->has_clip = true;
-        }
         skel_instance_t* i = &s->model.instance;
         m_prop_skels[ &e ] = std::move( s );
         return i;
@@ -137,23 +142,91 @@ inline skel_instance_t* c_world::prop_instance( entity_t& e )
     return nullptr;
 }
 
-// The prop's pose at item.control.time: false with no instance / clip (UNKNOWN: the palette stays as it was, counted).
-inline bool c_world::prop_pose( const animated_t& item )
+// One of the prop's VuAnimations by its asset name, null when it does not load.
+inline const skel_animation_t* c_world::prop_clip( prop_skel_t& s, const std::string& name )
 {
-    entity_t* owner = item.entity;
-    skel_instance_t* instance = owner ? prop_instance( *owner ) : nullptr;
-    if ( !instance )
-        return false;
-    prop_skel_t& s = *m_prop_skels[ owner ];
-    if ( !s.has_clip )
-        return false;
-    if ( !s.added )
+    const auto found = s.clips.find( name );
+    if ( found != s.clips.end( ) )
+        return found->second.get( );
+    std::vector< std::uint8_t > blob;
+    auto clip = std::make_unique< skel_animation_t >( );
+    if ( !m_archive.read( name.c_str( ), blob ) || !skel_animation_load( blob.data( ), blob.size( ), *clip ) )
     {
-        skel_animated_add( s.animated, &s.control );
-        s.added = true;
+        LOG_WARNING( "prop clip %s failed to load", name.c_str( ) );
+        return nullptr;
     }
-    s.control.time = item.control.time;
-    return skel_animated_build( s.animated ) && skel_instance_set_pose( s.model.instance, &s.animated );
+    return s.clips.emplace( name, std::move( clip ) ).first->second.get( );
+}
+
+// VuAnimatedPropEntity's PlayAnimation plug 0x5ECB60, to the control's last advance (the caller fires OnAnimStart). Each of the three
+// advances 0x516300 is skel_animated_advance's body on this one control. False: no instance, no clip or no params (UNKNOWN, counted).
+inline bool c_world::prop_play_plug( animated_t& item, const std::uint8_t* params )
+{
+    if ( params == nullptr || item.entity == nullptr || prop_instance( *item.entity ) == nullptr )
+        return false;
+    const prop_play_params_t p = prop_params_read( params );
+    if ( p.asset == 0 || p.asset > m_play_tokens.size( ) )
+        return false;
+    prop_skel_t& s = *m_prop_skels[ item.entity ];
+    const skel_animation_t* clip = prop_clip( s, m_play_tokens[ p.asset - 1u ] );
+    if ( clip == nullptr )
+        return false;
+    auto made = std::make_unique< skel_control_t >( );
+    skel_control_t* c = made.get( );
+    c->animation = clip;
+    const std::string owner = item.path;
+    const auto advance = [ & ]( float dt )
+    {
+        skel_animated_t alone;
+        alone.controls.push_back( c );
+        skel_animated_advance( alone, dt, [ & ]( int, const std::string& name, const value_t* carried ) {
+            on_animation_event( owner, name, carried );
+        } );
+    };
+    c->time = p.start;
+    advance( 0.0f );
+    c->factor = p.factor;
+    c->looping = p.looping;
+    advance( 0.0f );
+    if ( p.blend > 0.0f )   // comiss against 0x6F7570 = 0
+    {
+        s.blend.on = true;
+        s.blend.rate = 1.0f / p.blend;
+        c->weight = 0.0f;
+    }
+    else
+        skel_animated_clear( s.animated );
+    skel_animated_add( s.animated, c );
+    if ( p.timed != 0 && p.timed <= m_play_tokens.size( ) )
+    {
+        const auto timed = m_timed.find( m_play_tokens[ p.timed - 1u ] );
+        c->events = timed != m_timed.end( ) ? &timed->second : nullptr;
+    }
+    c->listener = true;
+    advance( p.advance );
+    s.owned.push_back( std::move( made ) );
+    return true;
+}
+
+// VuAnimatedPropEntity's tick 0x5ED030 up to the pose: the fade (world/playback.hxx), the advance 0x5169E0 through the listener 0x5ED680,
+// 0x516CF0, 0x532720. False with no instance or a pose read UNKNOWN (the palette stays as it was).
+inline bool c_world::prop_tick( const animated_t& item, float dt )
+{
+    const auto found = item.entity ? m_prop_skels.find( item.entity ) : m_prop_skels.end( );
+    if ( found == m_prop_skels.end( ) )
+        return false;
+    prop_skel_t& s = *found->second;
+    const std::string owner = item.path;
+    prop_blend_step( s.animated, s.blend, dt );
+    skel_animated_advance( s.animated, dt, [ & ]( int, const std::string& name, const value_t* params ) {
+        on_animation_event( owner, name, params );
+    } );
+    const bool posed = skel_animated_build( s.animated ) && skel_instance_set_pose( s.model.instance, &s.animated );
+    const std::vector< skel_control_t* >& live = s.animated.controls;
+    s.owned.erase( std::remove_if( s.owned.begin( ), s.owned.end( ), [ & ]( const std::unique_ptr< skel_control_t >& c ) {
+        return std::find( live.begin( ), live.end( ), c.get( ) ) == live.end( );
+    } ), s.owned.end( ) );
+    return posed;
 }
 
 // What 0x533C90 draws: the instance's current palette (identity until it plays, 0x532360), null with no instance.
@@ -163,26 +236,12 @@ inline const std::vector< float >* c_world::prop_palette( const animated_t& item
     return i ? &i->palette[ i->current & 1 ] : nullptr;
 }
 
-// VuAnimatedPropEntity's tick 0x5ED030 as the attach records see it: the pose (0x5169E0's time: the old path's control; 0x516CF0,
-// 0x532720), then its attach component's slot 14 with the transform's world and zero velocities (0x5ED3BE), whether a clip plays or not.
+// VuAnimatedPropEntity's tick 0x5ED030 after the pose (skin_props ran it): its attach component's slot 14 with the transform's world and
+// zero velocities (0x5ED3BE), whether a clip plays or not.
 inline void c_world::animated_attach_tick( )
 {
     for ( auto& pair : m_prop_skels )
     {
-        prop_skel_t& s = *pair.second;
-        const std::string path = entity_path( *pair.first );
-        for ( const animated_t& item : m_animated )
-            if ( item.path == path && s.has_clip && item.playing )
-            {
-                if ( !s.added )
-                {
-                    skel_animated_add( s.animated, &s.control );
-                    s.added = true;
-                }
-                s.control.time = item.control.time;
-                if ( skel_animated_build( s.animated ) )
-                    skel_instance_set_pose( s.model.instance, &s.animated );
-            }
         const transform_component_t* t = entity_transform( *pair.first );
         if ( !t )
             continue;

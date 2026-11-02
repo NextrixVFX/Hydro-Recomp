@@ -68,6 +68,7 @@ inline void c_world::load_entity_tree( const char* asset, const value_t& project
     // The logic / action / motion / settings consumers (engine entity/actions.hxx).
     std::vector< rotator_t > fresh_rotators;
     std::map< std::string, play_t > fresh_play;
+    std::map< std::string, play_t > fresh_plays;   // by the sender's own path: what its Trigger packs
     std::map< std::string, action_t > fresh_actions;
     std::map< std::string, delay_t > fresh_delays;
     std::map< std::string, std::string > fresh_events;
@@ -172,6 +173,7 @@ inline void c_world::load_entity_tree( const char* asset, const value_t& project
             play.looping = p->looping != 0;
             play.one_shot = p->one_shot != 0;
             play.factor = p->time_factor;
+            play.blend = p->blend_time;
             if ( const script_component_t* sc = script_of( e ) )
             {
                 const int trigger = script_find_plug( *sc, "Trigger" );
@@ -180,8 +182,12 @@ inline void c_world::load_entity_tree( const char* asset, const value_t& project
                     play.trigger = path_of[ sc->m_plugs[ trigger ].m_links.front( ).m_entity ];
                 if ( drives >= 0 )
                     for ( const script_link_t& link : sc->m_plugs[ drives ].m_links )
+                    {
                         fresh_play.emplace( path_of[ link.m_entity ], play );
+                        play.props.push_back( path_of[ link.m_entity ] );
+                    }
             }
+            fresh_plays.emplace( trail, play );
             if ( !trail.empty( ) )
             {
                 action_t act{};
@@ -423,6 +429,7 @@ inline void c_world::load_entity_tree( const char* asset, const value_t& project
     m_type_census = std::move( fresh_census );
     m_rotators = std::move( fresh_rotators );
     m_play = std::move( fresh_play );
+    m_plays = std::move( fresh_plays );
     m_actions = std::move( fresh_actions );
     m_delays = std::move( fresh_delays );
     m_events = std::move( fresh_events );

@@ -82,9 +82,8 @@ inline c_world::retval_t c_world::dispatch( const std::string& entity, const std
     //   return VuRetVal( 0 );
     //
     // The params it builds carry the asset, Start Time (+144), Blend Time
-    // (+148), Time Factor (+152) and Looping (+156): the PROP owns none of
-    // that, which is why our play_t is indexed by the target's path and
-    // copied onto the prop in bind_animations.
+    // (+148), Time Factor (+152), Looping (+156) and the timed events: the
+    // PROP owns none of that (world/playback.hxx).
     // VuAttachEntity's two input plugs 0x5F5550 / 0x5F5690 (world/joints.hxx); each answers the empty VuRetVal.
     if ( const auto joint = m_entities.find( entity ); joint != m_entities.end( ) && m_joints.owns( joint->second ) )
     {
@@ -355,7 +354,20 @@ inline c_world::retval_t c_world::dispatch( const std::string& entity, const std
                 return retval_t{};
             if ( action->second.one_shot )
                 action->second.done = true;
-            fire( entity, "PlayAnimation", depth );
+            const auto sender = m_plays.find( entity );
+            if ( sender == m_plays.end( ) )
+                return retval_t{};
+            const play_t& play = sender->second;
+            prop_play_params_t packed;
+            packed.asset = play.clip_token;
+            packed.start = play.start;
+            packed.blend = play.blend;
+            packed.factor = play.factor;
+            packed.looping = play.looping;
+            packed.timed = play.timed_token;
+            std::uint8_t params_out[ 0x84 ];
+            prop_params_write( params_out, packed );
+            fire( entity, "PlayAnimation", depth, params_out );
             return retval_t{};
         }
         count_unhandled( entity, plug );
@@ -376,11 +388,7 @@ inline c_world::retval_t c_world::dispatch( const std::string& entity, const std
     //   advance( sixth param )                         0 from this sender
     //   fire( "OnAnimStart" )
     //
-    // UNKNOWN, not reproduced: Blend Time. Its weight ramp lives in the
-    // prop's tick @0x5ed030 and the pose blend in @0x516cf0; with a single
-    // control the blend normalises by the control's own weight, so it
-    // only shows as the bind pose until the first tick - but the case of
-    // a prop with a previous clip still fading has not been read.
+    // motion.hxx prop_play_plug. The ramp is the tick's (prop_tick).
     // CAUSE of the TNT that never dropped: this walk took ANY plug: "Dynamite1Show" -> TNT . Show restarted the clip at t = 1 s, for ever. Show 0x5ECF90 / Hide 0x5ECFE0 only toggle the draw.
     bool started = false;
     if ( plug == "Show" || plug == "Hide" )
@@ -394,14 +402,12 @@ inline c_world::retval_t c_world::dispatch( const std::string& entity, const std
     {
         if ( item.path != entity || plug != "PlayAnimation" )
             continue;
+        if ( !prop_play_plug( item, params ) )
+        {
+            count_unhandled( entity, plug );
+            return retval_t{};
+        }
         item.playing = true;
-        // control.end / control.loop are the clip's own members, so they
-        // are read from the clip where it is advanced, in skin_props().
-        item.control.looping = item.looping;
-        item.control.factor = item.factor;
-        item.control.time = item.start;
-        const auto timed = m_timed.find( item.timed );
-        item.control.events = timed != m_timed.end( ) ? &timed->second : nullptr;
         ++m_fired;
         started = true;
         fire( entity, "OnAnimStart", depth );
