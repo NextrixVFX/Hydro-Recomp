@@ -679,7 +679,6 @@ private:
         m_animated.clear( );
         m_static_draws.clear( );
         m_play.clear( );
-        m_scored.clear( );
         m_triggers.clear( );
         m_filters.clear( );
         m_actions.clear( );
@@ -1006,17 +1005,6 @@ public:
                 transform_draw_matrix( *t, item.world );
                 const auto box = m_scene_aabbs.find( item.asset );
                 scene_component_aabb( item.aabb, box != m_scene_aabbs.end( ) ? box->second.data( ) : scene_zero_aabb( ), item.world, false );
-                if ( !item.playing && item.rigid )
-                {
-                    const std::vector< cached_part_t >& parts = model_for( item.asset );
-                    for ( std::size_t index = 0; index < item.placements.size( ) && index < parts.size( ); ++index )
-                        if ( item.placements[ index ] >= 0 )
-                        {
-                            float node[ 16 ];
-                            math_multiply( node, item.world, parts[ index ].node );
-                            c_engine::move( item.placements[ index ], node );
-                        }
-                }
             }
         prop_draw( owner );
     }
@@ -1489,10 +1477,13 @@ public:
                 const animated_draw_t s = animated_model_select( item.draw, item.aabb, item.aabb + 4, p.m_eye, p.m_skip_models != 0u );
                 if ( !s.drawn || !item.retail || ( p.m_reflecting & item.draw.reflect ) != p.m_reflecting )
                     continue;
+                const std::vector< float >* palette = prop_palette( item );
+                if ( palette == nullptr )
+                    continue;   // no instance: nothing to pose it with (UNKNOWN, retail always has one)
                 item.retail->m_colour = s.color;
                 item.retail->m_byte = s.dynamic_lighting;
-                item.retail->m_model_word = static_cast< std::uint32_t >( item.palette.size( ) / 16 );
-                item.retail->m_bones = m_retail->palette_id( item.palette.data( ) );
+                item.retail->m_model_word = static_cast< std::uint32_t >( palette->size( ) / 16 );
+                item.retail->m_bones = m_retail->palette_id( palette->data( ) );
                 item.retail->draw( sort, item.world, p );
             }
             if ( !p.m_reflecting )
@@ -1895,7 +1886,6 @@ private:
         model_draw_t draw{};                                // the component's properties, 0x61DB60's choice
         float aabb[ 8 ]{};                                  // its world aabb
         std::unique_ptr< gfx_animated_model_t > retail;     // the instance over stage.hxx's model
-        std::vector< float > palette;                       // the frame's pose, gMatrixArray; identity until it plays
         std::string trigger;
         // "VuTimedEventAsset/<name>", empty when the driver names none.
         std::string timed;
@@ -1908,12 +1898,6 @@ private:
         int geometry = -1;
         // The VuAnimationControl the last PlayAnimation built (@0x5ecb60).
         animation_control_t control{};
-        // A single-bone clip is a RIGID motion: every vertex rides one
-        // matrix, so the placement matrix can carry it and the mesh never has
-        // to be touched. These instances keep the SHARED cached geometry and
-        // a placement handle per part instead of a clone.
-        bool rigid = false;
-        std::vector< int > placements;
         // Props on an OnGameStart trigger begin at load; the rest wait for
         // their event to arrive and sit at the bind pose until it does.
         bool playing = false;
@@ -2035,7 +2019,8 @@ private:
         bool has_clip = false, added = false;
     };
     std::map< entity_t*, std::unique_ptr< prop_skel_t > > m_prop_skels;
-    bool prop_pose( const animated_t& item, std::vector< float >& palette );
+    bool prop_pose( const animated_t& item );
+    const std::vector< float >* prop_palette( const animated_t& item );
     int m_motion_unknown = 0;   // a motion child's IF slot 0 not read
     // (entity, refName) -> the full path the ref points at.
     std::map< std::pair< std::string, std::string >, std::string > m_refs;
@@ -2157,12 +2142,8 @@ private:
     int m_logic_unrecreated = 0;
     // UpdateBranchProbabilities events reached without their VuParams (UNKNOWN, graph.hxx).
     int m_waypoint_params_unknown = 0;
-    // Assets already scored by the extent test, so it reports once each.
-    std::set< std::string > m_scored;
-    // Route single-bone props through the placement matrix instead of CPU
-    // skinning. Kept switchable so the saving can be measured rather than
-    // asserted: --stream-rigid-props forces them back through the vertex path.
-    bool m_rigid_props = true;
+    // Props whose pose failed (no instance / clip): UNKNOWN, reported once.
+    int m_pose_unknown = 0;
     // --drive: let the AI controller steer the player boat round the gate
     // chain, so an unattended bench run exercises anything that needs the
     // player to actually move.
