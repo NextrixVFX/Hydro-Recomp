@@ -162,6 +162,7 @@ struct gfx_sort_hooks_t
     virtual void program( std::uint32_t id, int slot, std::uint32_t handle = 0, std::uint32_t value = 0, const std::uint32_t* vector = nullptr ) = 0;
     virtual std::uint32_t thread( int slot, std::uint32_t a = 0, std::uint32_t b = 0 ) = 0;  // g 0x759098
     virtual void profile( int slot ) = 0;                                                    // g 0x7590A0, when present
+    virtual void scheduler( int, std::uint32_t = 0 ) { }                                     // g 0x759008
     virtual void composer( int slot, std::uint32_t a = 0, std::uint32_t b = 0 ) = 0;         // [g 0x7590BC +4], when present
     virtual void water_flip( ) = 0;                                                          // 0x595690 on [g 0x759058 +0x1C]
     virtual void light_flip( ) = 0;                                                          // g 0x759094 +0xC4 / +0xC8 ^= 1
@@ -309,6 +310,23 @@ struct gfx_sort_t : ui_gfx_sort_t
 
     // 0x53ACA0, the tick "Draw"'s callee: the frame time.
     void tick( float dt ) { m_time += dt; }
+
+    // Slot 1 0x53A0C0: the tick "Decision" (0x53ACA0, tick( ) below) registered on g 0x759008. The dev statistics object it makes first when g 0x759020 is set (0x5A8B10): STOPPED.
+    void start( ) { m_hooks.scheduler( 0x20, 0x53ACA0u ); }
+
+    // Slot 2 0x53A1C0: wait( )'s body inline, the dev statistics' teardown (STOPPED), the tick off.
+    void finish( )
+    {
+        wait( );
+        m_hooks.scheduler( 0x28 );
+    }
+
+    // The dtor 0x539DC0: the two events closed; its frees are this object's own members here.
+    void close_events( )
+    {
+        m_hooks.thread( 0x34, m_event[ 0 ] );
+        m_hooks.thread( 0x34, m_event[ 1 ] );
+    }
 
     // 0x53A400: the frame pending on the render thread, finished.
     void wait( )
