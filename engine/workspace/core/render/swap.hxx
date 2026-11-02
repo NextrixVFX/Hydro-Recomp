@@ -5,7 +5,7 @@
 #include <workspace/core/render/window.hxx>
 
 #if HYDRO_HOST_WINDOWS
-#  include <dxgi1_2.h>
+#  include <dxgi1_5.h>
 #endif
 
 class c_swap
@@ -21,9 +21,6 @@ public:
     int width( ) const { return m_width; }
     int height( ) const { return m_height; }
 
-    // The harness presents unthrottled so frame times are the renderer's own
-    // cost and not the display cadence.
-    void vsync( bool enabled ) { m_vsync = enabled; }
 #if HYDRO_HOST_WINDOWS
     IDXGISwapChain1* chain( ) const { return m_swap; }
 #endif
@@ -31,7 +28,9 @@ public:
 private:
     int m_width{};
     int m_height{};
-    bool m_vsync = true;
+    // Ours, not retail: always unthrottled, so a frame time is the game's own cost and not the display cadence.
+    // Tearing where the display allows it, or the compositor can still hold a flip-model window to the refresh.
+    bool m_tearing = false;
 #if HYDRO_HOST_WINDOWS
     IDXGISwapChain1*         m_swap{};
     ID3D11RenderTargetView*  m_target{};
@@ -111,6 +110,18 @@ bool c_swap::create( c_device& device, c_window& window )
     description.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
     description.Scaling = DXGI_SCALING_STRETCH;
     description.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
+
+    IDXGIFactory5* factory5 = nullptr;
+    if ( SUCCEEDED( factory->QueryInterface( __uuidof( IDXGIFactory5 ), reinterpret_cast< void** >( &factory5 ) ) ) )
+    {
+        BOOL tearing = FALSE;
+        if ( SUCCEEDED( factory5->CheckFeatureSupport( DXGI_FEATURE_PRESENT_ALLOW_TEARING, &tearing, sizeof( tearing ) ) ) && tearing )
+        {
+            m_tearing = true;
+            description.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+        }
+        factory5->Release( );
+    }
 
     result = factory->CreateSwapChainForHwnd(
         device.device( ),
@@ -197,7 +208,7 @@ void c_swap::present( )
     if ( m_swap )
     {
         const double present_start = trace::now( );
-        m_swap->Present( m_vsync ? 1u : 0u, 0 );
+        m_swap->Present( 0u, m_tearing ? DXGI_PRESENT_ALLOW_TEARING : 0u );
         trace::frame( ).present += trace::now( ) - present_start;
     }
     trace::report( );
