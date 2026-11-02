@@ -13,6 +13,7 @@
 #include <workspace/core/boat/thunk.hxx>
 #include <workspace/core/dynamics/contact.hxx>
 #include <workspace/core/trigger/volume.hxx>
+#include <workspace/core/boat/powerup.hxx>
 #include <workspace/core/ui/common.hxx>
 #include <workspace/core/ui/config.hxx>
 #include <workspace/core/world/blend.hxx>
@@ -282,6 +283,20 @@ struct race_session_t
     // The level's static bodies (world/bodies.hxx) and their collision mesh assets.
     boat_mesh_library_t level_meshes;
     std::vector< std::unique_ptr< level_body_t > > level_bodies;
+    // The level's power-ups made live (world/pickups.hxx): their bodies are in level_bodies too.
+    struct powerup_live_t
+    {
+        struct race_session_t* session = nullptr;
+        entity_t* entity = nullptr;
+        powerup_t p;
+        bool boost = false;
+        std::uint8_t randomize = 1;           // +0x138
+        std::vector< std::uint8_t > image;    // what 0x43DB40 reads: +0x13C the energy, +0x140 the multiplayer byte
+        level_body_t* body = nullptr;         // +0x114
+    };
+    std::vector< std::unique_ptr< powerup_live_t > > powerups;
+    value_t powerup_db;                       // VuDBAsset/PowerUpDB
+    int powerups_applied = 0;                 // ours: the census
     // The level's dynamic game props made live (world/dynprop.hxx): their bodies are in level_bodies too.
     struct dyn_prop_t
     {
@@ -1725,6 +1740,8 @@ inline bool race_session_dynamic_prop( race_session_t& s, entity_t& e, const bod
     return true;
 }
 
+inline bool race_session_powerup( race_session_t& s, entity_t& e, std::uint32_t& id, const c_archive& archive );   // world/pickups.hxx
+
 inline void race_session_level_bodies( race_session_t& s, entity_t& tree, const c_archive& archive )
 {
     if ( !s.dynamics )
@@ -1750,6 +1767,8 @@ inline void race_session_level_bodies( race_session_t& s, entity_t& tree, const 
         for ( auto& c : e.m_children )
             self( self, *c );
         if ( race_session_gfx_game_initialize( s, e ) )
+            return;
+        if ( race_session_powerup( s, e, id, archive ) )
             return;
         if ( dynamic_prop_class( e.m_type ) )   // the mine's slot 6 0x438CF0 included (race_session_dynamic_prop)
         {

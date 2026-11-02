@@ -17,6 +17,7 @@
 #include <workspace/core/world/dynamics.hxx>
 #include <workspace/core/world/kernel.hxx>
 #include <workspace/core/world/query.hxx>
+#include <workspace/core/world/pickups.hxx>
 #include <workspace/core/world/session.hxx>
 #include <workspace/core/world/tree.hxx>
 #include <workspace/core/world/wake.hxx>
@@ -943,8 +944,14 @@ inline void race_contact_added( void* user, solver_contact_point_t& cp, solver_r
             }
         return nullptr;
     };
-    h.callback0 = prop_callback( object0, object1 );
-    h.callback1 = prop_callback( object1, object0 );
+    const auto any_callback = [ & ]( solver_rigid_t* self, solver_rigid_t* other ) -> std::function< void( contact_record_t& ) > {
+        for ( const auto& u : s.powerups )
+            if ( u->body && &u->body->body.body == self )
+                return [ &s, self, other ]( contact_record_t& ) { race_powerup_contact( s, self, other ); };
+        return prop_callback( self, other );
+    };
+    h.callback0 = any_callback( object0, object1 );
+    h.callback1 = any_callback( object1, object0 );
     ++c.ran;
     c.meshes += o1.mesh ? 1 : 0;
     if ( !contact_added( s.surfaces, reinterpret_cast< std::uint8_t* >( &cp ), o0, o1, index1, h ) )
@@ -1438,6 +1445,8 @@ inline void race_session_explode( race_session_t& s, const float* m, const float
 
 inline bool race_event_dispatch( race_session_t& s, const std::string& entity, const std::string& plug, const std::uint8_t* params )
 {
+    if ( race_powerup_plug( s, entity, plug ) )
+        return true;
     // VuPropEntity's inputs (ctor 0x5464C0, plug inits 0x546EE0): "Show" 0x546380 - the static model component (+0x70) onto
     // the 3D draw manager unless its +0x1E, the body (+0x74 -> +0x100) into the dynamics world unless added (+0x104);
     // "Hide" 0x5463E0 - the reverse. VuRetVal 0. (The draw manager is the renderer's: prop_drawn.)

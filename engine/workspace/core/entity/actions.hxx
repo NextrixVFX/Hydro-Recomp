@@ -59,6 +59,42 @@ inline void delay_load( delay_properties_t& p, const value_t& v, const delay_pro
     property_float( v, "Random Window", p.random_window, d.random_window, false );
 }
 
+// VuPowerUpEntity (ctor 0x43B180): "Initially Enabled" bool +0x70 = 1, "Type" +0x74, "Reflect" +0x8C = 0, "Handle Wave
+// Height" +0x8D = 0, "Height Above Water" float +0x90 = 0, "Voice Over Entry" +0x94; the boost's (ctor 0x43D860)
+// "Randomize for Multiplayer" +0x138 = 1. The two DB entries load as the names they hold.
+struct powerup_properties_t
+{
+    std::uint8_t initially_enabled;
+    std::string type;
+    std::uint8_t reflect;
+    std::uint8_t handle_wave_height;
+    float height_above_water;
+    std::string voice_over;
+    std::uint8_t randomize;
+};
+
+inline void powerup_construct( powerup_properties_t& p )
+{
+    p.initially_enabled = 1;
+    p.type.clear( );
+    p.reflect = 0;
+    p.handle_wave_height = 0;
+    p.height_above_water = 0.0f;
+    p.voice_over.clear( );
+    p.randomize = 1;
+}
+
+inline void powerup_load( powerup_properties_t& p, const value_t& v, const powerup_properties_t& d )
+{
+    property_bool( v, "Initially Enabled", p.initially_enabled, d.initially_enabled );
+    property_string( v, "Type", p.type, d.type );
+    property_bool( v, "Reflect", p.reflect, d.reflect );
+    property_bool( v, "Handle Wave Height", p.handle_wave_height, d.handle_wave_height );
+    property_float( v, "Height Above Water", p.height_above_water, d.height_above_water, false );
+    property_string( v, "Voice Over Entry", p.voice_over, d.voice_over );
+    property_bool( v, "Randomize for Multiplayer", p.randomize, d.randomize );
+}
+
 // VuBooleanEntity (create 0x5E5810, ctor 0x5E5880): "Value" bool +0x60 = 0.
 struct boolean_properties_t
 {
