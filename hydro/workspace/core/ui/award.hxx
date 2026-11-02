@@ -341,7 +341,12 @@ inline bool ui_game_screens_t::award_open( const char* project, std::int32_t tie
         ops.m_release = [ b ] { b->project_release( ); };
         ops.m_tick = [ b ]( float dt ) { b->tick( dt, true ); };
         ops.m_draw = [ this, b, root ] { if ( m_frame ) m_frame( *root, *b ); };
-        hooks.m_event = [ b ]( const char* name, const ui_params_t& p ) { b->post( fsm_hash( name ), p ); };
+        // The setup's m_event, when set: the leaves' own listeners (world/external.hxx award_event), then the project's maps.
+        hooks.m_event = [ b, leaves = hooks.m_event ]( const char* name, const ui_params_t& p ) {
+            if ( leaves )
+                leaves( name, p );
+            b->post( fsm_hash( name ), p );
+        };
     }
     award->m_screen = std::make_unique< c_ui_award_screen >( award->m_root.get( ), std::move( ops ), std::move( hooks ) );
     m_award = award;

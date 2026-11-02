@@ -669,6 +669,12 @@ private:
     logic_entity_t* screen_logic( screen_state_t& state, entity_t& e );
     ui_ret_t screen_external( screen_state_t& state, c_ui_binding& binding, entity_t& e, const char* plug, const ui_params_t& p );
     void award_busy( const ui_params_t& p );
+    struct award_view_t   // the Screens/Award leaves' runtime (world/external.hxx award_event)
+    {
+        std::string credits, trophy_id, trophy_image, award_image, cat_id, info_id;
+    };
+    award_view_t m_award_view;
+    void award_event( const char* name, const ui_params_t& p );
     bool menu_poster( std::uint32_t hash, const ui_params_t& p );
     void ui_play( const char* name )
     {

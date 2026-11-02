@@ -325,6 +325,7 @@ inline void c_world::bind_game_screens( )
     };
     m_race.rules.screen_hooks.award_done = [ this ] { return m_race.screens.award_done( ); };
     m_race.rules.screen_hooks.award.award_open = [ this ]( const char* project, std::int32_t tier, const std::string& boat_class, std::int32_t value, const std::vector< std::string >& names ) {
+        m_award_view = award_view_t{ };
         return m_race.screens.award_open( project, tier, boat_class, value, names );
     };
     m_race.rules.screen_hooks.paused = [ this ] { return m_boxes.drawing( ); };
@@ -425,6 +426,11 @@ inline ui_frame_inputs_t c_world::ui_inputs( )
     in.m_fontdb = &m_font_db;
     in.m_string = [ this ]( const std::string& id ) { return string_db_get( m_string_db, id ); };
     in.m_texture = [ this ]( const entity_t& e, int which ) -> const ui_texture_t* {
+        if ( e.m_type == "VuBarracudaUITrophyImageEntity" || e.m_type == "VuBarracudaUIAwardImageEntity" )
+        {
+            const std::string& image = e.m_type[ 13 ] == 'T' ? m_award_view.trophy_image : m_award_view.award_image;   // 0x440EA0: +0xB8's texture
+            return image.empty( ) ? nullptr : m_ui_pass->texture_asset( image );
+        }
         static const char* const names[ 3 ] = { "Texture Asset", "Selected Texture Asset", "Pressed Texture Asset" };
         const ui_slot_t* s = ui_property_value( e, names[ which < 3 ? which : 0 ] );
         return s && !s->m_text.empty( ) ? m_ui_pass->texture_asset( s->m_text ) : nullptr;
@@ -465,6 +471,14 @@ inline ui_screen_env_t c_world::ui_screen_environment( )
     env.m_text = [ this ]( const entity_t& e ) {
         if ( e.m_type == "VuGamerTagUITextEntity" )   // slot 12 0x445DE0
             return platform_gamer_tag( );
+        if ( e.m_type == "VuBarracudaUICreditTextEntity" )   // slot 12 0x443920: +0x10C itself
+            return m_award_view.credits;
+        if ( e.m_type == "VuBarracudaUITrophyTextEntity" )   // 0x446DE0, the three: VuStringDB slot 7 on +0x10C
+            return m_award_view.trophy_id.empty( ) ? std::string( ) : string_db_get( m_string_db, m_award_view.trophy_id );
+        if ( e.m_type == "VuBarracudaUIUnlockCatTextEntity" )
+            return m_award_view.cat_id.empty( ) ? std::string( ) : string_db_get( m_string_db, m_award_view.cat_id );
+        if ( e.m_type == "VuBarracudaUIUnlockInfoTextEntity" )
+            return m_award_view.info_id.empty( ) ? std::string( ) : string_db_get( m_string_db, m_award_view.info_id );
         const ui_slot_t* id = ui_property_value( e, "String ID" );
         return id && !id->m_text.empty( ) ? string_db_get( m_string_db, id->m_text ) : std::string( );
     };

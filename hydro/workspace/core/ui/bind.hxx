@@ -631,7 +631,9 @@ private:
 
     static bool shown_vtable( std::uint32_t vt )
     {
-        return vt == k_ui_hud_element_vtable || vt == k_ui_text_vtable || vt == k_ui_hud_toast_vtable || vt == k_ui_image_vtable;
+        // 0x73B5DC .. 0x73C32C: Screens/Award's image and text leaves, whose Show / Hide / SetAlpha are their bases' (ctors 0x6284E0, 0x627070).
+        return vt == k_ui_hud_element_vtable || vt == k_ui_text_vtable || vt == k_ui_hud_toast_vtable || vt == k_ui_image_vtable || vt == 0x73B5DCu || vt == 0x73C0BCu ||
+               vt == 0x73B86Cu || vt == 0x73C18Cu || vt == 0x73C25Cu || vt == 0x73C32Cu;
     }
 
     static void make_shown( ui_bound_t& b )
