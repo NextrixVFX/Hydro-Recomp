@@ -14,6 +14,7 @@
 #include <workspace/core/world/pause.hxx>
 #include <workspace/core/boat/construct.hxx>
 #include <workspace/core/boat/fleet.hxx>
+#include <workspace/core/boat/ghost.hxx>
 #include <workspace/core/boat/load.hxx>
 #include <workspace/core/boat/meshes.hxx>
 #include <workspace/core/boat/nuisance.hxx>
@@ -98,6 +99,7 @@ struct race_session_load_ctx_t
 
 struct race_session_boat_t
 {
+    const ghost_data_t* ghost = nullptr;   // VuGhostBoatEntity +0x520
     boat_graph_t graph;
     std::unique_ptr< race_boat_driver_t > driver;
     vu_rigid_body_t body{};
@@ -241,6 +243,12 @@ struct race_session_t
     tire_track_manager_t tire_tracks;   // VuTireTrackManager g 0x7590F4 (world/tiretrack.hxx; its lists stay empty in retail)
     ghost_loads_t ghost_loads;          // VuGhostGame +0x75C .. and +0x740 (ShowError's message)
     ghost_game_t ghost_game;            // the handlers' view of the game (world/ghostplay.hxx)
+    std::vector< std::unique_ptr< ghost_record_t > > ghost_records;   // VuGhostManager +0x64
+    std::vector< std::unique_ptr< entity_t > > ghost_entities;
+    std::vector< std::shared_ptr< void > > ghost_ticks;
+    std::function< race_session_boat_t*( const std::string&, const value_t& ) > ghost_make;
+    std::function< void( std::size_t ) > boat_models;   // the hull's three instances, c_world's
+    const value_t* constant_db = nullptr;
     std::vector< pfx_frame_boat_t > pfx_boats;
     std::vector< pfx_frame_fluids_t > pfx_fluids;
     std::vector< race_start_boat_t > start_boats;
@@ -487,7 +495,7 @@ inline void race_session_post( race_session_t& s, const char* name, const ui_par
     race_bus_broadcast( s.bus, event_hash( name ), params ? *params : none );
 }
 
-inline void race_drive_setup( race_session_t& s, const value_t* constant_db );
+inline void race_drive_setup( race_session_t& s, const value_t* constant_db, std::size_t first = 0 );
 inline void race_drive_decision( race_session_t& s, std::size_t boat, float dt );
 inline void race_drive_viewports( race_session_t& s );
 inline void race_drive_build( race_session_t& s, std::size_t boat, float dt );
@@ -2465,7 +2473,7 @@ inline void race_session_end( race_session_t& s )
         s.slalom_draw = false;   // +0x744's +0x1E = 0 after the draw manager's remove (g 0x7590B8 vt+0x2C - the renderer's)
         race_unwired( s, "VuSlalomGame slot 6 0x48C880: the draw manager's remove (g 0x7590B8 vt+0x2C) of +0x744 - the renderer's (a hook)" );
     };
-    h.ghost_release = [ &s ] { ghost_clear( s.ghost ); };   // VuGhostGame slot 6 0x485360: 0x4AF490 (no ghost boats: 0x4AF640 not recreated)
+    h.ghost_release = [ &s ] { ghost_clear( s.ghost ); };   // VuGhostGame slot 6 0x485360: 0x4AF490
     h.call = [ &s ]( const char* what ) {
         const std::string w( what );
         if ( w == "cameras" )

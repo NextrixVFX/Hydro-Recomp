@@ -80,6 +80,8 @@
 // read, by 0x413830).
 struct race_drive_t
 {
+    bool ghost = false;   // VuGhostDriver 0x737DDC
+    ghost_pilot_t ghost_pilot;
     race_session_t* session = nullptr;
     std::size_t index = 0;
     std::vector< std::uint8_t > records;
@@ -482,7 +484,12 @@ inline void race_drive_driver( void* user, float dt )
         nuisance_driver_tick( *s.track, r.nuisance_pilot, t, r.nuisance_target, *s.random, dt, h );
         return;
     }
-    race_unwired( s, "a driver tick of a class not wired here (UI / ghost, or an AI boat with no pilot) - UNKNOWN" );
+    if ( r.ghost )
+    {
+        ghost_driver_tick( *s.track, r.ghost_pilot, r.d.transform );   // slot 18 0x40EBA0
+        return;
+    }
+    race_unwired( s, "a driver tick of a class not wired here (UI, or an AI boat with no pilot) - UNKNOWN" );
 }
 
 inline void race_drive_camera( void* user, float dt )
@@ -519,12 +526,15 @@ inline void race_drive_respawn( void* user )
 
 // ---- setup -----------------------------------------------------------------
 
-inline void race_drive_setup( race_session_t& s, const value_t* constant_db )
+inline void race_drive_setup( race_session_t& s, const value_t* constant_db, std::size_t first )
 {
-    s.drives.assign( s.boats.size( ), nullptr );
+    if ( first == 0 )
+        s.drives.assign( s.boats.size( ), nullptr );
+    else
+        s.drives.resize( s.boats.size( ) );
     if ( constant_db )
         s.vertical_fov = member( member( member( *constant_db, "VuDBAsset" ), "Camera" ), "VerticalFOV" );
-    for ( std::size_t k = 0; k < s.boats.size( ); ++k )
+    for ( std::size_t k = first; k < s.boats.size( ); ++k )
     {
         race_session_boat_t& b = *s.boats[ k ];
         std::uint8_t* transform = race_session_image( b, 0, 0x50 );
@@ -584,6 +594,7 @@ inline void race_drive_setup( race_session_t& s, const value_t* constant_db )
                 s.explosion_listeners.push_back( l );
             } );
         r->ai = vtable == 0x737B5Cu;
+        r->ghost = vtable == 0x737DDCu;
         if ( vtable == 0x737C4Cu )
         {
             // The ctor 0x40D880's state: no target (+0xF0 0), no target sector (+0xF4 0), an empty plan (+0x84).
@@ -745,7 +756,8 @@ inline void race_drive_setup( race_session_t& s, const value_t* constant_db )
         h.hull.wake = race_drive_hull_wake;
         s.drives[ k ] = r;
     }
-    race_drive_contact_setup( s );
+    if ( first == 0 )
+        race_drive_contact_setup( s );
     int made = 0;
     for ( const auto& r : s.drives )
         made += r ? 1 : 0;
@@ -1705,10 +1717,13 @@ inline void race_session_game_mode( void* user, float dt )
     {
         race_rules_boat_t& rb = s.rules_boats[ k ];
         rb.sector = nullptr;
-        const race_drive_t* d = k < s.drives.size( ) ? s.drives[ k ].get( ) : nullptr;
+        const std::size_t at = rb.drive >= 0 ? static_cast< std::size_t >( rb.drive ) : k;
+        const race_drive_t* d = at < s.drives.size( ) ? s.drives[ at ].get( ) : nullptr;
         int sector = -1;
         if ( d && d->human )
             sector = d->human_pilot.sector;
+        else if ( d && d->ghost )
+            sector = d->ghost_pilot.sector;
         else if ( d && d->ai && d->pilot >= 0 )
         {
             const fleet_plan_t& plan = s.pilots[ static_cast< std::size_t >( d->pilot ) ].plan;
@@ -1819,4 +1834,17 @@ inline void race_session_game_mode( void* user, float dt )
                       rules_f( rb.boat, 0x4C4 ), rules_f( rb.boat, 0x4B4 ), rules_i32( rb.boat, 0x308 ), rules_f( rb.transform, 0x80 ),
                       rules_f( rb.transform, 0x84 ), rules_f( rb.transform, 0x88 ) );
         }
+}
+
+// The ghost's replay, its two hooks on the Decision composition.
+inline void race_ghost_debris( race_session_t& s, std::size_t k )
+{
+    if ( k < s.drives.size( ) && s.drives[ k ] )
+        s.drives[ k ]->hooks.debris_410FF0( s.drives[ k ].get( ) );
+}
+
+inline void race_ghost_destroyed( race_session_t& s, std::size_t k )
+{
+    if ( k < s.drives.size( ) && s.drives[ k ] )
+        s.drives[ k ]->hooks.boat_41E240( s.drives[ k ].get( ) );
 }

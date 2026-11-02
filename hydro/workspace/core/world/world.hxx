@@ -1298,12 +1298,11 @@ public:
         // Boat_proxy/Proxy_diffuse placeholder) - retail's state at that point, not a stand-in. The damage pieces'
         // skins (+0x238, 0x4119F0) are not built here: our renderer does not draw the pieces. race_draw moves the
         // shown instance each frame (0x41EAE0's matrix).
-        for ( std::size_t k = 0; k < m_race.boats.size( ); ++k )
-        {
+        m_race.boat_models = [ this ]( std::size_t k ) {
             race_session_boat_t& b = *m_race.boats[ k ];
             const std::uint8_t* transform = m_race.start_boats[ k ].transform;
             if ( !transform )
-                continue;
+                return;
             float m[ 16 ];
             race_boat_draw_matrix( b.graph.objects[ 0 ].image.data( ), transform, m );
             const int at[ 3 ] = { 0xC4, 0xDC, 0xF4 };
@@ -1365,7 +1364,9 @@ public:
                       b.io.boat_strings[ 0xC4 ].c_str( ), b.io.boat_strings[ 0xDC ].c_str( ), b.io.boat_strings[ 0xF4 ].c_str( ), b.skin.c_str( ),
                       b.sections ? ( skinned ? "skin pass 0x421490 applied" : "skin pass 0x421490 ran, no texture changed" )
                                  : "skin pass 0x421490 not reached (0x420A70 stopped) - the models' own materials" );
-        }
+        };
+        for ( std::size_t k = 0; k < m_race.boats.size( ); ++k )
+            m_race.boat_models( k );
     }
 
     // Per frame: the draw 0x41EAE0's instance choice against this frame's eye, and its matrix: the transform's world
@@ -1383,6 +1384,11 @@ public:
                 continue;
             const std::uint8_t* boat = b.graph.objects[ 0 ].image.data( );
             gfx_retail_boat_t& r = *m_retail_boats[ k ];
+            if ( b.ghost )   // slot 12 0x422590: the fade, then 0x41EAE0
+            {
+                const std::size_t human = race_ghost_human( m_race );
+                ghost_boat_fade( b.graph.objects[ 0 ].image.data( ), transform, human < m_race.start_boats.size( ) ? m_race.start_boats[ human ].transform : nullptr );
+            }
             int pick = race_boat_draw_instance( boat, transform, p.m_eye );
             if ( pick < 0 )
                 continue;
