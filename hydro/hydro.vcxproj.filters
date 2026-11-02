@@ -399,6 +399,9 @@
     <ClInclude Include="workspace\core\world\field.hxx">
       <Filter>workspace\core\world</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\core\world\foliage.hxx">
+      <Filter>workspace\core\world</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\core\world\force.hxx">
       <Filter>workspace\core\world</Filter>
     </ClInclude>
@@ -531,6 +534,9 @@
     <ClInclude Include="workspace\core\world\strings.hxx">
       <Filter>workspace\core\world</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\core\world\subtitle.hxx">
+      <Filter>workspace\core\world</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\core\world\surface.hxx">
       <Filter>workspace\core\world</Filter>
     </ClInclude>
@@ -574,6 +580,9 @@
       <Filter>workspace\utility\checks</Filter>
     </ClInclude>
     <ClInclude Include="workspace\utility\checks\device.hxx">
+      <Filter>workspace\utility\checks</Filter>
+    </ClInclude>
+    <ClInclude Include="workspace\utility\checks\foliage.hxx">
       <Filter>workspace\utility\checks</Filter>
     </ClInclude>
     <ClInclude Include="workspace\utility\checks\game.hxx">

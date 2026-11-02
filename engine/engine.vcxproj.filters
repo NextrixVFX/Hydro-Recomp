@@ -326,6 +326,9 @@
     <ClInclude Include="workspace\core\entity\values.hxx">
       <Filter>workspace\core\entity</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\core\input\device.hxx">
+      <Filter>workspace\core\input</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\core\input\manager.hxx">
       <Filter>workspace\core\input</Filter>
     </ClInclude>
