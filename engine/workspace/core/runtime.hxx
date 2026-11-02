@@ -74,6 +74,11 @@ void c_engine::camera( const float* eye, const float* target, float far_plane )
     g_viewport( ).aim( eye, target, far_plane );
 }
 
+void c_engine::lens( float tan_half, float near_plane )
+{
+    g_viewport( ).lens( tan_half, near_plane );
+}
+
 void c_engine::sun( const float* direction )
 {
     g_light( ).aim( direction );

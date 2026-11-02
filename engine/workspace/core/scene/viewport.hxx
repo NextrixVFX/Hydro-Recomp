@@ -1,10 +1,13 @@
 #pragma once
 
+#include <cmath>
+
 class c_viewport
 {
 public:
     void look( const float position[ 3 ] );
     void aim( const float* eye, const float* target, float far_plane );
+    void lens( float tan_half, float near_plane ) { m_tan_half = tan_half; m_near = near_plane; }
     void tilt( float x, float y, float z );
     void build( int width, int height );
     const float* view( ) const { return m_view; }
@@ -15,6 +18,8 @@ public:
     void scale_depth( float scale );
 
 private:
+    float m_tan_half = 0.0f;   // tan( vertical fov / 2 ) of the camera; 0: no camera, the old 1.05 (the scaffold's view)
+    float m_near = 0.5f;       // the camera's +0x178
     float m_target[ 3 ]{};
     float m_eye[ 3 ]{};
     float m_view[ 16 ]{};
@@ -87,7 +92,7 @@ void c_viewport::build( int width, int height )
     math_look( m_view, m_eye, at, m_up );
 
     float aspect = height > 0 ? static_cast< float >( width ) / static_cast< float >( height ) : 1.0f;
-    math_perspective( m_projection, m_aimed ? 1.05f : 0.9f, aspect, 0.5f, m_aimed ? m_far : 800.0f );
+    math_perspective( m_projection, !m_aimed ? 0.9f : m_tan_half > 0.0f ? 2.0f * std::atan( m_tan_half ) : 1.05f, aspect, m_aimed ? m_near : 0.5f, m_aimed ? m_far : 800.0f );
 }
 
 void c_viewport::scale_depth( float scale )

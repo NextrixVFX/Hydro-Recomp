@@ -5,6 +5,7 @@
 //
 // SUBSTITUTIONS, each until the composer frame owns the view (world/composer.hxx):
 // - The engine still owns the frame: engine_pass runs inside c_geometry::draw's opaque stage, one flip per engine pass (main, mirror); retail has one flip a frame with the passes in the key's screen field.
+// - The reflection's camera and clip plane take the viewport's plane (0x530F10, surface.hxx water_reflection_plane_tick).
 // - The six planes come from the engine's view-projection, normalised, not from the camera's 0x57CBA0: inward and unit length as retail's, order near / far / sides differs (only a sign OR reads them).
 // - m_depth_material and m_shadow_material hold the colour material: VuGfxUtil's depth and shadow programs (g 0x75902C +8 / +0xC) are not made; nothing submits those passes yet (no depth pre-pass, no shadow pass).
 // NOT RECREATED: the dynamic lights' gather (0x562C40) answers no light until lights.hxx is fed; retain / release never free: the models live as long as the stage.
@@ -17,6 +18,7 @@
 #include <workspace/core/render/resource.hxx>
 #include <workspace/core/world/backend.hxx>
 #include <workspace/core/world/drawing.hxx>
+#include <workspace/core/world/foliage.hxx>
 #include <workspace/core/world/gfxsort.hxx>
 #include <workspace/core/world/meshes.hxx>
 #include <workspace/core/world/livery.hxx>
@@ -87,6 +89,7 @@ struct gfx_retail_t
             gfx_programs_t::set_matrix( m_api, *part.m_shader->m_program, *part.m_shader->m_matrix, r );
             m_device.draw_indexed( 3u, part.m_start, part.m_triangles );
         };
+        m_backend.m_callbacks[ k_gfx_cb_foliage ] = [ this ]( std::uint8_t* r ) { foliage_record( r ); };
     }
 
     gfx_direct_t m_api;
@@ -120,6 +123,8 @@ struct gfx_retail_t
     gfx_camera_t m_camera;
     int m_passes = 0;
     std::vector< const float* > m_palettes;   // this pass's skinned draws
+    std::vector< std::uint16_t > m_quad_indices;   // VuGfxUtil +0x48
+    float m_plane = 0.0f;                          // the reflection plane, viewport +0x268
 
     // A VuCubeTextureAsset's object (0x5AE140). A substitution (VuSubstituteAssetEntity) changes the object in place: `m_cube_name` answers the resolved name, frame( ) follows it.
     gfx_texture_object_t* cube_object( const std::string& name )
@@ -317,6 +322,51 @@ struct gfx_retail_t
         return id_of( made, [ & ] { return m_backend.add_chunk( made ); } );
     }
 
+    // 0x5BB3A0's device half: the two programs, the declaration { position 0, uv 12, colour 20 } made on the first, one material each.
+    void foliage_materials( std::uint32_t out[ 2 ] )
+    {
+        const char* names[ 2 ] = { "Foliage/Simple", "Foliage/Fog" };
+        std::vector< std::uint8_t > blob;
+        gfx_program_t* programs[ 2 ] = { };
+        for ( int i = 0; i < 2; ++i )
+        {
+            if ( !m_read( std::string( "VuCompiledShaderAsset/" ) + names[ i ], blob ) )
+                return;
+            programs[ i ] = m_programs.load( blob.data( ) );
+        }
+        gfx_vertex_element_t elements[ 3 ];
+        elements[ 0 ].m_stream = 0; elements[ 0 ].m_offset = 0;  elements[ 0 ].m_type = 2; elements[ 0 ].m_usage = 0; elements[ 0 ].m_index = 0;
+        elements[ 1 ].m_stream = 0; elements[ 1 ].m_offset = 12; elements[ 1 ].m_type = 1; elements[ 1 ].m_usage = 6; elements[ 1 ].m_index = 0;
+        elements[ 2 ].m_stream = 0; elements[ 2 ].m_offset = 20; elements[ 2 ].m_type = 7; elements[ 2 ].m_usage = 2; elements[ 2 ].m_index = 0;
+        gfx_declaration_t* declaration = m_declarations.create( std::vector< gfx_vertex_element_t >( elements, elements + 3 ), *programs[ 0 ] );
+        const gfx_handle_t layout = declaration->m_layout;
+        const std::uint32_t layout_id = id_of( declaration, [ & ] { return m_backend.add_layout( layout ); } );
+        for ( int i = 0; i < 2; ++i )
+        {
+            gfx_program_t* program = programs[ i ];
+            const std::uint32_t program_id = id_of( program, [ & ] { return m_backend.add_program( program ); } );
+            const gfx_material_t* material = m_sort.material_create( program_id, layout_id, gfx_material_desc_t{ } );
+            out[ i ] = id_of( material, [ & ] { return m_backend.add_material( material ); } );
+        }
+    }
+
+    // 0x5BBDD0: { texture, count, count x 4 vertices }: the texture in slot 0, the shared quad indices (0x50B420: 0 1 2 0 2 3 per quad), the dynamic draw.
+    void foliage_record( std::uint8_t* record )
+    {
+        std::uint32_t texture;
+        std::int32_t count;
+        std::memcpy( &texture, record, 4 );
+        std::memcpy( &count, record + 4, 4 );
+        m_device.set_texture( 0u, texture ? m_backend.m_texture_table[ texture - 1u ] : nullptr );
+        for ( std::size_t q = m_quad_indices.size( ) / 6u; q < static_cast< std::size_t >( count ); ++q )
+        {
+            const std::uint16_t v = static_cast< std::uint16_t >( q * 4u );
+            for ( const std::uint16_t i : { std::uint16_t( v ), std::uint16_t( v + 1 ), std::uint16_t( v + 2 ), std::uint16_t( v ), std::uint16_t( v + 2 ), std::uint16_t( v + 3 ) } )
+                m_quad_indices.push_back( i );
+        }
+        m_device.draw_indexed_dynamic( 3u, static_cast< std::uint32_t >( count ) * 4u, static_cast< std::uint32_t >( count ) * 2u, m_quad_indices.data( ), record + 8, 0x18u );
+    }
+
     void model_record( std::uint8_t* record, gfx_model_pass_t pass )
     {
         gfx_model_record_t r;
@@ -414,11 +464,12 @@ struct gfx_retail_t
             p.m_lod = 0.05f;
             p.m_reflecting = 1u;
             p.m_clip[ 2 ] = 1.0f;
+            p.m_clip[ 3 ] = -m_plane;
             float inverse[ 16 ];
             std::memcpy( inverse, m_view_proj, 64 );
             hull_invert( inverse );
             for ( int r = 0; r < 4; ++r )
-                clip[ r ] = ( inverse[ r * 4 + 1 ] + inverse[ r * 4 ] ) * 0.0f + inverse[ r * 4 + 2 ];   // 0x558C00's row, plane 0
+                clip[ r ] = ( ( inverse[ r * 4 + 1 ] + inverse[ r * 4 ] ) * 0.0f + inverse[ r * 4 + 2 ] ) + inverse[ r * 4 + 3 ] * -m_plane;   // 0x558C00's row
         }
         m_device.clip_plane( clip );
         m_sort.set_layer( 1u );

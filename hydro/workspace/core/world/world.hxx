@@ -158,7 +158,6 @@ private:
     const std::vector< cached_part_t >& model_for( const std::string& asset );
 
     void foliage_build( const entity_t& root );
-    void foliage_frame( );
 
     const value_t* template_root( const std::string& name )
     {
@@ -688,7 +687,6 @@ private:
             c_engine::drop( alpha );
         m_foliage = foliage_manager_t{ };
         m_foliage_entities.clear( );
-        m_foliage_draws.clear( );
         m_pfx.clear( );
         m_draws = 0;
         m_stack.clear( );
@@ -696,7 +694,6 @@ private:
         m_animated.clear( );
         m_static_draws.clear( );
         m_play.clear( );
-        m_scored.clear( );
         m_triggers.clear( );
         m_filters.clear( );
         m_actions.clear( );
@@ -1023,17 +1020,6 @@ public:
                 transform_draw_matrix( *t, item.world );
                 const auto box = m_scene_aabbs.find( item.asset );
                 scene_component_aabb( item.aabb, box != m_scene_aabbs.end( ) ? box->second.data( ) : scene_zero_aabb( ), item.world, false );
-                if ( !item.playing && item.rigid )
-                {
-                    const std::vector< cached_part_t >& parts = model_for( item.asset );
-                    for ( std::size_t index = 0; index < item.placements.size( ) && index < parts.size( ); ++index )
-                        if ( item.placements[ index ] >= 0 )
-                        {
-                            float node[ 16 ];
-                            math_multiply( node, item.world, parts[ index ].node );
-                            c_engine::move( item.placements[ index ], node );
-                        }
-                }
             }
         prop_draw( owner );
     }
@@ -1436,7 +1422,7 @@ public:
             rt[ 0 ] = 1.0f;
         const float up[ 3 ] = { rt[ 1 ] * fw[ 2 ] - rt[ 2 ] * fw[ 1 ], rt[ 2 ] * fw[ 0 ] - rt[ 0 ] * fw[ 2 ], rt[ 0 ] * fw[ 1 ] - rt[ 1 ] * fw[ 0 ] };
         const float aspect = 1280.0f / 720.0f;
-        const water_frustum_t cam = water_frustum_build( m_eye, rt, fw, up, aspect, 0.5f, m_far, std::tan( 1.05f * 0.5f ) * aspect );
+        const water_frustum_t cam = water_frustum_build( m_eye, rt, fw, up, aspect, m_lens_near, m_far, m_lens_tan * aspect );
         water_grid_frame( m_grid, cam, m_water, &m_water_view, m_grid_frame );
         water_stage_frame( dt );
     }
@@ -1481,6 +1467,11 @@ public:
         std::memcpy( view.m_statics.m_decal_ambient, &record[ 15 ], 4 );
         std::memcpy( view.m_statics.m_decal_diffuse, &record[ 16 ], 4 );
         m_stage.frame( dt, m_grid_frame, view );
+        c_engine::clear_colour( &record[ 1 ] );
+        water_reflection_plane_tick( m_reflection_plane, &m_water, m_eye );
+        c_engine::reflection_plane( m_reflection_plane.m_plane );
+        if ( m_retail )
+            m_retail->m_plane = m_reflection_plane.m_plane;
         if ( m_retail )
             m_retail->frame( dt, record, m_far, m_lights );
     }
@@ -1504,15 +1495,21 @@ public:
                     item.retail->draw( sort, p );
                 }
             retail_boats( sort, p );
+            for ( foliage_entity_t& f : m_foliage_entities )
+                if ( ( p.m_reflecting & f.m_reflect ) == p.m_reflecting )
+                    f.draw( p.m_eye, p.m_eye );
             for ( animated_t& item : m_animated )
             {
                 const animated_draw_t s = animated_model_select( item.draw, item.aabb, item.aabb + 4, p.m_eye, p.m_skip_models != 0u );
                 if ( !s.drawn || !item.retail || ( p.m_reflecting & item.draw.reflect ) != p.m_reflecting )
                     continue;
+                const std::vector< float >* palette = prop_palette( item );
+                if ( palette == nullptr )
+                    continue;   // no instance: nothing to pose it with (UNKNOWN, retail always has one)
                 item.retail->m_colour = s.color;
                 item.retail->m_byte = s.dynamic_lighting;
-                item.retail->m_model_word = static_cast< std::uint32_t >( item.palette.size( ) / 16 );
-                item.retail->m_bones = m_retail->palette_id( item.palette.data( ) );
+                item.retail->m_model_word = static_cast< std::uint32_t >( palette->size( ) / 16 );
+                item.retail->m_bones = m_retail->palette_id( palette->data( ) );
                 item.retail->draw( sort, item.world, p );
             }
             if ( !p.m_reflecting )
@@ -1521,6 +1518,9 @@ public:
                     g.model->m_colour = g.colour;
                     g.model->draw( sort, g.matrix, p );
                 }
+            // 0x558AC0 / 0x558C00 after the walk: 0x5BBAA0. Ours, flagged: the level's "Foliage Tint" as loaded for the composer's +0xA8: whether it follows the blended settings is unread.
+            const std::uint8_t tint[ 3 ] = { static_cast< std::uint8_t >( m_foliage_tint ), static_cast< std::uint8_t >( m_foliage_tint >> 8 ), static_cast< std::uint8_t >( m_foliage_tint >> 16 ) };
+            m_foliage.flush( sort, tint );
         };
         m_pfx.m_geom_sink = [ this ]( const std::string& asset, const float* matrix, std::uint32_t colour ) {
             gfx_static_model_t*& model = m_retail_geom_models[ asset ];
@@ -1651,6 +1651,7 @@ public:
             std::memcpy( m_eye, m_race.viewport_camera + 0x00, sizeof( m_eye ) );
             std::memcpy( m_target, m_race.viewport_camera + 0x10, sizeof( m_target ) );
             m_far = m_authored_far;
+            camera_lens( m_race.viewport_camera );
         }
         else if ( m_background.rig )
         {
@@ -1662,9 +1663,15 @@ public:
             std::memcpy( m_eye, cam + 0x00, sizeof( m_eye ) );
             std::memcpy( m_target, cam + 0x10, sizeof( m_target ) );
             std::memcpy( &m_far, cam + 0x17C, sizeof( m_far ) );
+            camera_lens( cam );
         }
         else
+        {
+            m_lens_tan = std::tan( 1.05f * 0.5f );
+            m_lens_near = 0.5f;
+            c_engine::lens( 0.0f, 0.5f );
             dev_vantage( dt );
+        }
         // Ours (a test driver): --look "ex ey ez tx ty tz" pins the view, to put a still on a chosen thing.
         if ( const char* look = c_engine::option( "look" ) )
         {
@@ -1708,7 +1715,6 @@ public:
     void scene_frame_rest( float dt )
     {
         race_draw( );
-        foliage_frame( );
         water_draw( dt );
         // The crossing test wants the position of whatever the plane's Trigger
         // Type accepts. With no boat in the scene the dev vantage stands in,
@@ -1822,17 +1828,9 @@ private:
     float m_target[ 3 ]{};
     float m_far = 800.0f;
     std::unique_ptr< gfx_sorted_t > m_sorted;   // the render seam (world/sorted.hxx)
-    // VuFoliageManager and the level's VuFoliageEntity (models.hxx foliage_build / foliage_frame).
-    struct foliage_draw_t
-    {
-        foliage_bucket_t* bucket = nullptr;
-        int geometry = -1;
-        int capacity = 0;
-        std::vector< mesh_vertex_t > scratch;
-    };
+    // VuFoliageManager and the level's VuFoliageEntity (models.hxx foliage_build, drawn by stage.hxx).
     foliage_manager_t m_foliage;
     std::vector< foliage_entity_t > m_foliage_entities;
-    std::vector< foliage_draw_t > m_foliage_draws;
     std::uint32_t m_foliage_tint = 0xFFFFFFFFu;
 
     // VuWaterTextureSettingsEntity_ctor @0x5d2bd0, read in property order:
@@ -1870,6 +1868,17 @@ private:
     water_grid_t m_grid{};
     water_grid_frame_t m_grid_frame{};
     water_stage_t m_stage{};
+    water_reflection_plane_t m_reflection_plane{};
+    float m_lens_tan = 0.0f, m_lens_near = 0.5f;   // the frame camera's vertical half tangent, +0x178
+    void camera_lens( const std::uint8_t* camera )
+    {
+        std::memcpy( &m_lens_near, camera + 0x178, 4 );
+        float t, aspect;   // +0x180 is the horizontal half tangent (0x4D2C60 widened the vertical fov by the aspect)
+        std::memcpy( &t, camera + 0x180, 4 );
+        std::memcpy( &aspect, camera + 0x174, 4 );
+        m_lens_tan = t / aspect;
+        c_engine::lens( m_lens_tan, m_lens_near );
+    }
     bool m_stage_attached = false, m_stage_bound = false;
     std::unique_ptr< gfx_retail_t > m_retail;
     std::vector< std::unique_ptr< gfx_retail_boat_t > > m_retail_boats;
@@ -1915,7 +1924,6 @@ private:
         model_draw_t draw{};                                // the component's properties, 0x61DB60's choice
         float aabb[ 8 ]{};                                  // its world aabb
         std::unique_ptr< gfx_animated_model_t > retail;     // the instance over stage.hxx's model
-        std::vector< float > palette;                       // the frame's pose, gMatrixArray; identity until it plays
         std::string trigger;
         // "VuTimedEventAsset/<name>", empty when the driver names none.
         std::string timed;
@@ -1928,12 +1936,6 @@ private:
         int geometry = -1;
         // The VuAnimationControl the last PlayAnimation built (@0x5ecb60).
         animation_control_t control{};
-        // A single-bone clip is a RIGID motion: every vertex rides one
-        // matrix, so the placement matrix can carry it and the mesh never has
-        // to be touched. These instances keep the SHARED cached geometry and
-        // a placement handle per part instead of a clone.
-        bool rigid = false;
-        std::vector< int > placements;
         // Props on an OnGameStart trigger begin at load; the rest wait for
         // their event to arrive and sit at the bind pose until it does.
         bool playing = false;
@@ -2055,7 +2057,8 @@ private:
         bool has_clip = false, added = false;
     };
     std::map< entity_t*, std::unique_ptr< prop_skel_t > > m_prop_skels;
-    bool prop_pose( const animated_t& item, std::vector< float >& palette );
+    bool prop_pose( const animated_t& item );
+    const std::vector< float >* prop_palette( const animated_t& item );
     int m_motion_unknown = 0;   // a motion child's IF slot 0 not read
     // (entity, refName) -> the full path the ref points at.
     std::map< std::pair< std::string, std::string >, std::string > m_refs;
@@ -2177,12 +2180,8 @@ private:
     int m_logic_unrecreated = 0;
     // UpdateBranchProbabilities events reached without their VuParams (UNKNOWN, graph.hxx).
     int m_waypoint_params_unknown = 0;
-    // Assets already scored by the extent test, so it reports once each.
-    std::set< std::string > m_scored;
-    // Route single-bone props through the placement matrix instead of CPU
-    // skinning. Kept switchable so the saving can be measured rather than
-    // asserted: --stream-rigid-props forces them back through the vertex path.
-    bool m_rigid_props = true;
+    // Props whose pose failed (no instance / clip): UNKNOWN, reported once.
+    int m_pose_unknown = 0;
     // --drive: let the AI controller steer the player boat round the gate
     // chain, so an unattended bench run exercises anything that needs the
     // player to actually move.

@@ -130,8 +130,8 @@ inline skel_instance_t* c_world::prop_instance( entity_t& e )
     return nullptr;
 }
 
-// The prop's pose at item.control.time: false with no instance / clip (UNKNOWN: the old path stands, counted).
-inline bool c_world::prop_pose( const animated_t& item, std::vector< float >& palette )
+// The prop's pose at item.control.time: false with no instance / clip (UNKNOWN: the palette stays as it was, counted).
+inline bool c_world::prop_pose( const animated_t& item )
 {
     entity_t* owner = item.entity;
     skel_instance_t* instance = owner ? prop_instance( *owner ) : nullptr;
@@ -146,10 +146,14 @@ inline bool c_world::prop_pose( const animated_t& item, std::vector< float >& pa
         s.added = true;
     }
     s.control.time = item.control.time;
-    if ( !skel_animated_build( s.animated ) || !skel_instance_set_pose( s.model.instance, &s.animated ) )
-        return false;
-    palette = s.model.instance.palette[ s.model.instance.current & 1 ];   // the one setPose wrote
-    return true;
+    return skel_animated_build( s.animated ) && skel_instance_set_pose( s.model.instance, &s.animated );
+}
+
+// What 0x533C90 draws: the instance's current palette (identity until it plays, 0x532360), null with no instance.
+inline const std::vector< float >* c_world::prop_palette( const animated_t& item )
+{
+    const skel_instance_t* i = item.entity ? prop_instance( *item.entity ) : nullptr;
+    return i ? &i->palette[ i->current & 1 ] : nullptr;
 }
 
 // VuAnimatedPropEntity's tick 0x5ED030 as the attach records see it: the pose (0x5169E0's time: the old path's control; 0x516CF0,

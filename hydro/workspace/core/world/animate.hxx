@@ -7,15 +7,12 @@
 // identical pump pistons do not pump in step.
 inline void c_world::skin_props( float dt )
 {
-    std::vector< float > palette;
     for ( animated_t& item : m_animated )
     {
-        if ( ( item.geometry < 0 && !item.rigid ) || !item.playing )
+        if ( item.geometry < 0 || !item.playing )
             continue;
-        const auto mesh = m_skinned.find( item.asset );
-        const auto bones = m_skeletons.find( item.asset );
         const auto clip = m_clips.find( item.clip );
-        if ( mesh == m_skinned.end( ) || bones == m_skeletons.end( ) || clip == m_clips.end( ) )
+        if ( clip == m_clips.end( ) )
             continue;
 
         // VuAnimatedPropEntity's tick @0x5ed030 advances every control
@@ -41,166 +38,10 @@ inline void c_world::skin_props( float dt )
             } );
 
         // The pose: 0x516CF0 (skel_animated_build) over the control's time, 0x532720 the palette, the prop's own instance (world/motion.hxx
-        // prop_instance, the same path the attach records read). The old walk over one clip frame (build_palette, frame below for the
-        // size checks only) had no blend between frames: a rotor stepped by its 30 Hz keys (user item 3).
-        const bool retail_pose = prop_pose( item, palette );
-        int frame = 0;
-        if ( frames > 0 )
-            frame = ( static_cast< int >( static_cast< float >( frames ) * item.control.time
-                / item.control.loop - 0.5f ) + 1 ) % frames;
-
-        // The pose for gMatrixArray: 0x533C90 takes the palette; the draw walks the model itself.
-        build_palette( item.palette, bones->second, clip->second, frame, nullptr, 0, 0.0f );
-        continue;
-
-        // Rigid: fold the single bone's palette matrix into each part's
-        // placement. The streamed path computes
-        // (world * node) * (palette * vertex); this computes
-        // (world * node * palette) * vertex, which is the same transform
-        // regrouped, so the picture is identical and the mesh is untouched.
-        if ( item.rigid )
-        {
-            if ( !retail_pose )
-                build_palette( palette, bones->second, clip->second, frame, nullptr, 0, 0.0f );
-            const std::vector< cached_part_t >& parts = model_for( item.asset );
-            for ( std::size_t index = 0;
-                index < item.placements.size( ) && index < parts.size( ); ++index )
-            {
-                if ( item.placements[ index ] < 0 )
-                    continue;
-                float node[ 16 ]{};
-                float posed[ 16 ]{};
-                math_multiply( node, item.world, parts[ index ].node );
-                math_multiply( posed, node, palette.data( ) );
-                c_engine::move( item.placements[ index ], posed );
-
-                // The extent test cannot see this path - no vertices are
-                // written - so check the equivalent property on the
-                // matrix. A rigid motion must not change the volume the
-                // mesh occupies, so the determinant of the posed basis has
-                // to match the unposed one. A bad palette scale or a
-                // transposed block shows up here as a ratio far from 1.
-                if ( index != 0 || m_scored.count( item.asset ) != 0 )
-                    continue;
-                // Mid-clip here too, for the same reason as the streamed
-                // branch: scoring a rigid prop on its first frame caught
-                // Props/TNT at frame 0 and reported a translation of
-                // 0 0 0, which says nothing about where the clip takes it.
-                const int frames = clip->second.frames( );
-                const int cycle = frames > 0 ? frame % frames : 0;
-                if ( frames > 2 && cycle != frames / 2 )
-                    continue;
-                m_scored.insert( item.asset );
-                const float before = determinant( node );
-                const float after = determinant( posed );
-                const float ratio = std::fabs( before ) > 1.0e-6f
-                    ? std::fabs( after / before ) : 0.0f;
-
-                // "A rigid motion preserves volume" is NOT true in
-                // general: Props/TNT/PittsFlyby authors a scale track
-                // running 1.000 to 2.000, so at its half-way frame the
-                // determinant is exactly 8 and the old test called correct
-                // data broken. Compare against the volume the clip's OWN
-                // scale implies instead - that still catches a wrong
-                // composition while accepting an authored scale.
-                const clip_pose_t& pose = clip->second.at( frame, 0 );
-                const model_bone_t& rest = bones->second[ 0 ];
-                const float clip_volume = pose.scale[ 0 ] * pose.scale[ 1 ] * pose.scale[ 2 ];
-                const float bind_volume = rest.scale[ 0 ] * rest.scale[ 1 ] * rest.scale[ 2 ];
-                const float expect = std::fabs( bind_volume ) > 1.0e-6f
-                    ? clip_volume / bind_volume : clip_volume;
-                const float error = std::fabs( expect ) > 1.0e-6f
-                    ? std::fabs( ratio / expect ) : 0.0f;
-                if ( error > 0.9f && error < 1.1f )
-                {
-                    LOG_SUCCESS( "prop %-34s rigid by matrix: determinant x%.3f, clip scale implies x%.3f, translation %.1f %.1f %.1f",
-                        item.asset.c_str( ), ratio, expect,
-                        posed[ 12 ], posed[ 13 ], posed[ 14 ] );
-                }
-                else
-                {
-                    LOG_ERROR( "prop %-34s rigid BROKEN: determinant x%.3f but the clip scale implies x%.3f",
-                        item.asset.c_str( ), ratio, expect );
-                }
-            }
-            continue;
-        }
-        if ( !retail_pose )
-            build_palette( palette, bones->second, clip->second, frame, nullptr, 0, 0.0f );
-        const mesh_vertex_t* target = skin_geometry(
-            item.geometry, mesh->second, bones->second, palette );
-
-        // The hull's frame-0 round-trip does NOT transfer to props: a prop
-        // clip is entitled to start away from its bind pose, and several
-        // measurably do. What must hold for any correct pose, whether the
-        // clip is a local deformation or a world path, is that it
-        // PRESERVES THE MODEL'S SIZE - articulated motion moves a mesh
-        // about, it does not inflate it. A mesh flung apart by a bad
-        // palette blows the extent up by orders of magnitude, which is
-        // exactly how the earlier mis-space showed itself.
-        if ( target == nullptr || m_scored.count( item.asset ) != 0 )
-            continue;
-        // Score MID-CLIP, not on the first streamed frame. A
-        // trigger-started prop gets its first frame the instant the event
-        // fires, and for a clip whose frame 0 is the bind pose that frame
-        // is the bind pose: the rockslide duly reported a perfect extent
-        // ratio with 0 of 2002 vertices moved, which proves nothing about
-        // motion. Waiting for the half-way frame makes the vertex count
-        // meaningful for every prop, however it was started.
-        const int cycle = frames > 0 ? frame % frames : 0;
-        if ( frames > 2 && cycle != frames / 2 )
-            continue;
-        m_scored.insert( item.asset );
-
-        float low[ 3 ]{}, high[ 3 ]{}, rest_low[ 3 ]{}, rest_high[ 3 ]{};
-        for ( int axis = 0; axis < 3; ++axis )
-        {
-            low[ axis ] = rest_low[ axis ] = 1.0e30f;
-            high[ axis ] = rest_high[ axis ] = -1.0e30f;
-        }
-        int moved = 0;
-        for ( std::size_t v = 0; v < mesh->second.bind.size( ); ++v )
-        {
-            const mesh_vertex_t& rest = mesh->second.bind[ v ];
-            for ( int axis = 0; axis < 3; ++axis )
-            {
-                const float posed = target[ v ].position[ axis ];
-                if ( posed < low[ axis ] ) low[ axis ] = posed;
-                if ( posed > high[ axis ] ) high[ axis ] = posed;
-                if ( rest.position[ axis ] < rest_low[ axis ] ) rest_low[ axis ] = rest.position[ axis ];
-                if ( rest.position[ axis ] > rest_high[ axis ] ) rest_high[ axis ] = rest.position[ axis ];
-            }
-            const float dx = target[ v ].position[ 0 ] - rest.position[ 0 ];
-            const float dy = target[ v ].position[ 1 ] - rest.position[ 1 ];
-            const float dz = target[ v ].position[ 2 ] - rest.position[ 2 ];
-            if ( dx * dx + dy * dy + dz * dz > 1.0e-4f )
-                ++moved;
-        }
-        float span = 0.0f;
-        float rest_span = 0.0f;
-        for ( int axis = 0; axis < 3; ++axis )
-        {
-            const float a = high[ axis ] - low[ axis ];
-            const float b = rest_high[ axis ] - rest_low[ axis ];
-            span += a * a;
-            rest_span += b * b;
-        }
-        span = std::sqrt( span );
-        rest_span = std::sqrt( rest_span );
-        const float ratio = rest_span > 0.001f ? span / rest_span : 0.0f;
-        // A rigid or articulated pose keeps the diagonal within a small
-        // factor. Anything outside this is a broken palette, not a pose.
-        if ( ratio > 0.5f && ratio < 3.0f )
-        {
-            LOG_SUCCESS( "prop %-34s posed: extent %.1f vs bind %.1f (x%.2f), %d of %u vertices moved",
-                item.asset.c_str( ), span, rest_span, ratio, moved,
-                static_cast< unsigned >( mesh->second.bind.size( ) ) );
-        }
-        else
-        {
-            LOG_ERROR( "prop %-34s BROKEN: extent %.1f vs bind %.1f (x%.2f) - the palette is wrong",
-                item.asset.c_str( ), span, rest_span, ratio );
-        }
+        // prop_instance, the same path the attach records read). The draw reads that instance's palette (prop_palette): there is no second
+        // store to overwrite it, which is how the old one-clip-frame walk undid this pose once (8c7fdc2 + 729f931).
+        if ( !prop_pose( item ) && m_pose_unknown++ == 0 )
+            LOG_WARNING( "prop %s has no pose: no instance or clip (UNKNOWN)", item.path.c_str( ) );
     }
 }
 
@@ -209,10 +50,6 @@ inline void c_world::skin_props( float dt )
 // may be visited first, so the join has to happen after the whole walk.
 inline void c_world::bind_animations( )
 {
-    // --stream-rigid-props forces the single-bone props back through CPU
-    // skinning, so the saving from the placement-matrix path is a measured
-    // A/B rather than an assertion.
-    m_rigid_props = c_engine::option( "stream-rigid-props" ) == nullptr;
     const char* named = c_engine::option( "drive-to" );
     m_triggers.watch( named, c_engine::option( "drive" ) != nullptr || ( named != nullptr && named[ 0 ] != '\0' ) );
     int bound = 0;
@@ -434,9 +271,7 @@ inline void c_world::bind_animations( )
         ( void )first;
     }
 
-    int clones = 0;
-    int rigid = 0;
-    int streamed = 0;
+    int posed = 0;
     for ( animated_t& item : m_animated )
     {
         const auto mesh = m_skinned.find( item.asset );
@@ -458,25 +293,11 @@ inline void c_world::bind_animations( )
             && clip != m_clips.end( ) && clip->second.valid( )
             && clip->second.bones( ) == static_cast< int >( bones->second.size( ) )
             && mesh->second.skin.size( ) == mesh->second.bind.size( );
-        // A single-bone clip is a rigid motion, so the placement matrix
-        // can carry it: one matrix write per part per frame instead of
-        // transforming 1331 to 6604 vertices and re-uploading. These keep
-        // the shared cached geometry - no clone, no streaming, and the
-        // result is mathematically identical because the final transform
-        // is just regrouped from (world*node)*(palette*v) to
-        // (world*node*palette)*v.
         if ( usable )
         {
-            item.rigid = bones->second.size( ) == 1 && m_rigid_props;
-            ++( item.rigid ? rigid : clones );
+            ++posed;
             item.geometry = 0;   // skin_props' test: a pose is wanted
         }
-        // Retail's instance (stage.hxx): the palette identity until it plays (0x532360).
-        const std::size_t count = bones != m_skeletons.end( ) ? bones->second.size( ) : 0u;
-        item.palette.assign( ( std::max )( count, std::size_t{ 1 } ) * 16, 0.0f );
-        for ( std::size_t b = 0; b < item.palette.size( ) / 16; ++b )
-            for ( std::size_t k = 0; k < 4; ++k )
-                item.palette[ b * 16 + k * 5 ] = 1.0f;
         model_for( item.asset );
         if ( m_retail )
             if ( const gfx_scene_view_t* v = m_retail->model( item.asset ) )
@@ -485,8 +306,7 @@ inline void c_world::bind_animations( )
                 gfx_scene_view_attach( *item.retail, *v );
             }
     }
-    LOG_INFO( "animated props: %d streaming %d vertices per frame, %d rigid by placement matrix (0 vertices)",
-        clones, streamed, rigid );
+    LOG_INFO( "animated props: %d posed", posed );
 
 
     if ( m_animated.empty( ) )
