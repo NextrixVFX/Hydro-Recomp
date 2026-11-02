@@ -224,6 +224,7 @@
     <ClInclude Include="workspace\core\world\lens.hxx" />
     <ClInclude Include="workspace\core\world\drawer.hxx" />
     <ClInclude Include="workspace\core\world\primitive.hxx" />
+    <ClInclude Include="workspace\core\world\instance.hxx" />
     <ClInclude Include="workspace\core\world\lights.hxx" />
     <ClInclude Include="workspace\core\world\livery.hxx" />
     <ClInclude Include="workspace\core\world\logic.hxx" />

@@ -19,13 +19,23 @@
 //
 // The list +0x18: slot 8, the add, is retail's empty function 0x4021A0, so nothing ever enters it; remove 0x5A7800 and the flush 0x5A7980 run on nothing.
 
-// VuGfxDrawParams, as 0x5A75E0 / 0x562B10 read it.
+// What the draw reads of VuCamera.
+struct gfx_camera_t
+{
+    float m_eye[ 3 ] = { };             // +0
+    float m_far = 0.0f;                 // +0x17C
+    float m_planes[ 24 ] = { };         // +0x1E0
+};
+
+// VuGfxDrawParams, as 0x5A75E0 / 0x562B10 / 0x535220 read it.
 struct gfx_draw_params_t
 {
     float m_eye[ 4 ] = { };             // +0
-    const float* m_planes = nullptr;    // +0x10 the camera, its six planes at +0x1E0; here the planes themselves
+    const gfx_camera_t* m_camera = nullptr;  // +0x10
+    float m_lod = 0.0f;                 // +0x14
     std::uint8_t m_reflecting = 0;      // +0x18 also the mask a drawable must carry
-    float m_clip[ 4 ] = { };            // +0x1C the seventh plane, when +0x18 is set
+    float m_clip[ 4 ] = { };            // +0x1C the plane 0x535220 always reads; the walk's seventh when +0x18 is set
+    std::uint8_t m_second_depth = 0;    // +0x2C
 };
 
 // VuGfxDrawShadowParams, as 0x5A7730 reads it.
@@ -116,7 +126,7 @@ struct gfx_draw_manager_t
         if ( m_hooks.composer_present( ) )
             m_hooks.composer_draw( p );
         float planes[ 28 ];
-        std::memcpy( planes, p.m_planes, 24 * sizeof( float ) );
+        std::memcpy( planes, p.m_camera->m_planes, 24 * sizeof( float ) );
         int count = 6;
         if ( p.m_reflecting )
         {
