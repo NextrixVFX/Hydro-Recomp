@@ -156,6 +156,47 @@ inline void gfx_texture_update( gfx_api_t& api, const gfx_texture_object_t& t, s
     api.update_texture( t.m_texture, static_cast< std::uint32_t >( level ), bytes, row, row * static_cast< std::uint32_t >( h ) );
 }
 
+// VuMetroD3d11RenderTarget (vtable 0x74FD90, 0x1C bytes), create 0x57F7D0. gfx_target_t holds what the device reads; +0xC / +0x10 the two texture objects (slot 3 0x4B65A0 answers +0x10). Slot 1 is
+// retail's empty 0x401560. SUBSTITUTION: the list 0x759874 (ctor 0x57F630, only the device-lost walk reads it, not recreated) is not kept.
+struct gfx_target_object_t : gfx_target_t
+{
+    gfx_texture_object_t* m_depth_texture = nullptr;     // +0xC
+    gfx_texture_object_t* m_colour = nullptr;            // +0x10
+};
+
+// 0x57F7D0 (ecx width, edx height, the format code: 9 and 4 are RGBA8, anything else DXGI 0). Sampler first, then the texture, then the views, for each of the two.
+inline gfx_target_object_t* gfx_target_create( gfx_api_t& api, std::int32_t width, std::int32_t height, std::uint32_t format )
+{
+    gfx_texture_options_t o;
+    o.m_address_u = o.m_address_v = 1u;
+    o.m_min = o.m_mag = 2;
+    const auto object = [ & ]( std::uint32_t dxgi )
+    {
+        gfx_texture_object_t* t = new gfx_texture_object_t( );
+        t->m_width = width;
+        t->m_height = height;
+        t->m_levels = 1u;
+        gfx_texture_sampler( api, *t, o );
+        t->m_format = dxgi;
+        return t;
+    };
+    gfx_texture_desc_t d{ static_cast< std::uint32_t >( width ), static_cast< std::uint32_t >( height ), 1u, 1u, k_gfx_texture_formats[ 1 ], 1u, 0u, 0u, 0x40u, 0u, 0u };
+    gfx_target_object_t* r = new gfx_target_object_t( );
+    r->m_width = static_cast< std::uint32_t >( width );
+    r->m_height = static_cast< std::uint32_t >( height );
+    r->m_depth_texture = object( k_gfx_texture_formats[ 1 ] );
+    r->m_depth_texture->m_texture = api.create_texture( d );
+    r->m_depth = api.create_depth_view( r->m_depth_texture->m_texture );
+    const std::uint32_t colour = format == 9u || format == 4u ? 0x1Cu : 0u;
+    r->m_colour = object( colour );
+    d.m_format = colour;
+    d.m_bind = 0x28u;
+    r->m_colour->m_texture = api.create_texture( d );
+    r->m_colour->m_view = api.create_view( r->m_colour->m_texture );
+    r->m_view = api.create_target_view( r->m_colour->m_texture );
+    return r;
+}
+
 // 0x57C610: sampler handle +0x20 (the view), +0x1C, +0x24: retail releases the view, the texture, then the sampler.
 inline void gfx_texture_release( gfx_api_t& api, gfx_texture_object_t* t )
 {

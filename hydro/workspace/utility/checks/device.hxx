@@ -1,6 +1,7 @@
 #pragma once
 
 #include <workspace/core/render/gfx.hxx>
+#include <workspace/core/render/post.hxx>
 #include <workspace/core/render/program.hxx>
 #include <workspace/core/world/drawing.hxx>
 #include <workspace/core/world/shading.hxx>
@@ -677,6 +678,100 @@ inline bool verify_water_material( )
         return true;
     }
     LOG_ERROR( "water_material FAILED %d of %d words (cursor %zu of %zu)", g.failed, g.compared, g.at, g.size );
+    return false;
+}
+
+// Case gfx_post: create, render targets, the two callbacks; the log and the state after each.
+inline bool verify_gfx_post( )
+{
+    anim_cursor_t g;
+    g.w = g_golden_gpo_words;
+    g.size = g_golden_gpo_size;
+    g.where = "gfx_post";
+    gfx_rig_api_t api;
+    api.m_mapped.resize( 0x100000 );
+    gfx_device_t d( api );
+    d.m_width = d.m_chain_width = 1280;
+    d.m_height = d.m_chain_height = 720;
+    d.m_chain_view = 1;
+    d.m_chain_depth = 2;
+    d.create_dynamic( );
+    gfx_programs_t programs( api );
+    gfx_declarations_t declarations( api, programs );
+    const char* const names[ 4 ] = { "PostProcess/Copy", "PostProcess/GaussBlur5x5", "PostProcess/RadialBlur", "PostProcess/Effect" };
+    const gfx_program_t* loaded[ 4 ];
+    std::vector< std::uint8_t > streams[ 4 ];
+    for ( int i = 0; i < 4; ++i )
+    {
+        gfx_check_read_stream( g, streams[ i ] );
+        loaded[ i ] = programs.load( streams[ i ].data( ) );
+    }
+    const auto compare_log = [ & ]( )
+    {
+        const unsigned logged = g.take( );
+        g.eq( static_cast< std::uint32_t >( api.m_log.size( ) ), logged );
+        for ( unsigned i = 0; i < logged; ++i )
+            g.eq( i < api.m_log.size( ) ? api.m_log[ i ] : 0xDEADBEEFu, g.take( ) );
+    };
+    gfx_post_t post;
+    api.m_log.clear( );
+    post.create( declarations, [ & ]( const std::string& name )
+    {
+        api.rec( { 50, gfx_check_api_t::code_hash( name.data( ), static_cast< std::uint32_t >( name.size( ) ) ) } );
+        for ( int i = 0; i < 4; ++i )
+            if ( name == names[ i ] )
+                return loaded[ i ];
+        return static_cast< const gfx_program_t* >( nullptr );
+    } );
+    compare_log( );
+    gfx_target_object_t* targets[ 4 ] = { };
+    const unsigned made = g.take( );
+    for ( unsigned t = 0; t < made; ++t )
+    {
+        const std::int32_t w = static_cast< std::int32_t >( g.take( ) ), h = static_cast< std::int32_t >( g.take( ) );
+        const std::uint32_t f = g.take( );
+        api.m_log.clear( );
+        targets[ t ] = gfx_target_create( api, w, h, f );
+        g.eq( gfx_check_api_t::id( targets[ t ]->m_depth ), g.take( ) );
+        g.eq( gfx_check_api_t::id( targets[ t ]->m_view ), g.take( ) );
+        compare_log( );
+    }
+    const unsigned draws = g.take( );
+    for ( unsigned n = 0; n < draws; ++n )
+    {
+        const unsigned kind = g.take( );
+        gfx_texture_object_t texture;
+        texture.m_width = static_cast< std::int32_t >( g.take( ) );
+        texture.m_height = static_cast< std::int32_t >( g.take( ) );
+        texture.m_view = 11;
+        texture.m_sampler = 12;
+        const unsigned ti = g.take( );
+        const std::uint32_t amount_bits = g.take( );
+        float amount;
+        std::memcpy( &amount, &amount_bits, 4 );
+        const gfx_target_t* target = ti == 4u ? nullptr : targets[ ti ];
+        d.begin( );
+        api.m_log.clear( );
+        if ( kind )
+            post.radial_to( d, texture, target, amount );
+        else
+            post.copy_to( d, texture, target );
+        compare_log( );
+        g.eq( d.m_depth_enable, g.take( ) );
+        g.eq( d.m_depth_write, g.take( ) );
+        g.eq( d.m_cull, g.take( ) );
+        g.eq( static_cast< std::uint32_t >( d.m_width ), g.take( ) );
+        g.eq( static_cast< std::uint32_t >( d.m_height ), g.take( ) );
+        g.eq( d.m_primitives, g.take( ) );
+        g.eq( d.m_draws, g.take( ) );
+    }
+    g.eq( static_cast< std::uint32_t >( g.at ), static_cast< std::uint32_t >( g.size ) );
+    if ( !g.failed )
+    {
+        LOG_SUCCESS( "gfx_post matches retail's VuPostProcess (create 0x57BF10, copy 0x57C240, radial 0x57C2D0, quad 0x57C370, callbacks 0x5BC6F0 0x5BC7D0) and render target create 0x57F7D0 on %u draws: %d words exact", draws, g.compared );
+        return true;
+    }
+    LOG_ERROR( "gfx_post FAILED %d of %d words (cursor %zu of %zu)", g.failed, g.compared, g.at, g.size );
     return false;
 }
 
