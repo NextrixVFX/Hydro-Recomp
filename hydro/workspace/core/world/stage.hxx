@@ -79,6 +79,7 @@ struct gfx_retail_t final : gfx_composer_hooks_t
     gfx_retail_t( void* device, void* context ) : m_device( m_api ), m_programs( m_api ), m_declarations( m_api, m_programs ), m_backend( m_device ), m_sort( m_backend ), m_composer( m_sort, *this )
     {
         m_composer.m_radial = 1u;       // the ctor 0x5585F0
+        m_composer.m_lod = 0.02f;       // +0x18, 0x3CA3D70A in the ctor
         m_composer.m_extra = reinterpret_cast< const std::uint8_t* >( m_record );
         m_api.m_device = static_cast< ID3D11Device* >( device );
         m_api.m_context = static_cast< ID3D11DeviceContext* >( context );
