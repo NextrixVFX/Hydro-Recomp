@@ -4,6 +4,8 @@
 #include <workspace/core/world/gfxsort.hxx>
 #include <workspace/core/world/lights.hxx>
 #include <workspace/core/world/instance.hxx>
+#include <workspace/core/world/meshes.hxx>
+#include <workspace/core/world/corona.hxx>
 #include <workspace/core/world/primitive.hxx>
 #include <workspace/core/world/drawer.hxx>
 #include <workspace/core/world/skeleton.hxx>
@@ -11,6 +13,7 @@
 #include <array>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <cstring>
 #include <string>
@@ -338,6 +341,7 @@ struct gfx_check_hooks_t : gfx_sort_hooks_t
         return 0;
     }
     void profile( int slot ) override { record( 4, static_cast< std::uint32_t >( slot ), 0, 0, 0 ); }
+    void scheduler( int slot, std::uint32_t a ) override { record( 8, static_cast< std::uint32_t >( slot ), a, 0, 0 ); }
     void composer( int slot, std::uint32_t a, std::uint32_t b ) override { record( 6, static_cast< std::uint32_t >( slot ), a, b, 0 ); }
     void water_flip( ) override { record( 7, 0, 0, 0, 0 ); }
     void light_flip( ) override { m_light ^= 1; }
@@ -1591,6 +1595,616 @@ inline bool verify_gfx_static_model( )
     return false;
 }
 
+// Case gfx_real_model: world/meshes.hxx's view of a scene loaded by assets/scene.hxx, field by field against retail's own loaded VuGfxStaticScene; then draw, prefetch, shadow and the ray
+// test 0x520620 over the real meshes.
+inline bool verify_gfx_real_model( )
+{
+    anim_cursor_t g;
+    g.w = g_golden_grm_words;
+    g.size = g_golden_grm_size;
+    g.where = "gfx_real_model";
+    const auto real = []( std::uint32_t u ) { float f; std::memcpy( &f, &u, 4 ); return f; };
+    const auto bits = []( float f ) { std::uint32_t u; std::memcpy( &u, &f, 4 ); return u; };
+    c_archive archive;
+    const std::string pack = world_check_pack( );
+    if ( pack.empty( ) || !archive.open( pack.c_str( ) ) )
+    {
+        LOG_ERROR( "verify_gfx_real_model: Base.apf not found" );
+        return false;
+    }
+    const unsigned models = g.take( );
+    int commands = 0, rays = 0, hits = 0;
+    for ( unsigned model_no = 0; model_no < models; ++model_no )
+    {
+        std::vector< std::uint8_t > blob;
+        scene_t scene;
+        const std::string name = std::string( "VuStaticModelAsset/" ) + g_golden_grm_names[ model_no ];
+        if ( !archive.read( name.c_str( ), blob ) || !scene_load_static( blob.data( ), blob.size( ), scene ) )
+        {
+            LOG_ERROR( "verify_gfx_real_model: '%s' did not load", name.c_str( ) );
+            return false;
+        }
+        gfx_scene_view_t view;
+        gfx_scene_view_build( view, scene, blob.data( ) );
+        gfx_check_hooks_t hooks;
+        hooks.m_materials.resize( g.take( ) );
+        for ( gfx_material_t& m : hooks.m_materials )
+            m.m_key = g.take( );
+        hooks.m_chunks.resize( g.take( ) );
+        for ( gfx_chunk_t& c : hooks.m_chunks )
+            c.m_key = g.take( );
+        gfx_sort_t sort( hooks );
+        sort.m_buffers[ 0 ].m_memory.resize( 0x2C0000 );
+        sort.m_buffers[ 0 ].m_capacity = 0x2C0000;
+        // The layout: every word the walks read, in retail's objects' order.
+        const std::size_t layout_words = g.take( );
+        const std::size_t layout_end = g.at + layout_words;
+        g.eq( static_cast< unsigned >( view.m_rows.size( ) ), g.take( ) );
+        g.eq( static_cast< unsigned >( view.m_meshes.size( ) ), g.take( ) );
+        g.eq( static_cast< unsigned >( view.m_chunks.size( ) ), g.take( ) );
+        for ( const gfx_scene_material_t& r : view.m_rows )
+        {
+            g.eq( r.m_name, g.take( ) );
+            g.eq( r.m_skip, g.take( ) );
+            g.eq( r.m_casts, g.take( ) );
+            g.eq( r.m_flag_1d, g.take( ) );
+            g.eq( r.m_by_depth, g.take( ) );
+            g.eq( r.m_type, g.take( ) );
+        }
+        for ( const gfx_scene_chunk_t& c : view.m_chunks )
+            g.eq( c.m_stride, g.take( ) );
+        for ( const gfx_scene_mesh_t* mesh : view.m_meshes )
+        {
+            g.eq( static_cast< unsigned >( mesh->m_parts.size( ) ), g.take( ) );
+            for ( float f : mesh->m_min )
+                g.eq( bits( f ), g.take( ) );
+            for ( float f : mesh->m_max )
+                g.eq( bits( f ), g.take( ) );
+            for ( const gfx_scene_part_t* p : mesh->m_parts )
+            {
+                g.eq( p->m_id, g.take( ) );
+                g.eq( static_cast< unsigned >( p->m_row - view.m_rows.data( ) ), g.take( ) );
+                g.eq( static_cast< unsigned >( p->m_arrays - view.m_chunks.data( ) ), g.take( ) );
+                g.eq( p->m_first_index, g.take( ) );
+                g.eq( static_cast< unsigned >( p->m_triangles ), g.take( ) );
+                for ( float f : p->m_aabb )
+                    g.eq( bits( f ), g.take( ) );
+            }
+        }
+        const std::function< void( const gfx_scene_node_t& ) > compare_node = [ & ]( const gfx_scene_node_t& n )
+        {
+            for ( float f : n.m_matrix )
+                g.eq( bits( f ), g.take( ) );
+            for ( int k : { 0, 1, 2, 4, 5, 6 } )
+                g.eq( bits( n.m_aabb[ k ] ), g.take( ) );
+            std::uint32_t mesh = 0;
+            for ( std::size_t i = 0; i < view.m_meshes.size( ); ++i )
+                if ( view.m_meshes[ i ] == n.m_mesh )
+                    mesh = static_cast< std::uint32_t >( i ) + 1u;
+            g.eq( mesh, g.take( ) );
+            g.eq( static_cast< unsigned >( n.m_children.size( ) ), g.take( ) );
+            for ( const gfx_scene_node_t* child : n.m_children )
+                compare_node( *child );
+        };
+        g.eq( static_cast< unsigned >( view.m_roots.size( ) ), g.take( ) );
+        for ( const gfx_scene_node_t* root : view.m_roots )
+            compare_node( *root );
+        g.eq( static_cast< unsigned >( g.at ), static_cast< unsigned >( layout_end ) );
+        g.at = layout_end;
+        const auto compare_commands = [ & ]( )
+        {
+            const unsigned count = g.take( );
+            g.eq( static_cast< unsigned >( sort.m_commands[ 0 ].size( ) ), count );
+            commands += static_cast< int >( count );
+            for ( unsigned c = 0; c < count; ++c )
+            {
+                const unsigned words = g.take( );
+                if ( c >= sort.m_commands[ 0 ].size( ) )
+                {
+                    for ( unsigned i = 0; i < words; ++i )
+                        g.eq( 0xDEADBEEFu, g.take( ) );
+                    continue;
+                }
+                const ui_gfx_command_t& cmd = sort.m_commands[ 0 ][ c ];
+                for ( unsigned i = 0; i < 7; ++i )
+                {
+                    std::uint32_t w = cmd.m_words[ i ];
+                    if ( i == 4 || i == 5 )
+                        w -= 1;
+                    if ( i == 6 )
+                        w &= 0xFFFFu;
+                    g.eq( w, g.take( ) );
+                }
+                const std::uint8_t* r = sort.m_buffers[ 0 ].m_memory.data( ) + cmd.m_words[ 3 ];
+                for ( unsigned i = 0; i + 7 < words; ++i )
+                {
+                    std::uint32_t w;
+                    std::memcpy( &w, r + 4 * i, 4 );
+                    if ( i == 0x13 )
+                        w &= 0xFFu;
+                    g.eq( w, g.take( ) );
+                }
+            }
+        };
+        const auto fresh = [ & ]( )
+        {
+            sort.m_commands[ 0 ].clear( );
+            sort.m_buffers[ 0 ].m_used = 0;
+            std::fill( sort.m_buffers[ 0 ].m_memory.begin( ), sort.m_buffers[ 0 ].m_memory.begin( ) + 0x40000, static_cast< std::uint8_t >( 0 ) );
+        };
+        const unsigned draws = g.take( );
+        for ( unsigned d = 0; d < draws; ++d )
+        {
+            sort.m_key_lo = g.take( );
+            sort.m_key_hi = g.take( );
+            gfx_static_model_t model;
+            gfx_scene_view_attach( model, view );
+            model.m_colour = g.take( );
+            model.m_word = g.take( );
+            model.m_lod = real( g.take( ) );
+            model.m_byte_1c = static_cast< std::uint8_t >( g.take( ) );
+            model.m_two_pass = static_cast< std::uint8_t >( g.take( ) );
+            gfx_draw_params_t params;
+            gfx_camera_t camera;
+            params.m_second_depth = static_cast< std::uint8_t >( g.take( ) );
+            params.m_lod = real( g.take( ) );
+            camera.m_far = real( g.take( ) );
+            for ( float& f : camera.m_eye )
+                f = real( g.take( ) );
+            for ( int i = 0; i < 3; ++i )
+                params.m_eye[ i ] = real( g.take( ) );
+            for ( float& f : params.m_clip )
+                f = real( g.take( ) );
+            for ( float& f : camera.m_planes )
+                f = real( g.take( ) );
+            float parent[ 16 ];
+            for ( float& f : parent )
+                f = real( g.take( ) );
+            params.m_camera = &camera;
+            fresh( );
+            model.draw( sort, parent, params );
+            compare_commands( );
+            g.eq( sort.m_key_lo, g.take( ) );
+            g.eq( sort.m_key_hi, g.take( ) );
+            fresh( );
+            model.prefetch( sort );
+            compare_commands( );
+            fresh( );
+            gfx_shadow_params_t shadow;
+            gfx_shadow_volume_t volume;
+            std::vector< gfx_shadow_cascade_t > cascades;
+            for ( int i = 0; i < 3; ++i )
+                shadow.m_eye[ i ] = real( g.take( ) );
+            shadow.m_lod = real( g.take( ) );
+            for ( float& f : shadow.m_clip )
+                f = real( g.take( ) );
+            volume.m_count = static_cast< int >( g.take( ) );
+            for ( int i = 0; i < 4 * volume.m_count; ++i )
+                volume.m_planes[ i ] = real( g.take( ) );
+            cascades.resize( g.take( ) );
+            for ( gfx_shadow_cascade_t& c : cascades )
+            {
+                c.m_volume.m_count = static_cast< int >( g.take( ) );
+                for ( float& f : c.m_matrix )
+                    f = real( g.take( ) );
+                for ( int i = 0; i < 4 * c.m_volume.m_count; ++i )
+                    c.m_volume.m_planes[ i ] = real( g.take( ) );
+            }
+            shadow.m_volume = &volume;
+            shadow.m_cascades = static_cast< int >( cascades.size( ) );
+            shadow.m_cascade = cascades.data( );
+            model.draw_shadow( sort, parent, shadow );
+            compare_commands( );
+            g.eq( sort.m_key_lo, g.take( ) );
+            g.eq( sort.m_key_hi, g.take( ) );
+            fresh( );
+            model.m_colour = g.take( );
+            std::vector< gfx_scene_piece_t > pieces( g.take( ) );
+            for ( gfx_scene_piece_t& piece : pieces )
+            {
+                piece.m_node = &view.m_nodes[ g.take( ) ];
+                for ( float& f : piece.m_matrix )
+                    f = real( g.take( ) );
+            }
+            model.draw_pieces( sort, pieces.data( ), static_cast< int >( pieces.size( ) ), params );
+            compare_commands( );
+            g.eq( sort.m_key_lo, g.take( ) );
+            g.eq( sort.m_key_hi, g.take( ) );
+            sort.m_key_lo = g.take( );
+            sort.m_key_hi = g.take( );
+            const unsigned sky_slot = g.take( ), sky_over = g.take( );
+            gfx_skybox_t sky;
+            if ( sky_over )
+                sky.m_viewport[ sky_slot ] = &view;
+            else
+                sky.m_asset = &view;
+            float sky_eye[ 3 ];
+            for ( float& f : sky_eye )
+                f = real( g.take( ) );
+            fresh( );
+            sky.draw( sort, sky_eye );
+            compare_commands( );
+            g.eq( sort.m_key_lo, g.take( ) );
+            g.eq( sort.m_key_hi, g.take( ) );
+        }
+        const std::vector< gfx_piece_seed_t > seed = gfx_pieces_seed( view );
+        g.take( );
+        g.eq( static_cast< unsigned >( seed.size( ) ), g.take( ) );
+        for ( const gfx_piece_seed_t& s : seed )
+        {
+            g.eq( static_cast< unsigned >( s.m_node - view.m_nodes.data( ) ), g.take( ) );
+            for ( float f : s.m_inverse )
+                g.eq( bits( f ), g.take( ) );
+            for ( float f : s.m_pivot )
+                g.eq( bits( f ), g.take( ) );
+            g.eq( 0u, g.take( ) );
+        }
+        const unsigned count = g.take( );
+        gfx_static_model_t model;
+        gfx_scene_view_attach( model, view );
+        for ( unsigned r = 0; r < count; ++r )
+        {
+            float parent[ 16 ], a[ 3 ], b[ 3 ];
+            for ( float& f : parent )
+                f = real( g.take( ) );
+            for ( float& f : a )
+                f = real( g.take( ) );
+            for ( float& f : b )
+                f = real( g.take( ) );
+            const bool hit = model.ray( parent, a, b );
+            g.eq( hit ? 1u : 0u, g.take( ) );
+            for ( float f : b )
+                g.eq( bits( f ), g.take( ) );
+            ++rays;
+            hits += hit ? 1 : 0;
+        }
+    }
+    g.eq( static_cast< unsigned >( g.at ), static_cast< unsigned >( g.size ) );
+    if ( !g.failed )
+    {
+        LOG_SUCCESS( "gfx_real_model matches retail on shipped models: the scene view field by field (world/meshes.hxx), draw 0x520130, prefetch 0x520200, shadow 0x5201B0, ray test 0x520620 "
+                     "0x520A50 0x520D30 0x520F20: %u models, %d commands, %d rays (%d hits), %d words", models, commands, rays, hits, g.compared );
+        return true;
+    }
+    LOG_ERROR( "gfx_real_model FAILED %d of %d words (cursor %zu of %zu)", g.failed, g.compared, g.at, g.size );
+    return false;
+}
+
+// Case gfx_components: entity/draw.hxx's choices and world/meshes.hxx's components against 0x5B0600, 0x5B08D0, 0x5B09B0, 0x61DAE0, 0x61DC00, 0x543790 with the instances' own draws intercepted.
+inline bool verify_gfx_components( )
+{
+    anim_cursor_t g;
+    g.w = g_golden_gco_words;
+    g.size = g_golden_gco_size;
+    g.where = "gfx_components";
+    const auto real = []( std::uint32_t u ) { float f; std::memcpy( &f, &u, 4 ); return f; };
+    const auto bits = []( float f ) { std::uint32_t u; std::memcpy( &u, &f, 4 ); return u; };
+    gfx_check_hooks_t hooks;
+    gfx_sort_t sort( hooks );
+    const unsigned rows = g.take( );
+    int drawn = 0;
+    const auto compare_params = [ & ]( const gfx_draw_params_t& p )
+    {
+        for ( float f : p.m_eye )
+            g.eq( bits( f ), g.take( ) );
+        g.eq( p.m_camera != nullptr ? 1u : 0u, g.take( ) );
+        g.eq( bits( p.m_lod ), g.take( ) );
+        g.eq( p.m_reflecting, g.take( ) );
+        for ( float f : p.m_clip )
+            g.eq( bits( f ), g.take( ) );
+        g.eq( static_cast< unsigned >( p.m_second_depth ) | ( static_cast< unsigned >( p.m_skip_models ) << 8 ), g.take( ) );
+    };
+    for ( unsigned r = 0; r < rows; ++r )
+    {
+        const std::size_t end = g.take( );
+        const std::size_t stop = g.at + end;
+        const unsigned kind = g.take( );
+        model_draw_t c{ };
+        gfx_static_component_t sc;
+        gfx_animated_component_t ac;
+        gfx_breakable_component_t bc;
+        float mn[ 4 ] = { }, mx[ 4 ] = { };
+        for ( int i = 0; i < 3; ++i )
+            mn[ i ] = real( g.take( ) );
+        for ( int i = 0; i < 3; ++i )
+            mx[ i ] = real( g.take( ) );
+        gfx_camera_t camera;
+        for ( float& f : camera.m_eye )
+            f = real( g.take( ) );
+        const float eye_w = real( g.take( ) );
+        const float d0 = real( g.take( ) ), d1 = real( g.take( ) ), d2 = real( g.take( ) );
+        const std::uint32_t rejection_bits = g.take( );
+        c.rejection_scale_modifier = real( rejection_bits );
+        c.color = g.take( );
+        c.dynamic_lighting = static_cast< std::uint8_t >( g.take( ) );
+        const bool flag_a = g.take( ) != 0, flag_b = g.take( ) != 0;
+        c.draw_distance = d0;
+        c.lod0_draw_distance = d1;
+        c.lod1_draw_distance = d2;
+        sc.m_draw = &c;
+        ac.m_draw = &c;
+        std::memcpy( sc.m_min, mn, 16 );
+        std::memcpy( sc.m_max, mx, 16 );
+        std::memcpy( ac.m_min, mn, 16 );
+        std::memcpy( ac.m_max, mx, 16 );
+        for ( gfx_static_model_t& lod : sc.m_lods )
+        {
+            lod.m_lod = 0.0f;
+            lod.m_colour = 0;
+            lod.m_byte_1c = 0;
+        }
+        const auto lod_words = [ & ]( int i, bool hit, std::uint32_t matrix )
+        {
+            g.eq( hit ? 0xBCu + 0x20u * static_cast< unsigned >( i ) : 0u, g.take( ) );
+            g.eq( hit ? bits( sc.m_lods[ i ].m_lod ) : 0u, g.take( ) );
+            g.eq( hit ? sc.m_lods[ i ].m_colour : 0u, g.take( ) );
+            g.eq( hit ? sc.m_lods[ i ].m_byte_1c : 0u, g.take( ) );
+            g.eq( hit ? matrix : 0u, g.take( ) );
+            drawn += hit ? 1 : 0;
+        };
+        if ( kind == 0 )
+        {
+            sc.draw_info( sort, camera, eye_w, flag_a );
+            const static_draw_t s = static_model_select_info( c, mn, mx, camera.m_eye, flag_a );
+            lod_words( s.instance < 0 ? 0 : s.instance, s.instance >= 0, 0x13Cu );
+            if ( s.instance >= 0 )
+                compare_params( gfx_info_params( camera, eye_w ) );
+            else
+                g.at += 12;
+        }
+        else if ( kind == 1 )
+        {
+            gfx_shadow_params_t p;
+            std::memcpy( p.m_eye, camera.m_eye, 12 );
+            p.m_clip_flag = flag_a;
+            p.m_skip_models = flag_b;
+            sc.draw_shadow( sort, p );
+            const int i = static_model_select_shadow( c, mn, mx, p.m_eye, flag_a, flag_b );
+            lod_words( i < 0 ? 0 : i, i >= 0, 0x13Cu );
+        }
+        else if ( kind == 2 )
+        {
+            for ( unsigned i = 0; i < 4; ++i )
+                g.eq( 0xBCu + 0x20u * i, g.take( ) );
+        }
+        else if ( kind == 3 )
+        {
+            ac.draw_info( sort, camera, eye_w );
+            g.eq( 0x68u, g.take( ) );
+            g.eq( ac.m_model.m_colour, g.take( ) );
+            g.eq( ac.m_model.m_byte, g.take( ) );
+            g.eq( 0x104u, g.take( ) );
+            compare_params( gfx_info_params( camera, eye_w ) );
+            ++drawn;
+        }
+        else if ( kind == 4 )
+        {
+            const bool casts = animated_model_casts( c, mn, mx, camera.m_eye );
+            g.eq( casts ? 1u : 0u, g.take( ) );
+            g.eq( casts ? 0x68u : 0u, g.take( ) );
+            g.eq( casts ? 0x104u : 0u, g.take( ) );
+            drawn += casts ? 1 : 0;
+        }
+        else if ( kind == 6 )
+        {
+            float euler[ 3 ], m[ 16 ];
+            for ( float& f : euler )
+                f = real( g.take( ) );
+            gfx_matrix_set_euler( m, euler );
+            for ( float f : m )
+                g.eq( bits( f ), g.take( ) );
+        }
+        else
+        {
+            bc.m_colour = c.color;
+            bc.m_draw_distance = d0;
+            bc.m_rejection = c.rejection_scale_modifier;
+            bc.m_lighting = c.dynamic_lighting;
+            bc.m_life = real( g.take( ) );
+            bc.m_fade_time = real( g.take( ) );
+            std::memcpy( bc.m_min, mn, 16 );
+            std::memcpy( bc.m_max, mx, 16 );
+            bc.m_model.m_lod = 0.0f;
+            bc.m_model.m_colour = 0;
+            bc.m_model.m_byte_1c = 0;
+            const bool hit = bc.prepare( camera.m_eye );
+            g.eq( hit ? 1u : 0u, g.take( ) );
+            g.eq( hit ? 0x70u : 0u, g.take( ) );
+            g.eq( bc.m_colour, g.take( ) );
+            g.eq( bits( bc.m_model.m_lod ), g.take( ) );
+            g.eq( bc.m_model.m_colour, g.take( ) );
+            g.eq( bc.m_model.m_byte_1c, g.take( ) );
+            drawn += hit ? 1 : 0;
+        }
+        g.eq( static_cast< unsigned >( g.at ), static_cast< unsigned >( stop ) );
+        g.at = stop;
+    }
+    if ( !g.failed )
+    {
+        LOG_SUCCESS( "gfx_components matches retail's draw components (0x5B0600, 0x5B08D0, 0x5B09B0, 0x61DAE0, 0x61DC00, 0x543790): %u rows, %d handed on, %d words", rows, drawn, g.compared );
+        return true;
+    }
+    LOG_ERROR( "gfx_components FAILED %d of %d words (cursor %zu of %zu)", g.failed, g.compared, g.at, g.size );
+    return false;
+}
+
+// Case gfx_corona: world/corona.hxx against retail's 0x5E8080, 0x5E82D0, 0x5E7630, 0x5E7650.
+struct gfx_corona_check_ray_t : gfx_corona_ray_t
+{
+    bool blocked( const float from[ 3 ], const float to[ 3 ] ) override
+    {
+        const bool hit = m_seeds[ m_used++ ] != 0;
+        for ( int i = 0; i < 3; ++i )
+            m_seen.push_back( from[ i ] );
+        for ( int i = 0; i < 3; ++i )
+            m_seen.push_back( to[ i ] );
+        return hit;
+    }
+    unsigned m_seeds[ 4 ] = { };
+    unsigned m_used = 0;
+    std::vector< float > m_seen;
+};
+
+inline bool verify_gfx_corona( )
+{
+    anim_cursor_t g;
+    g.w = g_golden_gcn_words;
+    g.size = g_golden_gcn_size;
+    g.where = "gfx_corona";
+    const auto real = []( std::uint32_t u ) { float f; std::memcpy( &f, &u, 4 ); return f; };
+    const auto bits = []( float f ) { std::uint32_t u; std::memcpy( &u, &f, 4 ); return u; };
+    gfx_check_hooks_t hooks;
+    hooks.m_materials.resize( 1 );
+    hooks.m_materials[ 0 ].m_key = g.take( );
+    gfx_sort_t sort( hooks );
+    sort.m_buffers[ 0 ].m_memory.resize( 0x10000 );
+    sort.m_buffers[ 0 ].m_capacity = 0x10000;
+    const unsigned rows = g.take( );
+    int hit_rays = 0, records = 0;
+    for ( unsigned r = 0; r < rows; ++r )
+    {
+        const std::size_t words = g.take( );
+        const std::size_t stop = g.at + words;
+        if ( g.take( ) == 0 )
+        {
+            gfx_sun_corona_t sun;
+            const int count = static_cast< int >( g.take( ) );
+            for ( float& f : sun.m_forward )
+                f = real( g.take( ) );
+            for ( std::uint8_t& b : sun.m_request )
+                b = static_cast< std::uint8_t >( g.take( ) );
+            for ( float& f : sun.m_visible )
+                f = real( g.take( ) );
+            std::vector< gfx_sun_view_t > views( count );
+            for ( gfx_sun_view_t& v : views )
+            {
+                for ( float& f : v.m_camera.m_eye )
+                    f = real( g.take( ) );
+                v.m_camera.m_far = real( g.take( ) );
+            }
+            gfx_corona_check_ray_t ray;
+            for ( unsigned& u : ray.m_seeds )
+                u = g.take( );
+            sun.tick( views.data( ), count, ray );
+            g.eq( static_cast< unsigned >( ray.m_seen.size( ) / 6 ), g.take( ) );
+            for ( float f : ray.m_seen )
+                g.eq( bits( f ), g.take( ) );
+            hit_rays += static_cast< int >( ray.m_seen.size( ) / 6 );
+            for ( std::uint8_t b : sun.m_request )
+                g.eq( b, g.take( ) );
+            for ( float f : sun.m_visible )
+                g.eq( bits( f ), g.take( ) );
+            sun.m_colour = g.take( );
+            sun.m_size = real( g.take( ) );
+            sun.m_word_94 = g.take( );
+            sun.m_word_98 = g.take( );
+            sun.m_material = 1;
+            gfx_camera_t camera;
+            for ( float& f : camera.m_eye )
+                f = real( g.take( ) );
+            camera.m_far = real( g.take( ) );
+            const float c44 = real( g.take( ) );
+            gfx_draw_params_t p;
+            p.m_camera = &camera;
+            sort.m_key_lo = g.take( );
+            sort.m_key_hi = g.take( );
+            sort.m_commands[ 0 ].clear( );
+            sort.m_buffers[ 0 ].m_used = 0;
+            std::fill( sort.m_buffers[ 0 ].m_memory.begin( ), sort.m_buffers[ 0 ].m_memory.end( ), static_cast< std::uint8_t >( 0 ) );
+            sun.draw( sort, p, c44 );
+            for ( std::uint8_t b : sun.m_request )
+                g.eq( b, g.take( ) );
+            const unsigned commands = g.take( );
+            g.eq( static_cast< unsigned >( sort.m_commands[ 0 ].size( ) ), commands );
+            for ( unsigned c = 0; c < commands && c < sort.m_commands[ 0 ].size( ); ++c )
+            {
+                const ui_gfx_command_t& cmd = sort.m_commands[ 0 ][ c ];
+                for ( unsigned i = 0; i < 7; ++i )
+                {
+                    std::uint32_t w = cmd.m_words[ i ];
+                    if ( i == 4 )
+                        w -= 1;
+                    if ( i == 6 )
+                        w &= 0xFFFFu;
+                    g.eq( w, g.take( ) );
+                }
+                const std::uint8_t* rec = sort.m_buffers[ 0 ].m_memory.data( ) + cmd.m_words[ 3 ];
+                for ( unsigned i = 0; i < 8; ++i )
+                {
+                    std::uint32_t w;
+                    std::memcpy( &w, rec + 4 * i, 4 );
+                    g.eq( w, g.take( ) );
+                }
+                ++records;
+            }
+        }
+        else
+        {
+            const std::uint8_t flags = static_cast< std::uint8_t >( g.take( ) );
+            g.eq( gfx_corona_ray_wants( flags ) ? 1u : 0u, g.take( ) );
+            const bool shape = g.take( ) != 0;
+            const std::uint8_t surface = static_cast< std::uint8_t >( g.take( ) );
+            const std::uint32_t tri = g.take( );
+            const float fraction = real( g.take( ) );
+            std::uint32_t normal[ 4 ];
+            for ( std::uint32_t& n : normal )
+                n = g.take( );
+            gfx_corona_result_t result;
+            const bool kept = result.add( 1u, fraction, tri, normal, shape, surface );
+            g.eq( kept ? 1u : 0u, g.take( ) );
+            g.eq( result.m_body, g.take( ) );
+            g.eq( bits( result.m_fraction ), g.take( ) );
+            g.eq( result.m_triangle, g.take( ) );
+            for ( std::uint32_t n : result.m_normal )
+                g.eq( n, g.take( ) );
+        }
+        g.eq( static_cast< unsigned >( g.at ), static_cast< unsigned >( stop ) );
+        g.at = stop;
+    }
+    if ( !g.failed )
+    {
+        LOG_SUCCESS( "gfx_corona matches retail's VuDirectionalCoronaEntity tick 0x5E8080, draw 0x5E82D0, ray result 0x5E7630 / 0x5E7650: %u rows, %d rays, %d records, %d words", rows, hit_rays, records, g.compared );
+        return true;
+    }
+    LOG_ERROR( "gfx_corona FAILED %d of %d words (cursor %zu of %zu)", g.failed, g.compared, g.at, g.size );
+    return false;
+}
+
+// Case gfx_sort_life: gfx_sort_t start / finish / close_events against 0x53A0C0, 0x53A1C0, 0x539DC0: the collaborators' calls, in order.
+inline bool verify_gfx_sort_life( )
+{
+    anim_cursor_t g;
+    g.w = g_golden_gsl_words;
+    g.size = g_golden_gsl_size;
+    g.where = "gfx_sort_life";
+    const unsigned rows = g.take( );
+    for ( unsigned r = 0; r < rows; ++r )
+    {
+        gfx_check_hooks_t hooks;
+        gfx_sort_t sort( hooks );
+        hooks.m_log.clear( );
+        sort.m_pending = g.take( ) != 0;
+        sort.m_event[ 0 ] = g.take( );
+        sort.m_event[ 1 ] = g.take( );
+        sort.start( );
+        sort.finish( );
+        g.eq( sort.m_pending ? 1u : 0u, g.take( ) );
+        sort.close_events( );
+        const unsigned calls = g.take( );
+        g.eq( static_cast< unsigned >( hooks.m_log.size( ) / 5 ), calls );
+        for ( unsigned i = 0; i < 5 * calls; ++i )
+            g.eq( i < hooks.m_log.size( ) ? hooks.m_log[ i ] : 0xDEADBEEFu, g.take( ) );
+    }
+    g.eq( static_cast< unsigned >( g.at ), static_cast< unsigned >( g.size ) );
+    if ( !g.failed )
+    {
+        LOG_SUCCESS( "gfx_sort_life matches retail's VuGfxSort 0x53A0C0, 0x53A1C0, 0x539DC0: %d words", g.compared );
+        return true;
+    }
+    LOG_ERROR( "gfx_sort_life FAILED %d of %d words (cursor %zu of %zu)", g.failed, g.compared, g.at, g.size );
+    return false;
+}
+
 // Case gfx_animated_model: world/instance.hxx against retail's draw 0x532AD0, shadow 0x533060 and prefetch 0x5333A0 on seeded fake meshes.
 inline bool verify_gfx_animated_model( )
 {
@@ -1762,5 +2376,9 @@ inline bool verify_render_all( )
     ok = verify_gfx_primitives( ) && ok;
     ok = verify_gfx_static_model( ) && ok;
     ok = verify_gfx_animated_model( ) && ok;
+    ok = verify_gfx_real_model( ) && ok;
+    ok = verify_gfx_components( ) && ok;
+    ok = verify_gfx_corona( ) && ok;
+    ok = verify_gfx_sort_life( ) && ok;
     return ok;
 }

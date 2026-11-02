@@ -36,6 +36,7 @@ struct gfx_draw_params_t
     std::uint8_t m_reflecting = 0;      // +0x18 also the mask a drawable must carry
     float m_clip[ 4 ] = { };            // +0x1C the plane 0x535220 always reads; the walk's seventh when +0x18 is set
     std::uint8_t m_second_depth = 0;    // +0x2C
+    std::uint8_t m_skip_models = 0;     // +0x2D the draw components draw nothing
 };
 
 // The light's volume: up to 12 planes (0xC0 bytes), +0xC0 the count.
@@ -61,6 +62,7 @@ struct gfx_shadow_params_t
     const gfx_shadow_cascade_t* m_cascade = nullptr;  // +0x1C
     float m_lod = 0.0f;                 // +0x20
     std::uint8_t m_clip_flag = 0;       // +0x24 also the mask a drawable must carry
+    std::uint8_t m_skip_models = 0;     // +0x38 the draw components cast nothing
     float m_clip[ 4 ] = { };            // +0x28 the plane the two box tests always read; the walk's one more when +0x24 is set
 };
 

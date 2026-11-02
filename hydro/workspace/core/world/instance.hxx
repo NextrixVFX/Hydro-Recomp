@@ -31,11 +31,22 @@ struct gfx_scene_material_t
     std::uint32_t m_shadow_material = 0;  // +0x2C
 };
 
+// A VuGfxSceneChunk's arrays as the ray test sees them: the buffers' CPU copies, which retail reaches by vt+0xC on +0x10 / +0x14.
+struct gfx_scene_chunk_t
+{
+    std::uint32_t m_stride = 0;                      // +0xC
+    const std::uint8_t* m_vertices = nullptr;        // [+0x10] position x y z at +0 of each vertex
+    const std::uint8_t* m_indices = nullptr;         // [+0x14] little-endian u16; bytes, the blob is not aligned
+};
+
 struct gfx_scene_part_t
 {
     std::uint32_t m_id = 0;                          // what a record holds
     const gfx_scene_material_t* m_row = nullptr;     // +0xC
     std::uint32_t m_chunk = 0;                       // [+0x10] +0x18
+    const gfx_scene_chunk_t* m_arrays = nullptr;     // +0x10
+    std::uint32_t m_first_index = 0;                 // +0x28
+    std::int32_t m_triangles = 0;                    // +0x2C
     float m_aabb[ 8 ] = { };                         // +0x30
 };
 
@@ -130,8 +141,119 @@ inline float gfx_mesh_depth( const gfx_scene_mesh_t& mesh, const float m[ 16 ], 
     return scaled < 1.0f ? scaled : 1.0f;
 }
 
+// 0x520F20 (aabb, matrix, a, b; stdcall): does the segment pass nearer the box's centre (the box through the matrix) than the half diagonal? The closest point's parameter is minss( 1, t ),
+// then maxss( 0, that ) - NaN (a == b) survives both and the answer is false.
+inline bool gfx_segment_near_box( const float box[ 8 ], const float m[ 16 ], const float a[ 3 ], const float b[ 3 ] )
+{
+    const float x0 = ( ( box[ 0 ] * m[ 0 ] + box[ 1 ] * m[ 4 ] ) + box[ 2 ] * m[ 8 ] ) + m[ 12 ];
+    const float y0 = ( ( box[ 0 ] * m[ 1 ] + box[ 1 ] * m[ 5 ] ) + box[ 2 ] * m[ 9 ] ) + m[ 13 ];
+    const float z0 = ( ( box[ 0 ] * m[ 2 ] + box[ 1 ] * m[ 6 ] ) + box[ 2 ] * m[ 10 ] ) + m[ 14 ];
+    const float x1 = ( ( box[ 4 ] * m[ 0 ] + box[ 5 ] * m[ 4 ] ) + box[ 6 ] * m[ 8 ] ) + m[ 12 ];
+    const float y1 = ( ( box[ 4 ] * m[ 1 ] + box[ 5 ] * m[ 5 ] ) + box[ 6 ] * m[ 9 ] ) + m[ 13 ];
+    const float z1 = ( ( box[ 4 ] * m[ 2 ] + box[ 5 ] * m[ 6 ] ) + box[ 6 ] * m[ 10 ] ) + m[ 14 ];
+    const float cx = ( x1 + x0 ) * 0.5f, cy = ( y1 + y0 ) * 0.5f, cz = ( z1 + z0 ) * 0.5f;
+    const float hx = ( x1 - x0 ) * 0.5f, hy = ( y1 - y0 ) * 0.5f, hz = ( z1 - z0 ) * 0.5f;
+    const float dx = b[ 0 ] - a[ 0 ], dy = b[ 1 ] - a[ 1 ], dz = b[ 2 ] - a[ 2 ];
+    const float t = ( ( dy * ( cy - a[ 1 ] ) + dx * ( cx - a[ 0 ] ) ) + dz * ( cz - a[ 2 ] ) ) / ( ( dy * dy + dx * dx ) + dz * dz );
+    float s = 1.0f < t ? 1.0f : t;     // minss( 1, t ): the second operand on NaN
+    s = 0.0f > s ? 0.0f : s;           // maxss( 0, s )
+    const float px = ( a[ 0 ] + dx * s ) - cx, py = ( a[ 1 ] + dy * s ) - cy, pz = ( a[ 2 ] + dz * s ) - cz;
+    const float distance = hull_sqrt( ( py * py + px * px ) + pz * pz );
+    return hull_sqrt( ( hy * hy + hx * hx ) + hz * hz ) > distance;
+}
+
+// 0x520D30 (mesh, a, b; stdcall): every part whose box the segment nears, every triangle facing against it; a hit moves b there, so the nearest hit stands at the end.
+inline bool gfx_ray_mesh( const gfx_scene_mesh_t& mesh, const float a[ 3 ], float b[ 3 ] )
+{
+    static constexpr float k_identity[ 16 ] = { 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1 };
+    bool hit = false;
+    for ( const gfx_scene_part_t* pp : mesh.m_parts )
+    {
+        const gfx_scene_part_t& part = *pp;
+        const gfx_scene_chunk_t& arrays = *part.m_arrays;
+        if ( !gfx_segment_near_box( part.m_aabb, k_identity, a, b ) )
+            continue;
+        const std::uint8_t* index = arrays.m_indices + 2 * static_cast< std::size_t >( part.m_first_index );
+        for ( std::int32_t i = 0; i < part.m_triangles; ++i, index += 6 )
+        {
+            std::uint16_t word[ 3 ];
+            std::memcpy( word, index, 6 );
+            float v0[ 3 ], v1[ 3 ], v2[ 3 ];
+            std::memcpy( v0, arrays.m_vertices + word[ 0 ] * static_cast< std::size_t >( arrays.m_stride ), 12 );
+            std::memcpy( v1, arrays.m_vertices + word[ 1 ] * static_cast< std::size_t >( arrays.m_stride ), 12 );
+            std::memcpy( v2, arrays.m_vertices + word[ 2 ] * static_cast< std::size_t >( arrays.m_stride ), 12 );
+            const float e1x = v1[ 0 ] - v0[ 0 ], e1y = v1[ 1 ] - v0[ 1 ], e1z = v1[ 2 ] - v0[ 2 ];
+            const float e2x = v2[ 0 ] - v0[ 0 ], e2y = v2[ 1 ] - v0[ 1 ], e2z = v2[ 2 ] - v0[ 2 ];
+            const float nx = e1y * e2z - e1z * e2y, ny = e1z * e2x - e1x * e2z, nz = e1x * e2y - e1y * e2x;
+            const float facing = ( ny * ( b[ 1 ] - a[ 1 ] ) + nx * ( b[ 0 ] - a[ 0 ] ) ) + nz * ( b[ 2 ] - a[ 2 ] );
+            if ( 0.0f > facing && gfx_segment_triangle( v0, v1, v2, a, b, b ) )
+                hit = true;
+        }
+    }
+    return hit;
+}
+
+// One piece of a broken model, what 0x51F540 reads of the debris' 0xD8-byte record (boat/effects.hxx).
+struct gfx_scene_piece_t
+{
+    const gfx_scene_node_t* m_node = nullptr;   // +0
+    float m_matrix[ 16 ] = { };                 // +0x94
+};
+
 struct gfx_static_model_t
 {
+    // 0x51F540 (VuBreakableModelInstance's draw, its scene walk read as 0x521960's: params only; instance +0x6C the count, +0x70 the 0xD8-byte pieces): each piece's node (+0) under the
+    // piece's matrix (+0x94), never the opaque walk. Retail unrolls the node's own level and its depth pre-pass there is dead (type 1 never reaches it): the same records as draw_node.
+    void draw_pieces( gfx_sort_t& sort, const gfx_scene_piece_t* pieces, int count, const gfx_draw_params_t& p ) const
+    {
+        for ( int i = 0; i < count; ++i )
+            draw_node( sort, *pieces[ i ].m_node, pieces[ i ].m_matrix, p, false );
+    }
+
+    // 0x520620 (matrix, a, b): the segment against the scene; b ends at the nearest hit. Nothing without a scene.
+    bool ray( const float matrix[ 16 ], const float a[ 3 ], float b[ 3 ] ) const
+    {
+        bool hit = false;
+        if ( m_scene )
+            for ( const gfx_scene_node_t* root : *m_scene )
+                hit = ray_node( *root, matrix, a, b ) || hit;
+        return hit;
+    }
+
+    // 0x520A50 (node, parent matrix, a, b): the node's box first; the segment into the mesh's frame by the inverse (0x4157C0), a hit back out, then the children.
+    bool ray_node( const gfx_scene_node_t& node, const float parent[ 16 ], const float a[ 3 ], float b[ 3 ] ) const
+    {
+        if ( !gfx_segment_near_box( node.m_aabb, parent, a, b ) )
+            return false;
+        bool hit = false;
+        float m[ 16 ];
+        hull_multiply( node.m_matrix, m, parent );
+        if ( node.m_mesh )
+        {
+            float i[ 16 ];
+            std::memcpy( i, m, 64 );
+            hull_invert( i );
+            const float local_a[ 3 ] = {
+                ( ( a[ 0 ] * i[ 0 ] + a[ 1 ] * i[ 4 ] ) + a[ 2 ] * i[ 8 ] ) + i[ 12 ],
+                ( ( a[ 0 ] * i[ 1 ] + a[ 1 ] * i[ 5 ] ) + a[ 2 ] * i[ 9 ] ) + i[ 13 ],
+                ( ( a[ 0 ] * i[ 2 ] + a[ 1 ] * i[ 6 ] ) + a[ 2 ] * i[ 10 ] ) + i[ 14 ] };
+            float local_b[ 3 ] = {
+                ( ( b[ 0 ] * i[ 0 ] + b[ 1 ] * i[ 4 ] ) + b[ 2 ] * i[ 8 ] ) + i[ 12 ],
+                ( ( b[ 0 ] * i[ 1 ] + b[ 1 ] * i[ 5 ] ) + b[ 2 ] * i[ 9 ] ) + i[ 13 ],
+                ( ( b[ 0 ] * i[ 2 ] + b[ 1 ] * i[ 6 ] ) + b[ 2 ] * i[ 10 ] ) + i[ 14 ] };
+            if ( gfx_ray_mesh( *node.m_mesh, local_a, local_b ) )
+            {
+                hit = true;
+                b[ 0 ] = ( ( local_b[ 1 ] * m[ 4 ] + local_b[ 0 ] * m[ 0 ] ) + local_b[ 2 ] * m[ 8 ] ) + m[ 12 ];
+                b[ 1 ] = ( ( local_b[ 1 ] * m[ 5 ] + local_b[ 0 ] * m[ 1 ] ) + local_b[ 2 ] * m[ 9 ] ) + m[ 13 ];
+                b[ 2 ] = ( ( local_b[ 1 ] * m[ 6 ] + local_b[ 0 ] * m[ 2 ] ) + local_b[ 2 ] * m[ 10 ] ) + m[ 14 ];
+            }
+        }
+        for ( const gfx_scene_node_t* child : node.m_children )
+            hit = ray_node( *child, m, a, b ) || hit;
+        return hit;
+    }
+
     // 0x520130 (matrix, params): nothing without a scene.
     void draw( gfx_sort_t& sort, const float matrix[ 16 ], const gfx_draw_params_t& p ) const
     {

@@ -139,6 +139,42 @@ inline animated_draw_t animated_model_select( const model_draw_t& c, const float
     return out;
 }
 
+// Vu3dDrawAnimatedModelComponent's shadow 0x61DC00 up to 0x533060: the same distance test, no skip, nothing copied.
+inline bool animated_model_casts( const model_draw_t& c, const float* aabb_min, const float* aabb_max, const float* eye )
+{
+    return animated_model_select( c, aabb_min, aabb_max, eye, false ).drawn;
+}
+
+// The Draw Distance / LOD choice 0x5B0730 shares with the two below: -1 at or beyond the draw distance.
+inline int static_model_lod( const model_draw_t& c, const float* aabb_min, const float* aabb_max, const float* eye, bool last )
+{
+    const float half = draw_bits( 0x3F000000u );
+    const float dx = ( aabb_max[ 0 ] + aabb_min[ 0 ] ) * half - eye[ 0 ];
+    const float dy = ( aabb_max[ 1 ] + aabb_min[ 1 ] ) * half - eye[ 1 ];
+    const float dz = ( aabb_max[ 2 ] + aabb_min[ 2 ] ) * half - eye[ 2 ];
+    const float dist2 = ( dy * dy + dx * dx ) + dz * dz;
+    if ( dist2 >= c.draw_distance * c.draw_distance )
+        return -1;
+    if ( last )
+        return 3;
+    if ( c.lod0_draw_distance * c.lod0_draw_distance > dist2 )
+        return 0;
+    return c.lod1_draw_distance * c.lod1_draw_distance > dist2 ? 1 : 2;
+}
+
+// Vu3dDrawStaticModelComponent's shadow 0x5B08D0 up to 0x5201B0: `reflection_pass` the shadow params' +0x24, `skip` their +0x38 (read after the choice). Writes only +0x14.
+inline int static_model_select_shadow( const model_draw_t& c, const float* aabb_min, const float* aabb_max, const float* eye, bool reflection_pass, bool skip )
+{
+    const int instance = static_model_lod( c, aabb_min, aabb_max, eye, reflection_pass );
+    return skip ? -1 : instance;
+}
+
+// 0x5B0600 up to 0x520130, the VuGfxDrawInfoParams path: `force` (its +7): LOD 0, no distance at all; otherwise the same choice, no reflection model. Colour raw, no fade.
+inline static_draw_t static_model_select_info( const model_draw_t& c, const float* aabb_min, const float* aabb_max, const float* eye, bool force )
+{
+    return static_draw_t{ force ? 0 : static_model_lod( c, aabb_min, aabb_max, eye, false ), c.rejection_scale_modifier, c.color, c.dynamic_lighting };
+}
+
 inline static_draw_t static_model_select( const model_draw_t& c, const float* aabb_min, const float* aabb_max, const float* eye,
     bool reflection_pass, bool skip, float fade )
 {

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <workspace/core/boat/hull.hxx>
+#include <workspace/core/boat/math.hxx>
 #include <workspace/core/world/gfxsort.hxx>
 
 #include <cmath>
@@ -237,6 +239,15 @@ inline bool gfx_sphere_visible( const float planes[ 24 ], const float centre[ 3 
         signs |= bits & 0x80000000u;
     }
     return signs == 0;
+}
+
+// 0x50C670 (ecx the matrix, euler; retn 4): identity (0x410A40) x fromEuler (0x435640), the same product boat/euler.hxx takes.
+inline void gfx_matrix_set_euler( float m[ 16 ], const float euler[ 3 ] )
+{
+    float identity[ 16 ], rotation[ 16 ];
+    vu_identity( identity );
+    vu_matrix_from_euler( rotation, euler );
+    hull_multiply( identity, m, rotation );
 }
 
 // 0x50C6B0 (ecx v0, edx v1, v2, segment a, segment b, out x y z; caller cleans): the segment's midpoint form against the triangle, two-sided. Out's fourth word is a stack
