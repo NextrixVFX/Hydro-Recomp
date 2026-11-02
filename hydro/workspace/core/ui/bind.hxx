@@ -1881,22 +1881,20 @@ private:
         {
             b->m_completion = std::make_unique< ui_completion_t >( );
             b->m_completion->m_kind = static_cast< ui_completion_kind_t >( ui_completion_of_vtable( vt ) );
-            static const char* const modes[ 4 ] = { "Race", "Slalom", "TimeTrial", "Championship" };
             ui_completion_env_t env;
             env.m_track_db = m_hooks.m_track_db;
             env.m_champ_db = m_hooks.m_champ_db;
             env.m_package = [ this ]( const std::string& asset ) { return m_hooks.m_platform( "144|" + asset ).first; };
             env.m_record = [ this ]( ui_completion_kind_t k, const std::string& track, const std::string& course, std::int32_t& place )
             {
-                const std::string key = k == ui_completion_kind_t::championship ? "88|" + track : "48|" + std::string( modes[ static_cast< int >( k ) ] ) + "|" + track + "|" + course;
-                const std::pair< bool, int > a = m_hooks.m_platform( key );
+                const std::pair< bool, int > a = m_hooks.m_platform( ui_completion_record_key( k, track, course ) );
                 place = a.second;
                 return a.first;
             };
             env.m_open = [ this ]( ui_completion_kind_t k, const std::string& track, const std::string& course )
             {
                 return m_hooks.m_platform( k == ui_completion_kind_t::championship ? "92|Championship|" + track
-                                                                                   : "100|" + std::string( modes[ static_cast< int >( k ) ] ) + "|" + track + "|" + course ).first;
+                                                                                   : "100|" + std::string( k_ui_completion_modes[ static_cast< int >( k ) ] ) + "|" + track + "|" + course ).first;
             };
             env.m_string6 = m_hooks.m_string_db;
             ui_completion_initialize( *b->m_completion, env );
