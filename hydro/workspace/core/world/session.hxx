@@ -1303,6 +1303,34 @@ inline void rigid_kinematic_step( solver_rigid_t& b, const float* matrix, const 
     body_set_center_of_mass_transform( b, basis, origin );
 }
 
+// The props' motion IF slots 1 / 2, 0x546D80 / 0x546DB0 (the tables 0x73A13C, VuRampEntity's 0x73B04C and VuAnimatedPropEntity's 0x756228 all
+// name these two): the rigid component's +0xD0 |= 2 (kinematic, slot 1: a motion took the target) or &= ~2 (slot 2), copied whole to its
+// body's +0xD8 when it has one. Bit 2 is what world_save_kinematic_state 0x6002E0 walks on.
+inline void rigid_motion_flag( std::uint32_t& flags_d0, std::uint32_t* body_d8, bool on )
+{
+    flags_d0 = on ? flags_d0 | 2u : flags_d0 & 0xFFFFFFFDu;
+    if ( body_d8 )
+        *body_d8 = flags_d0;
+}
+
+inline void race_session_motion_claim( race_session_t& s, entity_t& target, bool on )
+{
+    const std::string& cls = target.m_type;
+    if ( cls != "VuPropEntity" && cls != "VuRampEntity" && cls != "VuBreakablePropEntity" && cls != "VuAnimatedPropEntity" )
+        return;   // any other class's IF: race_session_motion_update names it
+    rigid_component_state_t* rs = nullptr;
+    for ( entity_component_t& c : target.m_components )
+        if ( c.m_vtable == k_rigid_body_component_vtable )
+            rs = static_cast< rigid_component_state_t* >( c.m_state.get( ) );
+    if ( !rs )
+        return;
+    std::uint32_t* word = nullptr;
+    for ( const auto& lb : s.level_bodies )
+        if ( lb->owner == &target && lb->built )
+            word = &body_word( lb->body, 0xD8 );
+    rigid_motion_flag( rs->value.flags_d0, word, on );
+}
+
 inline void race_session_kinematic_step( race_session_t& s, level_body_t& lb, const float* matrix, const float* linear, const float* angular )
 {
     if ( !lb.built )
@@ -1386,8 +1414,7 @@ inline void race_session_motion_update( race_session_t& rs, entity_t& target, bo
 // VuKeyframeMotionEntity's slot 6 0x5CE9E0 (key_motion_game_init): its VuKeyframeEntity children in order (Time, the
 // transform world), the "Entity" ref (its script component's ref) -> the target entity's VuMotionComponent (vtable
 // 0x74E984; 0x5F5810 answers null without one). The target's IF (VuAnimatedPropEntity's 0x756228 / the props' 0x73A13C
-// shape): slot 0 = race_session_motion_update; slots 1 / 2 (0x546D80 / 0x546DB0: the rigid component's +0xD0
-// bit 1 set / cleared and copied to its body) - no body is built for an animated prop here (UNKNOWN when one is).
+// shape): slot 0 = race_session_motion_update; slots 1 / 2 = race_session_motion_claim (0x546D80 / 0x546DB0).
 inline void race_session_key_motion( race_session_t& s, entity_t& e )
 {
     key_motion_state_t* st = static_cast< key_motion_state_t* >( e.m_state.get( ) );
@@ -1410,6 +1437,14 @@ inline void race_session_key_motion( race_session_t& s, entity_t& e )
         const transform_component_t* tt = entity_transform( *k->target_entity );
         k->target.transform = tt ? tt->world : nullptr;
         k->target.user = k.get( );
+        k->target.begin = []( void* u ) {
+            auto& x = *static_cast< race_session_t::key_live_t* >( u );
+            race_session_motion_claim( *x.session, *x.target_entity, true );
+        };
+        k->target.end = []( void* u ) {
+            auto& x = *static_cast< race_session_t::key_live_t* >( u );
+            race_session_motion_claim( *x.session, *x.target_entity, false );
+        };
         k->target.update = []( void* u, const float* m, const float* linear, const float* angular ) {
             auto& x = *static_cast< race_session_t::key_live_t* >( u );
             race_session_motion_update( *x.session, *x.target_entity, x.stepped, m, linear, angular );

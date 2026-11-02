@@ -240,6 +240,29 @@ inline bool verify_ramp_contact( )
     return bad == 0;
 }
 
+// The props' motion IF slots 1 / 2 0x546D80 / 0x546DB0 against retail (case prop_motion_flags): per call the component's +0xD0 in, whether the
+// body exists, the component's word and the body's word after.
+inline bool verify_prop_motion_flags( )
+{
+    save_words_t c{ g_golden_prop_motion_flags_words };
+    const unsigned n = c.next( );
+    int bad = 0;
+    for ( unsigned k = 0; k < n; ++k )
+    {
+        std::uint32_t flags = c.next( );
+        const unsigned on = c.next( ), body = c.next( ), want_flags = c.next( ), want_body = c.next( );
+        std::uint32_t word = 0x55555555u;
+        rigid_motion_flag( flags, body ? &word : nullptr, on != 0u );
+        if ( flags != want_flags || word != want_body )
+            ++bad;
+    }
+    if ( bad )
+        LOG_ERROR( "prop_motion_flags FAILED %d of %u", bad, n );
+    else
+        LOG_SUCCESS( "verify_prop_motion_flags: %u calls of 0x546D80 / 0x546DB0 match retail", n );
+    return bad == 0;
+}
+
 // createRigidBody 0x544100's sphere and box branches against retail (case prop_box_bodies): the real box / sphere props of
 // the level templates, through hydro's tree: the component's words after gameInitialize, the shape's type, scaling, implicit
 // dimensions and margin, the compound's aabb, scaling and child origin, the body's 0x2D4 bytes (pointer words masked).

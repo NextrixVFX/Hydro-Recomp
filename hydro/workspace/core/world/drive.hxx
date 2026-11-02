@@ -648,6 +648,7 @@ inline void race_drive_setup( race_session_t& s, const value_t* constant_db, std
         r->respawn.transform = transform;
         r->respawn.transform_parent = false;
         r->respawn.body = &b.body;
+        body_word( b.body, 0x2C4 ) = 1u;   // 0x41C3EC: the body's contact callback = boat +0x64 (a marker word here: race_contact_added's any_callback)
         r->respawn.proxy = nullptr;
         r->respawn.camera = d.camera;
         r->respawn.instigator = b.io.instigator;
@@ -1001,6 +1002,18 @@ inline void race_contact_added( void* user, solver_contact_point_t& cp, solver_r
         return nullptr;
     };
     const auto any_callback = [ & ]( solver_rigid_t* self, solver_rigid_t* other ) -> std::function< void( contact_record_t& ) > {
+        // A boat body's +0x2C4 is VuBoatEntity's +0x64 part, slot 0 0x41E620 (boat/events.hxx boat_contact_handler): the rumble raise, the
+        // AI's push off a flagged body, +0x389, and the hard hit +0x468 that the Decision tick turns into 0x41E010.
+        for ( std::size_t k = 0; k < s.boats.size( ) && k < s.drives.size( ); ++k )
+            if ( &s.boats[ k ]->body.body == self )
+            {
+                race_drive_t* dr = s.drives[ k ].get( );
+                vu_rigid_body_t* own = &s.boats[ k ]->body;
+                return [ dr, own, other ]( contact_record_t& rec ) {
+                    boat_contact_handler( dr->d.boat, reinterpret_cast< std::uint8_t* >( own ), reinterpret_cast< const std::uint8_t* >( other ), rec.pos, rec.normal,
+                                          dr->d.slots.slot[ 1 ] != 0, dr->d.human, dr->d.driver );
+                };
+            }
         for ( const auto& u : s.powerups )
             if ( u->body && &u->body->body.body == self )
                 return [ &s, self, other ]( contact_record_t& ) { race_powerup_contact( s, self, other ); };

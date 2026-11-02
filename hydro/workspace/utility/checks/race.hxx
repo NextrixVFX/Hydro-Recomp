@@ -3240,6 +3240,7 @@ inline bool verify_race_all( )
     ok = verify_asset_slots( ) && ok;
     ok = verify_input_manager( ) && ok;
     ok = verify_input_device( ) && ok;
+    ok = verify_pad_rumble( ) && ok;
     ok = verify_foliage( ) && ok;
     ok = verify_save_all( ) && ok;
     ok = verify_settings_profile( ) && ok;

@@ -92,6 +92,12 @@ inline void platform_input_init( platform_input_t& in, const value_t& document )
         caps[ 1 ] = c.SubType;
         return result;
     };
+    in.device.hooks.set_state = []( void*, int pad, std::uint16_t left, std::uint16_t right ) -> std::uint32_t {
+        XINPUT_VIBRATION v{};
+        v.wLeftMotorSpeed = left;
+        v.wRightMotorSpeed = right;
+        return XInputSetState( static_cast< DWORD >( pad ), &v );
+    };
 #else
     in.device.hooks.get_state = []( void*, int, input_xinput_state_t* ) -> std::uint32_t { return 0x48Fu; };
     in.device.hooks.get_caps = []( void*, int, std::uint8_t* ) -> std::uint32_t { return 0x48Fu; };
