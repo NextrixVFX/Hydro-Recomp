@@ -1,5 +1,6 @@
 #pragma once
 
+#include <workspace/core/assets/scene.hxx>
 #include <workspace/core/boat/fluid.hxx>
 #include <workspace/core/dynamics/row.hxx>
 
@@ -479,13 +480,10 @@ inline float* hull_translation( float* out, const float* v )
 // VuMatrix_multiply 0x4078C0 (thiscall A; out*, B*; retn 8): out[4i+j] =
 // ((A[4i]*B[j] + A[4i+1]*B[4+j]) + A[4i+2]*B[8+j]) + A[4i+3]*B[12+j]
 // (the form fluid_solve's oracle verified). out may alias neither input.
+// In retail's operand order (scene_multiply, read from 0x4078C0), so a NaN payload matches too; finite results are unchanged.
 inline float* hull_multiply( const float* a, float* out, const float* b )
 {
-    float m[ 16 ];
-    for ( int i = 0; i < 4; ++i )
-        for ( int j = 0; j < 4; ++j )
-            m[ 4 * i + j ] = ( ( a[ 4 * i ] * b[ j ] + a[ 4 * i + 1 ] * b[ 4 + j ] ) + a[ 4 * i + 2 ] * b[ 8 + j ] ) + a[ 4 * i + 3 ] * b[ 12 + j ];
-    std::memcpy( out, m, 64 );
+    scene_multiply( a, out, b );
     return out;
 }
 
