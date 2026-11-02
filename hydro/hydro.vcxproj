@@ -227,6 +227,8 @@
     <ClInclude Include="workspace\core\world\field.hxx" />
     <ClInclude Include="workspace\core\world\foliage.hxx" />
     <ClInclude Include="workspace\core\world\hudpass.hxx" />
+    <ClInclude Include="workspace\core\world\menu.hxx" />
+    <ClInclude Include="workspace\core\world\mode.hxx" />
     <ClInclude Include="workspace\core\world\force.hxx" />
     <ClInclude Include="workspace\core\world\front.hxx" />
     <ClInclude Include="workspace\core\world\frontcam.hxx" />

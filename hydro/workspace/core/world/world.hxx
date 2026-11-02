@@ -35,6 +35,7 @@
 #include <workspace/core/world/settings.hxx>
 #include <workspace/core/world/sorted.hxx>
 #include <workspace/core/world/hudpass.hxx>
+#include <workspace/core/world/mode.hxx>
 #include <workspace/core/world/foliage.hxx>
 #include <workspace/core/assets/texture.hxx>
 #include <workspace/utility/logger.hxx>
@@ -565,6 +566,34 @@ private:
     void bind_game_screens( );   // huds.hxx: Results' VuCommonScreen into s.rules.screen_hooks
     void hud( int project, race_hud_verb_t verb, float dt );
     void ui_frame( );
+    // The game modes (world/mode.hxx, menu.hxx).
+    friend class c_menu_mode;
+    friend class c_action_slot;
+    void modes_bind( );
+    void action_enter( );
+    void action_exit( );
+    void menu_enter( );
+    void menu_exit( );
+    const std::string& menu_tick( float dt );
+    void menu_any_key( );
+    std::uint32_t m_menu_pad = 0;
+    ui_bind_hooks_t menu_hooks( );
+    struct menu_project_t
+    {
+        std::unique_ptr< entity_t > root;
+        std::unique_ptr< c_ui_binding > binding;
+    };
+    mode_manager_t m_modes;
+    front_end_engine_t m_menu_engine;
+    std::unique_ptr< c_front_end > m_menu;
+    std::map< int, menu_project_t > m_menu_projects;
+    int m_menu_serial = 0;
+    int m_menu_frames = 0;
+    value_t m_menu_util;                                // gameutil +0x50 across the modes
+    value_t m_menu_input_db;
+    std::shared_ptr< platform_input_t > m_menu_input;
+    value_t m_chosen;                                   // the GameData of the mode change
+    bool m_has_chosen = false;
     void race_broadcast( const char* name, const ui_params_t* params = nullptr, int origin = -1 );
     void race_broadcast_hash( std::uint32_t hash, const char* name, const ui_params_t& p, int origin );
     void hud_post( std::uint32_t hash, const ui_params_t& p, int origin );
@@ -994,6 +1023,18 @@ public:
 #endif
             }
         }
+        if ( !m_modes.m_factory )
+            modes_bind( );
+        // Ours (a test driver): `--menu` starts at the front end. A normal launch's TitleSequence (0x4CBD48's first mode, ctor 0x4C6AB0) is NOT
+        // recreated: without the option the scaffold's race still loads.
+        if ( c_engine::option( "menu" ) != nullptr && !m_has_chosen )
+        {
+            if ( !m_opened )
+                load( );
+            m_modes.m_next = "FrontEnd";
+            m_modes.change( );
+            return;
+        }
         if ( c_engine::option( "front-end" ) != nullptr )
         {
             load_background( );
@@ -1003,11 +1044,16 @@ public:
         race_session_dbs_t dbs = race_dbs( );
         const auto text = []( const char* v ) { return std::string( v ? v : "" ); };
         const bool defaults = c_engine::option( "front-end-defaults" ) != nullptr;
-        const bool race = defaults || c_engine::option( "boat" ) != nullptr || c_engine::option( "skin" ) != nullptr;
+        const bool race = m_has_chosen || defaults || c_engine::option( "boat" ) != nullptr || c_engine::option( "skin" ) != nullptr;
         value_t util;
         value_t& game_data = ui_json_child( util, "GameData" );
         bool front_end = false;
-        if ( defaults )   // the test profile's front end (world/front.hxx); --boat / --skin override its picks
+        if ( m_has_chosen )   // the mode change's: 0x4BF9B0 built it
+        {
+            game_data = m_chosen;
+            front_end = true;
+        }
+        else if ( defaults )   // the test profile's front end (world/front.hxx); --boat / --skin override its picks
             front_end = front_end_defaults( text( mode ), text( track ), text( course ), dbs, game_data );
         else if ( race )
             front_end = race_session_game_data( text( mode ), text( track ), text( course ), text( c_engine::option( "boat" ) ),
@@ -1409,6 +1455,7 @@ public:
         if ( m_action )
             m_race.world.game_mode = [ this ]( float step ) {
                 const std::string& next = m_action->tick( step );
+                m_modes.m_next = next;   // 0x4CBFD0's tail; the change itself runs after the race's frame (it deletes the race)
                 if ( m_action_reported != m_action->state( ) )
                 {
                     m_action_reported = m_action->state( );
@@ -1419,6 +1466,13 @@ public:
         else
             m_race.world.game_mode = nullptr;
         race_session_frame( m_race, dt );
+        if ( m_menu )
+            m_modes.tick( dt );
+        else if ( !m_modes.m_next.empty( ) )
+        {
+            m_modes.change( );
+            return;
+        }
         // Ours (a test driver): `--end-race N` ends the session after its frame N (session.hxx race_session_end: VuGame's
         // release and the bodies' dtors) - retail's action-mode exit is not reached by our flow.
         {
@@ -1998,6 +2052,7 @@ private:
 };
 
 #include <workspace/core/world/graph.hxx>
+#include <workspace/core/world/menu.hxx>
 #include <workspace/core/world/motion.hxx>
 #include <workspace/core/world/animate.hxx>
 #include <workspace/core/world/entities.hxx>

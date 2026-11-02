@@ -400,10 +400,10 @@ inline ui_screen_env_t c_world::ui_screen_environment( )
 inline void c_world::ui_frame( )
 {
 #if HYDRO_UI_PASS
-    if ( !m_ui_pass || !m_action || !m_race.active )
+    if ( !m_ui_pass || !m_modes.m_mode )
         return;
     m_ui_pass->begin( m_race.world.display_w, m_race.world.display_h );
-    m_action->draw_state( );
+    m_modes.draw( );
     m_ui_pass->end( );
 #endif
 }
