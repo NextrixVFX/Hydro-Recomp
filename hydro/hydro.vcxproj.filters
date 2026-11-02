@@ -102,6 +102,9 @@
     <ClInclude Include="workspace\core\boat\entity.hxx">
       <Filter>workspace\core\boat</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\core\boat\euler.hxx">
+      <Filter>workspace\core\boat</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\core\boat\events.hxx">
       <Filter>workspace\core\boat</Filter>
     </ClInclude>
@@ -115,6 +118,9 @@
       <Filter>workspace\core\boat</Filter>
     </ClInclude>
     <ClInclude Include="workspace\core\boat\human.hxx">
+      <Filter>workspace\core\boat</Filter>
+    </ClInclude>
+    <ClInclude Include="workspace\core\boat\keys.hxx">
       <Filter>workspace\core\boat</Filter>
     </ClInclude>
     <ClInclude Include="workspace\core\boat\load.hxx">

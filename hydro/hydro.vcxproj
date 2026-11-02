@@ -126,11 +126,13 @@
     <ClInclude Include="workspace\core\boat\driver.hxx" />
     <ClInclude Include="workspace\core\boat\effects.hxx" />
     <ClInclude Include="workspace\core\boat\entity.hxx" />
+    <ClInclude Include="workspace\core\boat\euler.hxx" />
     <ClInclude Include="workspace\core\boat\events.hxx" />
     <ClInclude Include="workspace\core\boat\fleet.hxx" />
     <ClInclude Include="workspace\core\boat\fluid.hxx" />
     <ClInclude Include="workspace\core\boat\hull.hxx" />
     <ClInclude Include="workspace\core\boat\human.hxx" />
+    <ClInclude Include="workspace\core\boat\keys.hxx" />
     <ClInclude Include="workspace\core\boat\load.hxx" />
     <ClInclude Include="workspace\core\boat\manager.hxx" />
     <ClInclude Include="workspace\core\boat\math.hxx" />
