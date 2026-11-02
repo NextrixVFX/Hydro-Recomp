@@ -249,6 +249,7 @@
     <ClInclude Include="workspace\core\world\models.hxx" />
     <ClInclude Include="workspace\core\world\modes.hxx" />
     <ClInclude Include="workspace\core\world\motion.hxx" />
+    <ClInclude Include="workspace\core\world\opening.hxx" />
     <ClInclude Include="workspace\core\world\pause.hxx" />
     <ClInclude Include="workspace\core\world\pfx.hxx" />
     <ClInclude Include="workspace\core\world\pfxclass.hxx" />
@@ -264,11 +265,10 @@
     <ClInclude Include="workspace\core\world\rotate.hxx" />
     <ClInclude Include="workspace\core\world\rules.hxx" />
     <ClInclude Include="workspace\core\world\session.hxx" />
-    <ClInclude Include="workspace\core\world\opening.hxx" />
-    <ClInclude Include="workspace\core\world\sorted.hxx" />
     <ClInclude Include="workspace\core\world\settings.hxx" />
     <ClInclude Include="workspace\core\world\skeleton.hxx" />
     <ClInclude Include="workspace\core\world\slalom.hxx" />
+    <ClInclude Include="workspace\core\world\sorted.hxx" />
     <ClInclude Include="workspace\core\world\sound.hxx" />
     <ClInclude Include="workspace\core\world\spray.hxx" />
     <ClInclude Include="workspace\core\world\start.hxx" />
