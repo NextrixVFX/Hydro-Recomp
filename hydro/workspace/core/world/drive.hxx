@@ -504,9 +504,8 @@ inline void race_drive_camera( void* user, float dt )
     std::memcpy( &cb.debris_count, d.debris + 0xA0, 4 );
     if ( cb.destroyed && cb.debris_count > 0 )
     {
-        // The first piece's image (debris +0x9C's array) - the pieces' readers are hooks.
-        race_unwired( *r.session, "the camera on a destroyed boat with debris pieces (their images are not modelled) - UNKNOWN, the camera tick skipped" );
-        return;
+        // The first piece's image (debris +0x9C's array).
+        cb.piece = race_drive_boat( r ).debris.pieces[ 0 ]->image.data( );
     }
     cb.velocity = reinterpret_cast< const float* >( d.body + 0x140 );
     cb.engine = d.engine;
@@ -517,6 +516,114 @@ inline void race_drive_camera( void* user, float dt )
     r.camera_env.display_h = r.session->world.display_h;
     if ( !boat_camera_tick( d.camera, cb, r.camera_env, dt ) )
         race_unwired( *r.session, "the camera's mode +0x2A0 is none of 0 / 1 / 2 under control method 2 - UNKNOWN, nothing written" );
+}
+
+// What 0x412270 and 0x410FF0 ask of g_vudynamicsimpl and g_vupfximpl, by a piece's body word (the index + 1: world/pieces.hxx).
+inline boat_launch_hooks_t race_piece_launch_hooks( race_drive_t& r )
+{
+    boat_launch_hooks_t h;
+    h.remove.user = &r;
+    h.remove.remove_body = []( void* u, std::uint32_t body ) {
+        race_drive_t& d = *static_cast< race_drive_t* >( u );
+        if ( !vu_dynamics_remove_rigid_body( d.session->dynamics->impl, race_drive_boat( d ).debris.pieces[ body - 1 ]->body.body ) )
+            race_unwired( *d.session, "a debris piece's body removal (g_vudynamicsimpl vt+0x40) refused" );
+    };
+    h.remove.remove_step = []( void* u, std::uint8_t* step ) {
+        race_drive_t& d = *static_cast< race_drive_t* >( u );
+        if ( !vu_dynamics_remove_step_callback( d.session->dynamics->impl, step ) )
+            race_unwired( *d.session, "a debris piece's step removal (g_vudynamicsimpl vt+0x30) refused" );
+    };
+    h.remove.pfx_release = []( void* u, std::uint32_t system ) {
+        race_session_t& s = *static_cast< race_drive_t* >( u )->session;
+        s.world.pfx_ops->release( s.world.pfx_ops->user, system );
+    };
+    h.add_body = []( void* u, std::uint32_t body ) {
+        race_drive_t& d = *static_cast< race_drive_t* >( u );
+        if ( !vu_dynamics_add_rigid_body( d.session->dynamics->impl, race_drive_boat( d ).debris.pieces[ body - 1 ]->body.body ) )
+            race_unwired( *d.session, "a debris piece's body add (g_vudynamicsimpl vt+0x3C) refused" );
+    };
+    h.add_step = []( void* u, std::uint8_t* step ) {
+        race_drive_t& d = *static_cast< race_drive_t* >( u );
+        if ( !vu_dynamics_add_step_callback( d.session->dynamics->impl, step ) )
+            race_unwired( *d.session, "a debris piece's step add (g_vudynamicsimpl vt+0x2C) refused" );
+    };
+    h.pfx_create = []( void* u, const std::string& name ) -> std::uint32_t {
+        race_session_t& s = *static_cast< race_drive_t* >( u )->session;
+        return s.world.pfx_ops && !name.empty( ) ? s.world.pfx_ops->create( s.world.pfx_ops->user, name.c_str( ) ) : 0u;
+    };
+    h.pfx_start = []( void* u, std::uint32_t system ) {
+        race_session_t& s = *static_cast< race_drive_t* >( u )->session;
+        const boat_pfx_ops_t o = boat_pfx_runtime_ops( *s.world.pfx );
+        o.start( o.user, system );
+    };
+    return h;
+}
+
+// The pieces' links to the race's world, made at the first launch (ORDER OURS: world/pieces.hxx). The step = interface slot 1 0x412E30 (boat/damage.hxx
+// piece_fluid_step), the motion = setWorldTransform 0x412D90 (piece_motion_set), the models = 0x520080's on +0x48 and on the sub-object +4.
+inline void race_boat_debris_bind( race_session_t& s, race_session_boat_t& b )
+{
+    race_dynamics_t& dyn = *s.dynamics;
+    for ( const std::unique_ptr< race_piece_t >& q : b.debris.pieces )
+    {
+        race_piece_t* p = q.get( );
+        if ( !p->stepping )
+        {
+            rigid_set_gravity( p->body.body.body, dyn.world.gravity );
+            dyn.objects[ &p->body.body ] = &p->body.collision;
+            dyn.motion[ &p->body.body.body ] = [ p ]( const float* basis, const float* origin ) {
+                float bt[ 16 ];
+                std::memcpy( bt, basis, 48 );
+                std::memcpy( bt + 12, origin, 16 );
+                piece_motion_set( p->image.data( ), bt );
+            };
+            race_step_callback_t cb;
+            cb.slot0 = []( float, bool ) {};   // 0x410B30: ret 8
+            cb.slot1 = [ &s, &dyn, p ]( float dt ) {
+                if ( !s.world.view )
+                {
+                    race_unwired( s, "a debris piece's step 0x412E30 with no VuWater view - UNKNOWN, not run" );
+                    return;
+                }
+                const fluid_gravity_fn gravity = []( void* u, float* out ) {
+                    std::memcpy( out, static_cast< race_dynamics_t* >( u )->world.gravity, 12 );
+                    return true;
+                };
+                if ( !piece_fluid_step( p->solver, p->image.data( ), reinterpret_cast< std::uint8_t* >( &p->body.body ), s.world.view->water, water_view_kernel,
+                                        const_cast< water_view_t* >( s.world.view ), gravity, &dyn, dt ) )
+                    race_unwired( s, "a debris piece's step 0x412E30 reached a path not recreated - UNKNOWN" );
+            };
+            dyn.callbacks[ p->image.data( ) + 4 ] = cb;
+            p->stepping = true;
+        }
+        if ( !p->bound && s.world.debris_model )
+            if ( const gfx_scene_view_t* v = s.world.debris_model( p->asset ) )
+            {
+                gfx_scene_view_attach( p->model, *v );
+                p->model.m_colour = 0xFFFFFFFFu;   // 0x412270: +0x5C 1.0, +0x60 -1, +0x64 0
+                p->model.m_lod = 1.0f;
+                p->bound = true;
+            }
+    }
+    if ( !b.debris.bound && s.world.debris_model && !b.io.damage_model.empty( ) )
+        if ( const gfx_scene_view_t* v = s.world.debris_model( b.io.damage_model ) )
+        {
+            const std::vector< gfx_piece_seed_t > seeds = gfx_pieces_seed( *v );
+            b.debris.parts.assign( seeds.size( ), boat_debris_part_t{ } );
+            b.debris.drawn.assign( seeds.size( ), gfx_scene_piece_t{ } );
+            for ( std::size_t i = 0; i < seeds.size( ); ++i )
+            {
+                std::memcpy( b.debris.parts[ i ].image + 4, seeds[ i ].m_inverse, 64 );
+                std::memcpy( b.debris.parts[ i ].image + 0x44, seeds[ i ].m_pivot, 12 );
+                b.debris.parts[ i ].model_aabb = seeds[ i ].m_node->m_aabb;
+                b.debris.parts[ i ].model_matrix = seeds[ i ].m_node->m_matrix;
+                b.debris.drawn[ i ].m_node = seeds[ i ].m_node;
+            }
+            gfx_scene_view_attach( b.debris.model, *v );
+            b.debris.model.m_lod = state_f( b.io.damage, 0x18 );
+            b.debris.model.m_byte_1c = b.io.damage[ 0x20 ];
+            b.debris.bound = true;
+        }
 }
 
 inline void race_drive_respawn( void* user )
@@ -628,6 +735,7 @@ inline void race_drive_setup( race_session_t& s, const value_t* constant_db, std
         hd.hooks.held = []( void* u, std::int32_t pad, const char* name ) -> std::uint8_t { return race_drive_held( *static_cast< const race_session_t* >( u ), pad, name ); };
         hd.hooks.pressed = []( void* u, std::int32_t pad, const char* name ) -> std::uint8_t { return race_drive_pressed( *static_cast< const race_session_t* >( u ), pad, name ); };
         hd.hooks.misfire = []( void* u ) { race_unwired( *static_cast< race_session_t* >( u ), "audio: the BoostMisfire sound 0x41E060 (FMOD - platform)" ); };
+        hd.hooks.rumble = []( void* u, float low, float high ) { race_session_t& rs = *static_cast< race_session_t* >( u ); if ( rs.input ) rs.input->device.rumble( 0, low, high ); };   // pad vt+0x18( 0 ), the controller's vt+0
         // vt+0x1C (boat, line) from the human's decision: these hooks carry the session, not the boat - the human list's
         // only entry is the boat (a second human: UNKNOWN, logged).
         hd.hooks.voice = []( void* u, const char* line ) {
@@ -688,24 +796,27 @@ inline void race_drive_setup( race_session_t& s, const value_t* constant_db, std
         h.respawn = race_drive_respawn;
         h.enable = []( void* u ) { race_session_enable( *race_drive_of( u ).session, race_drive_boat( race_drive_of( u ) ), true ); };
         h.disable = []( void* u ) { race_session_enable( *race_drive_of( u ).session, race_drive_boat( race_drive_of( u ) ), false ); };
-        // 0x410FF0 (boat effects.hxx boat_debris_launch): with no parts and no pieces (all a race's debris holds here -
-        // their images / models / bodies are not built) it is 0x411950 (nothing to remove), +0x94 = 1, +0x98 = 10.0,
-        // +0xC8 = 1.0 and no draws; with any, UNKNOWN.
+        // 0x410FF0 (boat effects.hxx boat_debris_launch) on the pieces world/pieces.hxx loaded.
         h.debris_410FF0 = []( void* u ) {
             race_drive_t& d = race_drive_of( u );
-            std::uint8_t* db = d.d.debris;
-            if ( load_word( db, 0x70 ) != 0u || load_word( db, 0xA0 ) != 0u || !d.session->random )
+            race_session_t& rs = *d.session;
+            if ( !rs.random || !rs.dynamics )
             {
-                race_unwired( *d.session, "the debris launch 0x410FF0 with parts / pieces (not built here) or no VuRandom - UNKNOWN, not run" );
+                race_unwired( rs, "the debris launch 0x410FF0 with no VuRandom or no dynamics - UNKNOWN, not run" );
                 return;
             }
+            race_session_boat_t& rb = race_drive_boat( d );
+            race_boat_debris_bind( rs, rb );
+            std::uint8_t* db = d.d.debris;
             boat_debris_sub_t sub;
             std::memcpy( sub.range, db + 0x24, sizeof( sub.range ) );
-            std::vector< boat_debris_part_t > parts;
-            std::vector< boat_launch_piece_t > pieces;
+            std::vector< boat_launch_piece_t > launch;
+            for ( const std::unique_ptr< race_piece_t >& q : rb.debris.pieces )
+                launch.push_back( boat_launch_piece_t{ q->image.data( ), &q->body.body.body, q->pfx } );
             const solver_rigid_t body = boat_decision_body( d.d.body );
-            boat_debris_launch( db, sub, parts, pieces, reinterpret_cast< const float* >( d.d.transform + 0x50 ), body, *d.session->random,
-                                boat_launch_hooks_t{ } );
+            boat_debris_launch( db, sub, rb.debris.parts, launch, reinterpret_cast< const float* >( d.d.transform + 0x50 ), body, *rs.random, race_piece_launch_hooks( d ) );
+            LOG_INFO( "race: boat %d destroyed (sync %d): %d pieces, %d parts, at %.1f %.1f %.1f", static_cast< int >( d.index ), rs.dynamics->syncs, static_cast< int >( launch.size( ) ),
+                      static_cast< int >( rb.debris.parts.size( ) ), state_f( d.d.transform, 0x80 ), state_f( d.d.transform, 0x84 ), state_f( d.d.transform, 0x88 ) );
         };
         // 0x41E240: an FMOD one-shot at the boat (g 0x759010 EventSystem getEvent on the name at +0x1EC, set3DAttributes at the
         // transform's +0x80, start, release - imports 0x64C348 / 0x64C358 / 0x64C354): the audio platform layer, a hook.
@@ -721,8 +832,25 @@ inline void race_drive_setup( race_session_t& s, const value_t* constant_db, std
             boat_destroyed_event( it == race_drive_boat( d ).io.boat_strings.end( ) ? std::string( ) : it->second,
                                   reinterpret_cast< const float* >( d.d.transform + 0x80 ), eh );
         };
-        h.piece_follow = []( void* u ) { race_unwired( *race_drive_of( u ).session, "the debris pieces' follow (boat_debris_follow) with pieces - none are built here: UNKNOWN" ); };
-        h.piece_remove = []( void* u, int ) { race_unwired( *race_drive_of( u ).session, "a debris piece's removal (boat_piece_remove) - no piece is built here: UNKNOWN" ); };
+        h.piece_follow = []( void* u ) {
+            race_drive_t& d = race_drive_of( u );
+            race_session_boat_t& rb = race_drive_boat( d );
+            race_piece_t& q = *rb.debris.pieces[ 0 ];
+            boat_debris_follow( rb.body.body, q.body.body.body, reinterpret_cast< const float* >( q.image.data( ) + 8 ), []( void* t, const float* m ) {
+                // 0x5344A0( piece +8, notify 0 ): the boat has no parent and no children in a race (boat_motion_set's reading).
+                transform_component_t c{ };
+                transform_set_world( c, m, nullptr );
+                std::uint8_t* transform = static_cast< std::uint8_t* >( t );
+                std::memcpy( transform + 0x10, c.local, 64 );
+                std::memcpy( transform + 0x50, c.world, 64 );
+                std::memcpy( transform + 0x90, c.rotation, 12 );
+                std::memcpy( transform + 0xA0, c.world_rotation, 12 );
+            }, d.d.transform );
+        };
+        h.piece_remove = []( void* u, int k ) {
+            race_drive_t& d = race_drive_of( u );
+            boat_piece_remove( race_drive_boat( d ).debris.pieces[ static_cast< std::size_t >( k ) ]->image.data( ), race_piece_launch_hooks( d ).remove );
+        };
         h.boost.user = r.get( );
         h.boost.sound = []( void* u, const std::string& ) { race_unwired( *race_drive_of( u ).session, "audio: the boost sounds (FMOD - platform)" ); };
         // g 0x758FEC vt+0x1C (boat, "BoostLow" / "Drafting") is the voice-over manager's say-now (world/voice.hxx).
@@ -1219,6 +1347,15 @@ inline void race_drive_pfx_frame( race_session_t& s, race_drive_t& r, race_sessi
     std::memcpy( h.offset, r.d.boat + 0x49C, 16 );
     h.part_flag = r.d.boat[ 0x46B ];
     std::memcpy( &h.part_count, r.d.debris + 0xA0, 4 );
+    if ( h.part_flag != 0 && h.part_count > 0 )
+    {
+        const race_piece_t& q = *b.debris.pieces[ 0 ];
+        const std::uint8_t* pb = reinterpret_cast< const std::uint8_t* >( &q.body.body );
+        std::memcpy( h.part_matrix, q.image.data( ) + 8, 64 );
+        std::memcpy( h.part_body.position, pb + 0x40, 12 );
+        std::memcpy( h.part_body.linear, pb + 0x140, 12 );
+        std::memcpy( h.part_body.angular, pb + 0x150, 12 );
+    }
     std::memcpy( h.body.position, r.d.body + 0x40, 12 );
     std::memcpy( h.body.linear, r.d.body + 0x140, 12 );
     std::memcpy( h.body.angular, r.d.body + 0x150, 12 );
@@ -1378,17 +1515,18 @@ inline void race_drive_effects( race_session_t& s, race_drive_t& r, float dt )
             race_unwired( s, "Build step 5: 0x41A790's aabb merge left +0xA4 / +0xB4 = a stale stack word - UNKNOWN" );
     }
     std::uint8_t* db = r.d.debris;
-    if ( load_word( db, 0x70 ) != 0u || load_word( db, 0xA0 ) != 0u )
-    {
-        race_unwired( s, "Build step 5: the debris 0x411A50 with parts / pieces (their images and models are not built here) - UNKNOWN, not run" );
-        return;
-    }
+    race_session_boat_t& rb = race_drive_boat( r );
     boat_debris_t d;
     d.gravity = state_f( db, 0x6C );
     d.out = db[ 0x94 ];
     d.timer = state_f( db, 0xC8 );
     std::memcpy( d.aabb, db + 0xA8, 32 );
-    boat_debris_tick( d, dt, boat_pfx_ops_t{ } );
+    d.parts.swap( rb.debris.parts );
+    // SUBSTITUTION (flagged): a piece's model aabb is not kept, so 0x5175E0 merges the engine's zero aabb: this aabb drives no draw here.
+    for ( const std::unique_ptr< race_piece_t >& q : rb.debris.pieces )
+        d.pieces.push_back( boat_debris_piece_t{ reinterpret_cast< const float* >( q->image.data( ) + 8 ), nullptr, reinterpret_cast< const float* >( q->image.data( ) + 0x1B0 ), load_word( q->image.data( ), 0x228 ) } );
+    boat_debris_tick( d, dt, s.world.pfx ? boat_pfx_runtime_ops( *s.world.pfx ) : boat_pfx_ops_t{ } );
+    d.parts.swap( rb.debris.parts );
     std::memcpy( db + 0xA8, d.aabb, 12 );
     std::memcpy( db + 0xB8, d.aabb + 4, 12 );   // the w lanes +0xB4 / +0xC4: a stack word retail never writes - left
 }

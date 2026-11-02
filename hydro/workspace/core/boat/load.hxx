@@ -86,6 +86,8 @@ struct boat_load_t
     // The Pfx step (0x419EF0 / 0x419D70 x2 / 0x419FF0) handed over WHOLE: set, it is called with Default's and the
     // boat's Pfx sections, the driver class and the owner's flag bit 2 - bind it to boat/effects.hxx boat_pfx_fill
     // on the controller (boat +0x234) and its boat_pfx_fill_hooks_t. Null: the step stays the four logged calls.
+    // 0x411EF0 on one Damage section (world/pieces.hxx): the pieces and +0x78 / +0x90.
+    bool ( *damage_read )( void* user, const value_t& section ) = nullptr;
     bool ( *pfx_fill )( void* user, const value_t& fallback, const value_t& own, const boat_driver_t& driver, bool create ) = nullptr;
     void* pfx_user = nullptr;
     // 0x5322C0 on the model instance +0x2A4 (world/rig.hxx): null, the logged call only.
@@ -388,13 +390,17 @@ inline bool boat_load_sections( boat_load_t& io )
             call( 0x419FF0, "pfx", "" );
     }
     // Damage: 0x412170 (each piece's scalar deleting dtor - a hook - then the
-    // count +0xA0 = 0), the debris reader 0x411EF0 twice (VuPiece's loader:
-    // HOOKS), the model 0x520080(+4, +0x78), +0xCC = count > 0.
+    // count +0xA0 = 0), the debris reader 0x411EF0 twice (world/pieces.hxx,
+    // io.damage_read), the model 0x520080(+4, +0x78), +0xCC = count > 0.
     if ( static_cast< std::int32_t >( load_word( io.damage, 0xA0 ) ) > 0 )
         return false;
     image_put32( io.damage, 0xA0, 0 );
     call( 0x411EF0, "damage+0x0", "Default/Damage" );
+    if ( io.damage_read && !io.damage_read( io.pfx_user, member( fallback, "Damage" ) ) )
+        return false;
     call( 0x411EF0, "damage+0x0", name == "Default" ? "Default/Damage" : "boat/Damage" );
+    if ( io.damage_read && !io.damage_read( io.pfx_user, member( name == "Default" ? fallback : own, "Damage" ) ) )
+        return false;
     call( 0x520080, "damage+0x4", io.damage_model );
     io.damage[ 0xCC ] = static_cast< std::int32_t >( load_word( io.damage, 0xA0 ) ) > 0 ? 1 : 0;
     // The instigator: "Boat" | "Human Boat" (slot 12) | "AI Boat" (slot 13)
