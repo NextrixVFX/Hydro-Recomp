@@ -1151,6 +1151,88 @@ inline bool verify_ghost_overlap( )
     return bad == 0;
 }
 
+#include <workspace/core/world/playback.hxx>
+
+// VuAnimatedPropEntity against retail. Case prop_blend: the tick's fade and control removal 0x5ED030 .. 0x5ED17D, every field after each
+// step. Case prop_params: the plug's reads 0x5ECB60 .. 0x5ECDC2, on the sender's images and on tags that do not fit.
+inline bool verify_prop_blend( )
+{
+    save_words_t c{ g_golden_prop_blend_words };
+    const unsigned n = c.next( );
+    int bad = 0;
+    const auto bits = [ ]( float x ) { std::uint32_t u; std::memcpy( &u, &x, 4 ); return u; };
+    const auto real = [ ]( std::uint32_t u ) { float x; std::memcpy( &x, &u, 4 ); return x; };
+    for ( unsigned s = 0; s < n; ++s )
+    {
+        const unsigned count = c.next( );
+        skel_animation_t kinds[ 2 ];
+        kinds[ 1 ].additive = 1;
+        skel_control_t controls[ 8 ];
+        skel_animated_t a;
+        std::vector< unsigned > flags;
+        for ( unsigned i = 0; i < count; ++i )
+            flags.push_back( c.next( ) );
+        for ( unsigned i = 0; i < count; ++i )
+        {
+            controls[ i ].animation = &kinds[ flags[ i ] ];
+            controls[ i ].weight = real( c.next( ) );
+            skel_animated_add( a, &controls[ i ] );
+        }
+        prop_blend_t blend;
+        blend.on = c.next( ) != 0;
+        blend.rate = real( c.next( ) );
+        const float dt = real( c.next( ) );
+        prop_blend_step( a, blend, dt );
+        bool same = c.next( ) == ( blend.on ? 1u : 0u );
+        same = c.next( ) == bits( blend.rate ) && same;
+        for ( unsigned i = 0; i < count; ++i )
+            same = c.next( ) == bits( controls[ i ].weight ) && same;
+        for ( const std::vector< skel_control_t* >* list : { &a.controls, &a.blended, &a.additive } )
+        {
+            const unsigned size = c.next( );
+            same = size == list->size( ) && same;
+            for ( unsigned i = 0; i < size; ++i )
+            {
+                const unsigned id = c.next( );
+                same = i < list->size( ) && ( *list )[ i ] == &controls[ id ] && same;
+            }
+        }
+        if ( !same && ++bad <= 4 )
+            LOG_ERROR( "prop_blend: step %u differs", s );
+    }
+    if ( bad )
+        LOG_ERROR( "prop_blend FAILED %d of %u", bad, n );
+    else
+        LOG_SUCCESS( "verify_prop_blend: %u steps of the fade match retail's 0x5ED030 .. 0x5ED17D", n );
+
+    save_words_t r{ g_golden_prop_params_words };
+    const unsigned m = r.next( );
+    int wrong = 0;
+    for ( unsigned s = 0; s < m; ++s )
+    {
+        const unsigned size = r.next( );
+        std::uint8_t image[ 0x84 ] = { };
+        for ( unsigned i = 0; i < size; ++i )
+            image[ i ] = static_cast< std::uint8_t >( r.next( ) );
+        std::memcpy( image + 0x80, &size, 4 );
+        const prop_play_params_t p = prop_params_read( image );
+        bool same = r.next( ) == p.asset;
+        same = r.next( ) == bits( p.start ) && same;
+        same = r.next( ) == bits( p.blend ) && same;
+        same = r.next( ) == bits( p.factor ) && same;
+        same = r.next( ) == ( p.looping ? 1u : 0u ) && same;
+        same = r.next( ) == p.timed && same;
+        same = r.next( ) == bits( p.advance ) && same;
+        if ( !same && ++wrong <= 4 )
+            LOG_ERROR( "prop_params: image %u differs", s );
+    }
+    if ( wrong )
+        LOG_ERROR( "prop_params FAILED %d of %u", wrong, m );
+    else
+        LOG_SUCCESS( "verify_prop_blend: %u VuParams images read as retail's 0x5ECB60 reads them", m );
+    return bad == 0 && wrong == 0;
+}
+
 inline bool verify_force_affector( )
 {
     logic_check_t c{ g_golden_fae_words };

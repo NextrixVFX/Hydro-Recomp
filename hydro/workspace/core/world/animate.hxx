@@ -9,38 +9,23 @@ inline void c_world::skin_props( float dt )
 {
     for ( animated_t& item : m_animated )
     {
-        if ( item.geometry < 0 || !item.playing )
-            continue;
-        const auto clip = m_clips.find( item.clip );
-        if ( clip == m_clips.end( ) )
+        if ( !item.playing )
             continue;
 
-        // VuAnimatedPropEntity's tick @0x5ed030 advances every control
-        // (@0x5169e0, verified as control_advance) and then evaluates the
-        // pose (@0x516cf0). The listener is the prop's VuAnimationEventIF
-        // @0x5ed680: AnimDone and AnimLoop become its outputs.
+        // VuAnimatedPropEntity's tick @0x5ed030 fades its controls, advances
+        // them (@0x5169e0) and then evaluates the pose (@0x516cf0). The
+        // listener is the prop's VuAnimationEventIF @0x5ed680: AnimDone and
+        // AnimLoop become its outputs (motion.hxx prop_tick).
         //
         // Two things the old hand-written clock did are gone because retail
         // does not do them: a One Shot prop was retired at its last frame
         // (One Shot latches only the VuPlayAnimationEntity, at +168), and
         // Start Time was added as a phase every frame instead of being the
         // control's starting time.
-        // VuAnimation's load @0x562250 sets +24 = (frames - 1) / 30 and
-        // +28 = frames / 30, multiplying by the float 0.033333335.
-        const int frames = clip->second.frames( );
-        item.control.end = static_cast< float >( frames - 1 ) * 0.033333335f;
-        item.control.loop = static_cast< float >( frames ) * 0.033333335f;
-        const std::string owner = item.path;
-        control_advance( item.control, dt, true,
-            [ this, &owner ]( const std::string& name, const value_t* params )
-            {
-                on_animation_event( owner, name, params );
-            } );
-
-        // The pose: 0x516CF0 (skel_animated_build) over the control's time, 0x532720 the palette, the prop's own instance (world/motion.hxx
+        // The pose: 0x516CF0 (skel_animated_build) over the controls, 0x532720 the palette, the prop's own instance (world/motion.hxx
         // prop_instance, the same path the attach records read). The draw reads that instance's palette (prop_palette): there is no second
         // store to overwrite it, which is how the old one-clip-frame walk undid this pose once (8c7fdc2 + 729f931).
-        if ( !prop_pose( item ) && m_pose_unknown++ == 0 )
+        if ( !prop_tick( item, dt ) && m_pose_unknown++ == 0 )
             LOG_WARNING( "prop %s has no pose: no instance or clip (UNKNOWN)", item.path.c_str( ) );
     }
 }
@@ -55,6 +40,27 @@ inline void c_world::bind_animations( )
     int bound = 0;
     int loaded = 0;
     std::map< std::string, int > by_trigger;
+    // Every sender's assets, as the VuPlayAnimationEntity's asset refs loaded them with the project: its timed events, its tokens.
+    m_play_tokens.clear( );
+    for ( auto& sender : m_plays )
+    {
+        play_t& play = sender.second;
+        m_play_tokens.push_back( "VuAnimationAsset/" + play.clip );
+        play.clip_token = static_cast< std::uint32_t >( m_play_tokens.size( ) );
+        if ( play.timed.empty( ) )
+            continue;
+        const std::string name = "VuTimedEventAsset/" + play.timed;
+        m_play_tokens.push_back( name );
+        play.timed_token = static_cast< std::uint32_t >( m_play_tokens.size( ) );
+        if ( m_timed.find( name ) != m_timed.end( ) )
+            continue;
+        std::vector< std::uint8_t > bytes;
+        std::vector< timed_event_t > events;
+        if ( m_archive.read( name.c_str( ), bytes ) && timed_events_load( bytes, events ) )
+            m_timed.emplace( name, std::move( events ) );
+        else
+            LOG_WARNING( "timed events %s failed to load", name.c_str( ) );
+    }
     for ( animated_t& item : m_animated )
     {
         const auto found = m_play.find( item.path );
@@ -67,18 +73,7 @@ inline void c_world::bind_animations( )
         item.looping = found->second.looping;
         item.factor = found->second.factor;
         if ( !found->second.timed.empty( ) )
-        {
             item.timed = "VuTimedEventAsset/" + found->second.timed;
-            if ( m_timed.find( item.timed ) == m_timed.end( ) )
-            {
-                std::vector< std::uint8_t > bytes;
-                std::vector< timed_event_t > events;
-                if ( m_archive.read( item.timed.c_str( ), bytes ) && timed_events_load( bytes, events ) )
-                    m_timed.emplace( item.timed, std::move( events ) );
-                else
-                    LOG_WARNING( "timed events %s failed to load", item.timed.c_str( ) );
-            }
-        }
         ++by_trigger[ item.trigger ];
 
         if ( m_clips.find( item.clip ) == m_clips.end( ) )
@@ -307,6 +302,12 @@ inline void c_world::bind_animations( )
             }
     }
     LOG_INFO( "animated props: %d posed", posed );
+    // Every clip each prop's senders name, loaded with the level: no archive read at a plug.
+    for ( const auto& sender : m_plays )
+        for ( const std::string& target : sender.second.props )
+            for ( animated_t& item : m_animated )
+                if ( item.path == target && item.entity && prop_instance( *item.entity ) )
+                    prop_clip( *m_prop_skels[ item.entity ], "VuAnimationAsset/" + sender.second.clip );
 
 
     if ( m_animated.empty( ) )

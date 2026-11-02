@@ -29,6 +29,7 @@
 #include <workspace/core/world/strings.hxx>
 #include <workspace/core/world/session.hxx>
 #include <workspace/core/world/joints.hxx>
+#include <workspace/core/world/playback.hxx>
 #include <workspace/core/world/latch.hxx>
 #include <workspace/core/world/build.hxx>
 #include <workspace/core/world/drive.hxx>
@@ -2187,8 +2188,6 @@ private:
         // Its own streamed clone and its own clock, so four pump pistons
         // sharing one model still animate out of step as authored.
         int geometry = -1;
-        // The VuAnimationControl the last PlayAnimation built (@0x5ecb60).
-        animation_control_t control{};
         // Props on an OnGameStart trigger begin at load; the rest wait for
         // their event to arrive and sit at the bind pose until it does.
         bool playing = false;
@@ -2219,6 +2218,11 @@ private:
         bool looping = true;
         bool one_shot = false;
         float factor = 1.0f;
+        float blend = 0.0f;
+        // The tokens its params carry (world/playback.hxx) and the ends of its "PlayAnimation" output.
+        std::uint32_t clip_token = 0;
+        std::uint32_t timed_token = 0;
+        std::vector< std::string > props;
     };
 
     // VuOneShotFilterEntity: one byte of state, the flag at this+96.
@@ -2250,7 +2254,11 @@ private:
     std::vector< static_draw_item_t > m_static_draws;
     // Each VuStaticModelAsset's scene aabb (model_for, from load_model_scene), by asset name.
     std::map< std::string, std::array< float, 8 > > m_scene_aabbs;
+    // m_play: the first sender of each prop, for the load's checks only. m_plays: every sender by its own path. A prop can have several
+    // (Thor: idle, two swings); what it plays is what the sender of that PlayAnimation packed.
     std::map< std::string, play_t > m_play;
+    std::map< std::string, play_t > m_plays;
+    std::vector< std::string > m_play_tokens;
     c_trigger_set m_triggers;
     c_light_rig m_rig;
     std::map< std::string, filter_t > m_filters;
@@ -2301,18 +2309,21 @@ private:
     std::set< std::string > m_start_lights;
     std::set< std::string > m_ifs;
     c_joints m_joints;
-    // An animated prop with attach records: its VuAnimatedModelInstance (+0x64 +0x68) and VuAnimatedSkeleton (+0x100), on
-    // world/skeleton.hxx; the clip's time is the old pose path's control (animate.hxx). FLAGGED: one clip, no blend (0x5ED067's fade).
+    // An animated prop: its VuAnimatedModelInstance (+0x64 +0x68), VuAnimatedSkeleton (+0x100) with the controls 0x5ECB60 built, on
+    // world/skeleton.hxx, the fade +0x7E / +0x80. owned holds every control until the tick after it left the skeleton: retail's
+    // refcount can free one inside its own AnimDone (OnAnimDone -> PlayAnimation -> 0x517440), the walk does not read it after that.
     struct prop_skel_t
     {
         skel_model_t model;
-        skel_animation_t clip;
+        std::map< std::string, std::unique_ptr< skel_animation_t > > clips;
         skel_animated_t animated;
-        skel_control_t control;
-        bool has_clip = false, added = false;
+        std::vector< std::unique_ptr< skel_control_t > > owned;
+        prop_blend_t blend;
     };
     std::map< entity_t*, std::unique_ptr< prop_skel_t > > m_prop_skels;
-    bool prop_pose( const animated_t& item );
+    const skel_animation_t* prop_clip( prop_skel_t& s, const std::string& name );
+    bool prop_play_plug( animated_t& item, const std::uint8_t* params );
+    bool prop_tick( const animated_t& item, float dt );
     const std::vector< float >* prop_palette( const animated_t& item );
     int m_motion_unknown = 0;   // a motion child's IF slot 0 not read
     std::set< const entity_t* > m_motion_unread;
