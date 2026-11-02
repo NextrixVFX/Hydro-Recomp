@@ -3,6 +3,7 @@
 #include <workspace/core/world/dbrt.hxx>
 #include <workspace/core/world/gfxsort.hxx>
 #include <workspace/core/world/lights.hxx>
+#include <workspace/core/world/drawer.hxx>
 #include <workspace/core/world/skeleton.hxx>
 
 #include <cstdint>
@@ -998,6 +999,209 @@ inline bool verify_gfx_lights( )
     return false;
 }
 
+// Case gfx_draw_manager: every call of the manager's collaborators, logged as the case logged it (kind, object, params flag).
+struct gfx_dm_check_t : gfx_draw_hooks_t
+{
+    using log_t = std::vector< std::array< unsigned, 3 > >;
+    struct method_t : gfx_draw_method_t
+    {
+        void call( const void* params ) override { m_log->push_back( { m_kind, m_id, static_cast< unsigned >( params == m_want ) } ); }
+        log_t* m_log = nullptr;
+        unsigned m_kind = 0, m_id = 0;
+        const void* m_want = nullptr;
+    };
+    struct entry_t : gfx_draw_entry_t
+    {
+        void call( ) override { m_log->push_back( { 11u, m_id, 0u } ); }
+        log_t* m_log = nullptr;
+        unsigned m_id = 0;
+    };
+    void lights_submit( const gfx_draw_params_t& p ) override { m_log.push_back( { 7u, 0u, static_cast< unsigned >( &p == m_want ) } ); }
+    bool composer_present( ) override { return m_composer; }
+    void composer_draw( const gfx_draw_params_t& p ) override { m_log.push_back( { 8u, 0u, static_cast< unsigned >( &p == m_want ) } ); }
+    void register_tick( ) override { m_calls.push_back( 3u ); }
+    void register_flush( ) override { m_calls.push_back( 5u ); }
+    void unregister_tick( ) override { m_calls.push_back( 4u ); }
+    void unregister_flush( ) override { m_calls.push_back( 6u ); }
+    log_t m_log;
+    std::vector< unsigned > m_calls;
+    bool m_composer = false;
+    const void* m_want = nullptr;
+};
+
+// Case gfx_draw_manager: world/drawer.hxx against retail's creator 0x5A7320, ctor 0x5A73B0, add / remove / update, draw 0x5A75E0 (walk + leaf 0x5A7A90), shadow 0x5A7730 (leaf 0x5A7AF0),
+// list remove 0x5A7800 with its growth, flush 0x5A7980, tick 0x5A79F0, dtor 0x5A7540, release 0x5A7310.
+inline bool verify_gfx_draw_manager( )
+{
+    anim_cursor_t g;
+    g.w = g_golden_gdm_words;
+    g.size = g_golden_gdm_size;
+    g.where = "gfx_draw_manager";
+    const auto real = []( std::uint32_t u ) { float f; std::memcpy( &f, &u, 4 ); return f; };
+    gfx_dm_check_t hooks;
+    g_gfx_draw_manager = nullptr;
+    gfx_draw_manager_t* manager = gfx_draw_manager_create( hooks );
+    g.eq( 1u, g.take( ) );                     // the dev page: not recreated, the golden's first call
+    g.eq( hooks.m_calls.size( ) > 0 ? hooks.m_calls[ 0 ] : 0u, g.take( ) );
+    g.eq( hooks.m_calls.size( ) > 1 ? hooks.m_calls[ 1 ] : 0u, g.take( ) );
+    g.eq( 0x5A79F0u, g.take( ) );
+    g.eq( 0x5A7980u, g.take( ) );
+    g.eq( static_cast< unsigned >( manager->m_capacity ), g.take( ) );
+    g.eq( 0u, g.take( ) );
+    static gfx_drawable_t objects[ 40 ];
+    static gfx_dm_check_t::method_t draws[ 40 ], shadows[ 40 ];
+    static gfx_dm_check_t::entry_t entries[ 32 ];
+    gfx_draw_params_t params;
+    gfx_shadow_params_t shadow;
+    gfx_check_hooks_t sort_hooks;
+    gfx_sort_t sort( sort_hooks );
+    for ( unsigned i = 0; i < 40; ++i )
+    {
+        objects[ i ] = gfx_drawable_t( );
+        draws[ i ].m_log = &hooks.m_log;
+        draws[ i ].m_kind = 9;
+        draws[ i ].m_id = i;
+        draws[ i ].m_want = &params;
+        shadows[ i ].m_log = &hooks.m_log;
+        shadows[ i ].m_kind = 10;
+        shadows[ i ].m_id = i;
+        shadows[ i ].m_want = &shadow;
+        objects[ i ].m_draw = i % 11 == 10 ? nullptr : &draws[ i ];
+        objects[ i ].m_shadow = i % 13 == 12 ? nullptr : &shadows[ i ];
+    }
+    for ( unsigned i = 0; i < 32; ++i )
+    {
+        entries[ i ].m_log = &hooks.m_log;
+        entries[ i ].m_id = i;
+    }
+    hooks.m_want = &params;
+    const auto compare_log = [ & ]( )
+    {
+        const unsigned n = g.take( );
+        g.eq( static_cast< unsigned >( hooks.m_log.size( ) ), n );
+        for ( unsigned i = 0; i < n; ++i )
+            for ( unsigned k = 0; k < 3; ++k )
+                g.eq( i < hooks.m_log.size( ) ? hooks.m_log[ i ][ k ] : 0xDEADBEEFu, g.take( ) );
+        hooks.m_log.clear( );
+    };
+    const unsigned steps = g.take( );
+    int calls = 0;
+    for ( unsigned s = 0; s < steps; ++s )
+    {
+        const unsigned op = g.take( );
+        if ( op == 0 || op == 2 )
+        {
+            gfx_drawable_t& d = objects[ g.take( ) ];
+            if ( op == 0 )
+                d.m_mask = static_cast< std::uint8_t >( g.take( ) );
+            for ( float& f : d.m_aabb )
+                f = real( g.take( ) );
+            if ( op == 0 )
+                manager->add( d );
+            else
+                manager->update( d );
+        }
+        else if ( op == 1 )
+            manager->remove( objects[ g.take( ) ] );
+        else if ( op == 3 )
+        {
+            params.m_reflecting = static_cast< std::uint8_t >( g.take( ) );
+            hooks.m_composer = g.take( ) != 0;
+            float six[ 24 ];
+            for ( float& f : six )
+                f = real( g.take( ) );
+            for ( float& f : params.m_clip )
+                f = real( g.take( ) );
+            params.m_planes = six;
+            manager->draw( params );
+            calls += static_cast< int >( hooks.m_log.size( ) );
+            compare_log( );
+        }
+        else if ( op == 4 )
+        {
+            shadow.m_count = static_cast< int >( g.take( ) );
+            shadow.m_clip_flag = static_cast< std::uint8_t >( g.take( ) );
+            float cascade[ 52 ];
+            for ( int i = 0; i < 4 * shadow.m_count; ++i )
+                cascade[ i ] = real( g.take( ) );
+            for ( float& f : shadow.m_clip )
+                f = real( g.take( ) );
+            shadow.m_planes = cascade;
+            manager->draw_shadow( shadow );
+            calls += static_cast< int >( hooks.m_log.size( ) );
+            compare_log( );
+        }
+        else
+        {
+            const unsigned n = g.take( ), flush = g.take( ), gone = g.take( );
+            sort.m_key_lo = g.take( );
+            sort.m_key_hi = g.take( );
+            manager->m_list.clear( );
+            for ( unsigned i = 0; i < n; ++i )
+                manager->m_list.push_back( &entries[ g.take( ) ] );
+            manager->list_remove( &entries[ gone ] );
+            const unsigned left = g.take( );
+            g.eq( static_cast< unsigned >( manager->m_list.size( ) ), left );
+            for ( unsigned i = 0; i < left; ++i )
+                g.eq( i < manager->m_list.size( ) ? static_cast< gfx_dm_check_t::entry_t* >( manager->m_list[ i ] )->m_id : 0xDEADBEEFu, g.take( ) );
+            if ( flush )
+                manager->flush( sort );
+            compare_log( );
+            g.eq( sort.m_key_lo, g.take( ) );
+            g.eq( sort.m_key_hi, g.take( ) );
+            g.eq( static_cast< unsigned >( manager->m_list.size( ) ), g.take( ) );
+        }
+        g.eq( static_cast< unsigned >( manager->m_drawn ), g.take( ) );
+        g.eq( static_cast< unsigned >( manager->m_culled ), g.take( ) );
+        g.eq( static_cast< unsigned >( manager->m_shadow_drawn ), g.take( ) );
+        g.eq( static_cast< unsigned >( manager->m_shadow_culled ), g.take( ) );
+        g.eq( static_cast< unsigned >( manager->m_tree.m_count ), g.take( ) );
+        if ( g.take( ) )
+        {
+            g.take( );                         // the dev page's query
+            manager->tick( );
+            g.eq( static_cast< unsigned >( manager->m_drawn ), g.take( ) );
+            g.eq( static_cast< unsigned >( manager->m_culled ), g.take( ) );
+            g.eq( static_cast< unsigned >( manager->m_shadow_drawn ), g.take( ) );
+            g.eq( static_cast< unsigned >( manager->m_shadow_culled ), g.take( ) );
+        }
+    }
+    const unsigned runs = g.take( );
+    for ( unsigned r = 0; r < runs; ++r )
+    {
+        g.take( );                             // the row's length
+        const unsigned count = g.take( ), cap = g.take( );
+        manager->m_list.clear( );
+        for ( unsigned i = 0; i < count; ++i )
+            manager->m_list.push_back( &entries[ i ] );
+        manager->m_capacity = static_cast< int >( cap );
+        manager->list_remove( &entries[ 0 ] );
+        const unsigned left = g.take( );
+        g.eq( static_cast< unsigned >( manager->m_list.size( ) ), left );
+        g.eq( static_cast< unsigned >( manager->m_capacity ), g.take( ) );
+        g.take( );                             // a new block or not: the vector's business
+        for ( unsigned i = 0; i < left; ++i )
+            g.eq( i < manager->m_list.size( ) ? static_cast< gfx_dm_check_t::entry_t* >( manager->m_list[ i ] )->m_id : 0xDEADBEEFu, g.take( ) );
+    }
+    manager->m_list.clear( );
+    hooks.m_calls.clear( );
+    delete manager;
+    gfx_draw_manager_release( );
+    for ( unsigned i = 0; i < 2; ++i )
+        g.eq( i < hooks.m_calls.size( ) ? hooks.m_calls[ i ] : 0u, g.take( ) );
+    g.eq( 1u, g.take( ) );
+    g.eq( 1u, g.take( ) );
+    g.eq( static_cast< unsigned >( g_gfx_draw_manager != nullptr ), g.take( ) );
+    if ( g.failed == 0 && g.at == g.size )
+    {
+        LOG_SUCCESS( "gfx_draw_manager matches retail's Vu3dDrawManager (0x5A7320, 0x5A73B0, 0x5A75E0, 0x5A7730, 0x5A7800, 0x5A7980, 0x5A79F0, 0x5A7A90, 0x5A7AF0, 0x5A7540, 0x5A7310) on %u steps, "
+                     "%d collaborator calls: %d words exact", steps, calls, g.compared );
+        return true;
+    }
+    LOG_ERROR( "gfx_draw_manager FAILED %d of %d words (cursor %zu of %zu)", g.failed, g.compared, g.at, g.size );
+    return false;
+}
+
 inline bool verify_render_all( )
 {
     bool ok = true;
@@ -1006,5 +1210,6 @@ inline bool verify_render_all( )
     ok = verify_gfx_cache( ) && ok;
     ok = verify_gfx_dbrt( ) && ok;
     ok = verify_gfx_lights( ) && ok;
+    ok = verify_gfx_draw_manager( ) && ok;
     return ok;
 }
