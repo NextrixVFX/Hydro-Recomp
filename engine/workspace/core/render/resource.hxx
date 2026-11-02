@@ -4,7 +4,7 @@
 // Retail's declaration list head 0x759738 / count 0x75973C is gfx_declarations_t's vector. SUBSTITUTION: std::vector for MSVC's std::list,
 // the same order and the same first match.
 //
-// Not recreated: the asset-file texture create 0x57C740 and its DDS reader 0x606150 (the running game loads textures itself).
+// Not recreated: 0x606550, the byte swap 0x606150 runs when g 0x75906B is set (its writers not read: the case runs with 0).
 // Verified against retail: hydro checks/device.hxx verify_water_material (case water_material runs both through the water shader's ctor).
 
 #include <workspace/core/render/gfx.hxx>
@@ -186,6 +186,75 @@ inline gfx_texture_object_t* gfx_texture_create( gfx_api_t& api, std::int32_t wi
     t->m_levels = levels;
     gfx_texture_sampler( api, *t, o );
     t->m_format = k_gfx_texture_formats[ format ];
+    t->m_texture = texture;
+    t->m_view = view;
+    return t;
+}
+
+// 0x6061E0 0x606350's size of a level, 0x606490's pitch, by the image's code. A code past 14 answers 0 as retail does.
+inline std::uint32_t gfx_image_size( std::uint32_t code, std::int32_t width, std::int32_t height )
+{
+    const std::int32_t w = ( std::max )( width, 1 ), h = ( std::max )( height, 1 );
+    const std::int32_t blocks = ( ( h + 3 ) / 4 ) * ( ( w + 3 ) / 4 );
+    switch ( code )
+    {
+    case 1: case 2: return static_cast< std::uint32_t >( h * w * 4 );
+    case 3: return static_cast< std::uint32_t >( h * w * 3 );
+    case 4: case 11: case 12: case 13: case 14: return static_cast< std::uint32_t >( h * w * 2 );
+    case 5: return static_cast< std::uint32_t >( h * w );
+    case 6: case 7: return static_cast< std::uint32_t >( blocks * 8 );
+    case 8: return static_cast< std::uint32_t >( blocks * 16 );
+    case 9: case 10: return static_cast< std::uint32_t >( ( ( std::max )( h, 8 ) * ( std::max )( w, 8 ) * 4 + 7 ) / 8 );
+    default: return 0u;
+    }
+}
+
+inline std::uint32_t gfx_image_pitch( std::uint32_t code, std::int32_t width )
+{
+    const std::int32_t w = ( std::max )( width, 1 );
+    switch ( code )
+    {
+    case 1: case 2: return static_cast< std::uint32_t >( w * 4 );
+    case 3: return static_cast< std::uint32_t >( w * 3 );
+    case 4: case 11: case 12: case 13: case 14: return static_cast< std::uint32_t >( w * 2 );
+    case 5: return static_cast< std::uint32_t >( w );
+    case 6: case 7: case 9: case 10: return static_cast< std::uint32_t >( ( w + 3 ) / 4 * 8 );
+    case 8: return static_cast< std::uint32_t >( ( w + 3 ) / 4 * 16 );
+    default: return 0u;
+    }
+}
+
+// 0x57C740 on a VuTextureAsset's bytes: 0x5A8A50's five option words, width, height, levels, the DXGI format, then 0x606150's image: code, width, height, levels, a counted block. The
+// texture and its view first, every level through UpdateSubresource, the object and its sampler last.
+inline gfx_texture_object_t* gfx_texture_load( gfx_api_t& api, const std::uint8_t* bytes )
+{
+    std::uint32_t head[ 14 ];
+    std::memcpy( head, bytes, sizeof( head ) );
+    gfx_texture_options_t o;
+    o.m_address_u = head[ 0 ];
+    o.m_address_v = head[ 1 ];
+    o.m_min = static_cast< std::int32_t >( head[ 2 ] );
+    o.m_mag = static_cast< std::int32_t >( head[ 3 ] );
+    o.m_mip = static_cast< std::int32_t >( head[ 4 ] );
+    const gfx_texture_desc_t d{ head[ 5 ], head[ 6 ], head[ 7 ], 1u, head[ 8 ], 1u, 0u, 0u, 8u, 0u, 0u };
+    const gfx_handle_t texture = api.create_texture( d );
+    const gfx_handle_t view = api.create_view( texture );
+    const std::uint32_t code = head[ 9 ];
+    const std::int32_t w = static_cast< std::int32_t >( head[ 10 ] ), h = static_cast< std::int32_t >( head[ 11 ] );
+    const std::uint8_t* data = bytes + sizeof( head );
+    for ( std::uint32_t level = 0; level < head[ 7 ]; ++level )
+    {
+        const std::int32_t lw = w >> level, lh = h >> level;
+        const std::uint32_t size = gfx_image_size( code, lw, lh );
+        api.update_texture( texture, level, data, gfx_image_pitch( code, lw ), size );
+        data += size;
+    }
+    gfx_texture_object_t* t = new gfx_texture_object_t( );
+    t->m_width = static_cast< std::int32_t >( head[ 5 ] );
+    t->m_height = static_cast< std::int32_t >( head[ 6 ] );
+    t->m_levels = head[ 7 ];
+    gfx_texture_sampler( api, *t, o );
+    t->m_format = head[ 8 ];
     t->m_texture = texture;
     t->m_view = view;
     return t;

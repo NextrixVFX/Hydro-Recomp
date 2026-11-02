@@ -1190,6 +1190,55 @@ inline bool verify_gfx_quads( )
     return false;
 }
 
+// Case gfx_texture_load: 0x57C740 over the fourteen image codes and the pack's Water/WakeFroth.
+inline bool verify_gfx_texture_load( )
+{
+    anim_cursor_t g;
+    g.w = g_golden_gtl_words;
+    g.size = g_golden_gtl_size;
+    g.where = "gfx_texture_load";
+    gfx_rig_api_t api;
+    api.m_next = 69;   // the case's objects after the device's start: the first commit's three states, two dynamic buffers
+    c_archive archive;
+    const std::string pack = world_check_pack( );
+    if ( pack.empty( ) || !archive.open( pack.c_str( ) ) )
+    {
+        LOG_ERROR( "gfx_texture_load: Base.apf did not open" );
+        return false;
+    }
+    const unsigned rows = g.take( );
+    for ( unsigned r = 0; r < rows; ++r )
+    {
+        std::vector< std::uint8_t > bytes;
+        if ( g.take( ) )
+            archive.read( "VuTextureAsset/Water/WakeFroth", bytes );
+        else
+            gfx_check_read_stream( g, bytes );
+        api.m_log.clear( );
+        gfx_texture_object_t* t = gfx_texture_load( api, bytes.data( ) );
+        const unsigned logged = g.take( );
+        g.eq( static_cast< std::uint32_t >( api.m_log.size( ) ), logged );
+        for ( unsigned i = 0; i < logged; ++i )
+            g.eq( i < api.m_log.size( ) ? api.m_log[ i ] : 0xDEADBEEFu, g.take( ) );
+        g.eq( static_cast< std::uint32_t >( t->m_width ), g.take( ) );
+        g.eq( static_cast< std::uint32_t >( t->m_height ), g.take( ) );
+        g.eq( t->m_levels, g.take( ) );
+        g.eq( t->m_format, g.take( ) );
+        g.eq( gfx_check_api_t::id( t->m_texture ), g.take( ) );
+        g.eq( gfx_check_api_t::id( t->m_view ), g.take( ) );
+        g.eq( gfx_check_api_t::id( t->m_sampler ), g.take( ) );
+        delete t;
+    }
+    g.eq( static_cast< std::uint32_t >( g.at ), static_cast< std::uint32_t >( g.size ) );
+    if ( !g.failed )
+    {
+        LOG_SUCCESS( "gfx_texture_load matches retail's 0x57C740 on %u textures: %d words exact", rows, g.compared );
+        return true;
+    }
+    LOG_ERROR( "gfx_texture_load FAILED %d of %d words (cursor %zu of %zu)", g.failed, g.compared, g.at, g.size );
+    return false;
+}
+
 // Item 6 of batch 35: render/direct.hxx on a REAL device, no window: the hardware adapter, WARP when there is none. Retail's own Water/Complex/FogReflect from the pack, a flat 33 x 33
 // grid at z = 0 with a camera above it, the real wave texture, a checker for the foam and a gradient for the reflection. Passes when every object was created, the debug layer's state is not
 // "device removed", the surface covers the screen's lower half, and two wave frames differ (the normals reach the pixels).
@@ -1256,24 +1305,17 @@ inline bool verify_gfx_direct( )
     pass.m_device.m_chain_depth = depth;
     pass.m_device.set_target( nullptr );
 
-    // A checker for the foam, a blue gradient for the reflection.
+    // A blue gradient for the reflection; the foam is the pack's Water/WakeFroth, a real BC3 texture on the real device.
     gfx_texture_options_t linear;
     linear.m_min = linear.m_mag = 2;
-    gfx_texture_object_t* foam = gfx_texture_create( api, 16, 16, 4u, linear );
     gfx_texture_object_t* reflection = gfx_texture_create( api, 64, 64, 4u, linear );
-    std::vector< std::uint32_t > pixels( 16 * 16 );
-    for ( int i = 0; i < 16 * 16; ++i )
-        pixels[ i ] = ( ( i ^ ( i >> 4 ) ) & 1 ) ? 0xFFFFFFFFu : 0x00FFFFFFu;
-    gfx_texture_update( api, *foam, 0, pixels.data( ) );
-    pixels.resize( 64 * 64 );
+    std::vector< std::uint32_t > pixels( 64 * 64 );
     for ( int i = 0; i < 64 * 64; ++i )
         pixels[ i ] = 0xFF000000u | ( static_cast< std::uint32_t >( 255 - ( i >> 6 ) * 4 ) << 16 ) | ( static_cast< std::uint32_t >( ( i & 63 ) * 4 ) << 8 ) | 0x20u;
     gfx_texture_update( api, *reflection, 0, pixels.data( ) );
 
     water_pass_source_t source;
     source.m_read = [ & ]( const std::string& entry, std::vector< std::uint8_t >& out ) { return archive.read( entry.c_str( ), out ); };
-    // the pack's Water/WakeFroth exists, the view is this test's checker
-    source.m_texture = [ & ]( const std::string& name ) { return name == "Water/WakeFroth" ? foam->m_view : gfx_handle_t{ 0 }; };
     ok = pass.create( source ) && ok;
     const int shader = pass.add_shader( water_pass_t::default_desc( 1u ) );
     const water_shader_t& s = *pass.m_shaders[ 0 ];

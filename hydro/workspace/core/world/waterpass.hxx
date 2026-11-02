@@ -39,11 +39,10 @@ struct water_pass_view_t
     water_shader_statics_t m_statics;
 };
 
-// The caller's textures: bytes of a pack entry, and a named VuTextureAsset's view (0 when the pack has none).
+// The bytes of a pack entry: shaders and textures are made from them here, as retail does.
 struct water_pass_source_t
 {
     std::function< bool( const std::string& entry, std::vector< std::uint8_t >& out ) > m_read;
-    std::function< gfx_handle_t( const std::string& name ) > m_texture;
 };
 
 struct water_pass_t final : water_shader_assets_t, water_reflection_source_t
@@ -57,12 +56,11 @@ struct water_pass_t final : water_shader_assets_t, water_reflection_source_t
     water_texture_t m_wave;
     gfx_texture_object_t* m_wave_textures[ 2 ] = { };   // 0x607720's +0x44 / +0x48
     water_pass_source_t m_source;
-    std::map< std::string, std::unique_ptr< gfx_texture_t > > m_named;
+    std::map< std::string, gfx_texture_object_t* > m_named;
     std::map< std::string, const gfx_program_t* > m_loaded;
     std::vector< std::unique_ptr< water_shader_t > > m_shaders;    // per surface, in the frame's surface order
     gfx_handle_t m_reflection_sampler = 0;
     gfx_texture_t m_reflection;
-    gfx_handle_t m_named_sampler = 0;
     int m_missing_programs = 0;
 
     // The device's first steps, then 0x607720's textures (format 3, the options on the stack at 0x6079A2: wrap, linear, linear, the mip chain).
@@ -83,9 +81,6 @@ struct water_pass_t final : water_shader_assets_t, water_reflection_source_t
         gfx_texture_object_t sampler;
         gfx_texture_sampler( m_api, sampler, target );
         m_reflection_sampler = sampler.m_sampler;
-        gfx_texture_object_t named;
-        gfx_texture_sampler( m_api, named, wave );
-        m_named_sampler = named.m_sampler;
         return true;
     }
 
@@ -182,8 +177,6 @@ struct water_pass_t final : water_shader_assets_t, water_reflection_source_t
     void draw( const water_grid_frame_t& frame, const water_pass_view_t& v, gfx_handle_t reflection, const std::function< int( int surface ) >& shader_of )
     {
         m_reflection = gfx_texture_t{ 0u, m_reflection_sampler, reflection };
-        for ( const auto& named : m_named )
-            named.second->m_view = m_source.m_texture( named.first );
         const gfx_layer_values_t layer;
         m_device.begin( );
         m_device.depth_enable( layer.m_depth );
@@ -221,7 +214,7 @@ struct water_pass_t final : water_shader_assets_t, water_reflection_source_t
         m_loaded.emplace( name, p );
         return p;
     }
-    // 0x4269D0 asks the pack, not the device: the engine makes a texture's view at its first flush, so the view is read at each draw( ).
+    // 0x4269D0 asks the pack; 0x426A90 makes the asset through 0x57C740.
     bool texture_exists( const std::string& name ) override
     {
         std::vector< std::uint8_t > bytes;
@@ -230,9 +223,13 @@ struct water_pass_t final : water_shader_assets_t, water_reflection_source_t
     const gfx_texture_t* texture( const std::string& name ) override
     {
         auto& slot = m_named[ name ];
-        if ( !slot )
-            slot = std::make_unique< gfx_texture_t >( gfx_texture_t{ 0u, m_named_sampler, 0u } );
-        return slot.get( );
+        if ( slot == nullptr )
+        {
+            std::vector< std::uint8_t > bytes;
+            m_source.m_read( "VuTextureAsset/" + name, bytes );
+            slot = gfx_texture_load( m_api, bytes.data( ) );
+        }
+        return slot;
     }
     bool cube_exists( const std::string& ) override { return false; }                         // a reflecting shader never asks
     const gfx_texture_t* cube( const std::string& ) override { return nullptr; }
