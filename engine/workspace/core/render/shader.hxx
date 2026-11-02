@@ -10,7 +10,6 @@ public:
     void bind_mesh( );
     void bind_textured( );
     void bind_blit( );
-    void bind_fxaa( );
     void constants( const void* data, int bytes );
 
 private:
@@ -27,7 +26,6 @@ private:
     ID3D11InputLayout*  m_textured_layout{};
     ID3D11VertexShader* m_blit_vs{};
     ID3D11PixelShader*  m_blit_ps{};
-    ID3D11PixelShader*  m_fxaa_ps{};
     ID3D11SamplerState* m_sampler{};
     ID3D11SamplerState* m_wrap{};
 #endif
@@ -273,38 +271,6 @@ float4 main_ps(output_t input) : SV_Target
 {
     return scene_tex.Sample(scene_samp, input.uv);
 }
-float luma(float3 color)
-{
-    return dot(color, float3(0.299, 0.587, 0.114));
-}
-float4 fxaa_ps(output_t input) : SV_Target
-{
-    float2 size;
-    scene_tex.GetDimensions(size.x, size.y);
-    float2 texel = 1.0 / size;
-    float3 mid = scene_tex.Sample(scene_samp, input.uv).rgb;
-    float luma_m = luma(mid);
-    float luma_nw = luma(scene_tex.Sample(scene_samp, input.uv + float2(-1, -1) * texel).rgb);
-    float luma_ne = luma(scene_tex.Sample(scene_samp, input.uv + float2(1, -1) * texel).rgb);
-    float luma_sw = luma(scene_tex.Sample(scene_samp, input.uv + float2(-1, 1) * texel).rgb);
-    float luma_se = luma(scene_tex.Sample(scene_samp, input.uv + float2(1, 1) * texel).rgb);
-    float2 dir;
-    dir.x = -((luma_nw + luma_ne) - (luma_sw + luma_se));
-    dir.y = ((luma_nw + luma_sw) - (luma_ne + luma_se));
-    float reduce = max((luma_nw + luma_ne + luma_sw + luma_se) * 0.03125, 0.0078125);
-    float span = 1.0 / (min(abs(dir.x), abs(dir.y)) + reduce);
-    dir = clamp(dir * span, -8.0, 8.0) * texel;
-    float3 along = 0.5 * (
-        scene_tex.Sample(scene_samp, input.uv + dir * (1.0 / 3.0 - 0.5)).rgb +
-        scene_tex.Sample(scene_samp, input.uv + dir * (2.0 / 3.0 - 0.5)).rgb);
-    float3 wide = along * 0.5 + 0.25 * (
-        scene_tex.Sample(scene_samp, input.uv + dir * -0.5).rgb +
-        scene_tex.Sample(scene_samp, input.uv + dir * 0.5).rgb);
-    float luma_wide = luma(wide);
-    float luma_min = min(luma_m, min(min(luma_nw, luma_ne), min(luma_sw, luma_se)));
-    float luma_max = max(luma_m, max(max(luma_nw, luma_ne), max(luma_sw, luma_se)));
-    return float4(luma_wide < luma_min || luma_wide > luma_max ? along : wide, 1);
-}
 )";
 }
 
@@ -323,7 +289,6 @@ void c_shader::release( )
 #if HYDRO_HOST_WINDOWS
     if ( m_wrap ) m_wrap->Release( );
     if ( m_sampler ) m_sampler->Release( );
-    if ( m_fxaa_ps ) m_fxaa_ps->Release( );
     if ( m_blit_ps ) m_blit_ps->Release( );
     if ( m_blit_vs ) m_blit_vs->Release( );
     if ( m_textured_layout ) m_textured_layout->Release( );
@@ -335,7 +300,6 @@ void c_shader::release( )
     if ( m_mesh_vs ) m_mesh_vs->Release( );
     m_wrap = nullptr;
     m_sampler = nullptr;
-    m_fxaa_ps = nullptr;
     m_blit_ps = nullptr;
     m_blit_vs = nullptr;
     m_textured_layout = nullptr;
@@ -420,7 +384,6 @@ bool c_shader::create( )
     ID3DBlob* mesh_ps = nullptr;
     ID3DBlob* blit_vs = nullptr;
     ID3DBlob* blit_ps = nullptr;
-    ID3DBlob* fxaa_ps = nullptr;
     ID3DBlob* textured_vs = nullptr;
     ID3DBlob* textured_ps = nullptr;
     if ( !compile_shader( mesh_hlsl, "main_vs", "vs_4_0", &mesh_vs ) ||
@@ -428,8 +391,7 @@ bool c_shader::create( )
          !compile_shader( textured_hlsl, "main_vs", "vs_4_0", &textured_vs ) ||
          !compile_shader( textured_hlsl, "main_ps", "ps_4_0", &textured_ps ) ||
          !compile_shader( blit_hlsl, "main_vs", "vs_4_0", &blit_vs ) ||
-         !compile_shader( blit_hlsl, "main_ps", "ps_4_0", &blit_ps ) ||
-         !compile_shader( blit_hlsl, "fxaa_ps", "ps_4_0", &fxaa_ps ) )
+         !compile_shader( blit_hlsl, "main_ps", "ps_4_0", &blit_ps ) )
     {
         if ( mesh_vs ) mesh_vs->Release( );
         if ( mesh_ps ) mesh_ps->Release( );
@@ -437,7 +399,6 @@ bool c_shader::create( )
         if ( textured_ps ) textured_ps->Release( );
         if ( blit_vs ) blit_vs->Release( );
         if ( blit_ps ) blit_ps->Release( );
-        if ( fxaa_ps ) fxaa_ps->Release( );
         return false;
     }
 
@@ -446,7 +407,6 @@ bool c_shader::create( )
     device->CreatePixelShader( mesh_ps->GetBufferPointer( ), mesh_ps->GetBufferSize( ), nullptr, &m_mesh_ps );
     device->CreateVertexShader( blit_vs->GetBufferPointer( ), blit_vs->GetBufferSize( ), nullptr, &m_blit_vs );
     device->CreatePixelShader( blit_ps->GetBufferPointer( ), blit_ps->GetBufferSize( ), nullptr, &m_blit_ps );
-    device->CreatePixelShader( fxaa_ps->GetBufferPointer( ), fxaa_ps->GetBufferSize( ), nullptr, &m_fxaa_ps );
     device->CreateVertexShader( textured_vs->GetBufferPointer( ), textured_vs->GetBufferSize( ), nullptr, &m_textured_vs );
     device->CreatePixelShader( textured_ps->GetBufferPointer( ), textured_ps->GetBufferSize( ), nullptr, &m_textured_ps );
 
@@ -484,7 +444,6 @@ bool c_shader::create( )
     textured_ps->Release( );
     blit_vs->Release( );
     blit_ps->Release( );
-    fxaa_ps->Release( );
 
     // Initial size only; constants() grows this to whatever the largest
     // cbuffer upload actually needs, so no size is hardcoded twice.
@@ -508,7 +467,7 @@ bool c_shader::create( )
     device->CreateSamplerState( &sampler, &m_wrap );
 
     LOG_SUCCESS( "shaders mesh, textured, water, blit" );
-    return m_mesh_vs && m_mesh_ps && m_textured_vs && m_textured_ps && m_textured_layout && m_blit_vs && m_blit_ps && m_fxaa_ps && m_layout && m_constants && m_sampler && m_wrap;
+    return m_mesh_vs && m_mesh_ps && m_textured_vs && m_textured_ps && m_textured_layout && m_blit_vs && m_blit_ps && m_layout && m_constants && m_sampler && m_wrap;
 #else
     return false;
 #endif
@@ -550,14 +509,6 @@ void c_shader::bind_blit( )
     context->VSSetShader( m_blit_vs, nullptr, 0 );
     context->PSSetShader( m_blit_ps, nullptr, 0 );
     context->PSSetSamplers( 0, 1, &m_sampler );
-#endif
-}
-
-void c_shader::bind_fxaa( )
-{
-#if HYDRO_HOST_WINDOWS
-    bind_blit( );
-    g_device( ).context( )->PSSetShader( m_fxaa_ps, nullptr, 0 );
 #endif
 }
 

@@ -138,7 +138,7 @@ void c_composer::blit( )
     ID3D11ShaderResourceView* unbound = nullptr;
     g_swap( ).bind( g_device( ) );
     g_device( ).context( )->RSSetState( nullptr );
-    g_shader( ).bind_fxaa( );
+    g_shader( ).bind_blit( );   // retail's copy 0x5BC6F0: VuPostProcess 0x57BF10 holds Copy, GaussBlur5x5, RadialBlur, Effect; no FXAA in the image
     g_target( ).bind_color( );
     g_device( ).context( )->Draw( 3, 0 );
     g_device( ).context( )->PSSetShaderResources( 0, 1, &unbound );
