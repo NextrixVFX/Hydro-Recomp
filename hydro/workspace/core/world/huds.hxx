@@ -253,15 +253,11 @@ inline void c_world::race_broadcast( const char* name, const ui_params_t* params
 
 // The bus (world/bus.hxx: the session's VuEventManager - every subscriber the race's code registered, in the bus's order),
 // then the live HUDs. A HUD's own broadcast (m_broadcast_out, name unknown: null) comes here by its hash too, so the race's
-// subscribers hear the HUDs' events (OnUserNext ...). Subscribers outside the race's code known by reading: the pause
-// menu's "OnSetAllowPause" 0x4BB900 (its ctor 0x4BAE80: +0x31 = the params' first record when it is a bool, else 0) - the
-// pause menu is not built here (logged).
+// subscribers hear the HUDs' events (OnUserNext ...). The pause menu's gate is on the bus (world/pause.hxx).
 inline void c_world::race_broadcast_hash( std::uint32_t hash, const char* name, const ui_params_t& p, int origin )
 {
     const int ran = race_bus_broadcast( m_race.bus, hash, p );
-    if ( hash == fsm_hash( "OnSetAllowPause" ) )
-        race_unwired( m_race, "OnSetAllowPause's subscriber 0x4BB900 (the pause menu, ctor 0x4BAE80 - not built) - not run" );
-    else if ( ran == 0 && name )
+    if ( ran == 0 && name )
         LOG_VERBOSE( "race: broadcast %s - no subscriber in the race's code (the HUDs' next)", name );
     if ( name && std::strcmp( name, "OnStartLightsOut" ) == 0 )
         LOG_INFO( "race: OnStartLightsOut broadcast (sync %d) - %d subscribers ran", m_race.dynamics ? m_race.dynamics->syncs : -1, ran );

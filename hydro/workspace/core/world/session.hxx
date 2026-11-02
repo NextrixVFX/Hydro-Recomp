@@ -1,6 +1,8 @@
 #pragma once
 
 #include <workspace/core/world/ghost.hxx>
+#include <workspace/core/world/tiretrack.hxx>
+#include <workspace/core/world/pause.hxx>
 #include <workspace/core/boat/construct.hxx>
 #include <workspace/core/boat/fleet.hxx>
 #include <workspace/core/boat/load.hxx>
@@ -194,6 +196,8 @@ struct race_session_t
     std::vector< std::unique_ptr< race_session_boat_t > > boats;
     // pfx_frame_t's boats / fluids (the words the boat processes hold -> their readers): one entry per boat, kept current by Build step 5.
     ghost_manager_t ghost;              // VuGhostManager g 0x758FC8 (world/ghost.hxx)
+    pause_menu_t pause;                 // the pause menu VuActionGameMode +0x60: its gate only (world/pause.hxx)
+    tire_track_manager_t tire_tracks;   // VuTireTrackManager g 0x7590F4 (world/tiretrack.hxx; its lists stay empty in retail)
     std::string ghost_error;            // VuGhostGame +0x740 (a string key, ShowError's message)
     std::vector< pfx_frame_boat_t > pfx_boats;
     std::vector< pfx_frame_fluids_t > pfx_fluids;
@@ -2458,6 +2462,9 @@ inline void race_session_slalom_start( race_session_t& s, const race_session_dbs
 inline void race_session_game_events( race_session_t& s, const std::string& mode )
 {
     s.bus.ticks = &s.ticks;
+    // The pause menu's ctor 0x4BAE80 (the action mode's ctor, before any game): its two gate events. Its others: not built.
+    race_bus_subscribe( s.bus, "OnPauseActionGame", 0x4BB660u, "VuPauseMenu", [ &s ]( const ui_params_t& ) { pause_on_pause( s.pause ); } );
+    race_bus_subscribe( s.bus, "OnSetAllowPause", 0x4BB900u, "VuPauseMenu", [ &s ]( const ui_params_t& p ) { pause_on_set_allow( s.pause, p ); } );
     race_bus_subscribe( s.bus, "OnUserNext", 0x483170u, "VuGame", [ &s ]( const ui_params_t& ) {
         s.rules.event.pulse_condition( "OnUserNext" );
     } );
@@ -2706,6 +2713,9 @@ inline bool race_session_start( race_session_t& s, const std::string& mode, cons
             tick_register( x.ticks, { &x.collision, race_session_collision, &x }, phase );
         };
         collision_manager_init( s.collision_tables, s.surfaces, ch );
+        // VuTireTrackManager's init 0x5C40C0 (the engine's, 0x566CD4): the pools and skins; its "Final" tick on the session's ticks.
+        tire_track_init( s.tire_tracks, s.surfaces, s.collision_db );
+        tick_register( s.ticks, { &s.tire_tracks, []( void* u, float dt ) { tire_track_tick( static_cast< race_session_t* >( u )->tire_tracks, dt ); }, &s }, "Final" );
         LOG_INFO( "race: VuCollisionManager init 0x4AD110 - %d surface types, the four SurfaceTableDB tables loaded, its Decision tick registered",
                   static_cast< int >( s.collision_tables.types ) );
     }
@@ -2887,7 +2897,7 @@ inline bool race_session_start( race_session_t& s, const std::string& mode, cons
             race_unwired( s, "VuGhostGame slot 7 0x485380: the +0x75C ghost list is empty (LoadGhosts 0x485B50 / PreGame 0x486060 not recreated) - "
                              "the per-ghost +0x4DC copy ran over none (UNKNOWN)" );
         };
-        LOG_WARNING( "race: VuGhostGame - its states' handlers are not recreated (UNKNOWN); only VuGame's machines and slots 5 / 7 / 13 run" );
+        LOG_WARNING( "race: VuGhostGame - GetLeaderboard's handlers run; LoadGhosts 0x485B50 and every state behind it are not recreated (UNKNOWN)" );
     }
     else if ( s.start.timetrial )
     {
