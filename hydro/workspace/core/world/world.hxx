@@ -580,6 +580,16 @@ private:
     value_t m_hidden_db;                                // VuHiddenPackageManagerImpl +4's document
     // The game modes (world/mode.hxx, menu.hxx).
     friend class c_menu_mode;
+    friend class c_title_mode;
+    bool m_title = false;
+    void menu_bind( );
+    const value_t& title_db( );
+    void title_enter( );
+    void title_exit( );
+    void title_sound( );
+    void title_progress( int project, float value );
+    bool title_launch( ) const;
+    front_end_engine_t& title_engine( ) { return m_menu_engine; }
     friend class c_action_slot;
     void modes_bind( );
     void action_enter( );
@@ -955,7 +965,7 @@ private:
 public:
     bool loaded( ) const
     {
-        return m_loaded;
+        return m_loaded || m_title;
     }
 
     // VuActionGameMode's load 0x4BA060, in its order: the project by 0x4D3480 (race_project_name: GameData's Level,
@@ -1038,8 +1048,14 @@ public:
         }
         if ( !m_modes.m_factory )
             modes_bind( );
-        // Ours (a test driver): `--menu` starts at the front end. A normal launch's TitleSequence (0x4CBD48's first mode, ctor 0x4C6AB0) is NOT
-        // recreated: without the option the scaffold's race still loads.
+        // 0x4CBD48: a normal launch's first mode (world/title.hxx). The command line's race stays for the tests.
+        if ( title_launch( ) )
+        {
+            m_modes.m_next = "TitleSequence";
+            m_modes.change( );
+            return;
+        }
+        // Ours (a test driver): `--menu` starts at the front end.
         if ( c_engine::option( "menu" ) != nullptr && !m_has_chosen )
         {
             if ( !m_opened )
@@ -1431,6 +1447,11 @@ public:
     }
     void scene_frame( float dt )
     {
+        if ( m_title )   // the title sequence runs no scene: the mode manager's tick alone
+        {
+            m_modes.tick( dt );
+            return;
+        }
         if ( !m_loaded )
             return;
 

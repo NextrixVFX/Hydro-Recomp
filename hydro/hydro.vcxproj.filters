@@ -522,6 +522,9 @@
     <ClInclude Include="workspace\core\world\pickups.hxx">
       <Filter>workspace\core\world</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\core\world\title.hxx">
+      <Filter>workspace\core\world</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\core\world\ghostplay.hxx">
       <Filter>workspace\core\world</Filter>
     </ClInclude>

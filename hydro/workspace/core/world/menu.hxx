@@ -42,6 +42,8 @@ private:
     c_world& m_world;
 };
 
+#include <workspace/core/world/title.hxx>
+
 inline void c_world::modes_bind( )
 {
     m_modes.m_factory = [ this ]( const std::string& name ) -> std::unique_ptr< game_mode_t > {
@@ -49,6 +51,8 @@ inline void c_world::modes_bind( )
             return std::make_unique< c_menu_mode >( *this );
         if ( name == "Action" )
             return std::make_unique< c_action_slot >( *this );
+        if ( name == "TitleSequence" )
+            return std::make_unique< c_title_mode >( *this );
         LOG_WARNING( "game mode %s: its ctor in 0x4CC460 is NOT recreated - no mode (UNKNOWN)", name.c_str( ) );
         return nullptr;
     };
@@ -95,6 +99,29 @@ inline ui_bind_hooks_t c_world::menu_hooks( )
 inline void c_world::menu_enter( )
 {
     load_background( );   // the 3D behind the menus: VuBackground, as --front-end has it
+    menu_bind( );
+    {
+        std::vector< std::uint8_t > bytes;
+        if ( !m_menu_input && m_archive.read( "VuDBAsset/InputDB", bytes ) )
+        {
+            m_menu_input_db = c_reader( bytes ).parse( );
+            m_menu_input = std::make_shared< platform_input_t >( );
+            platform_input_init( *m_menu_input, m_menu_input_db );
+            saves_input( *m_menu_input );
+        }
+    }
+    m_menu_engine.m_platform = [ this ]( const char* what, int ) {
+        if ( std::strcmp( what, "cloud" ) == 0 )   // 0x4BF96D 0x5547F0, 0x4BF978 0x4ABD60: the pair
+            saves_commit( );
+    };
+    m_menu = std::make_unique< c_front_end >( m_menu_engine, m_constant_db );
+    m_menu->enter( m_menu_util );
+    LOG_SUCCESS( "front end: VuFrontEndGameMode, the first screen %s", m_menu->m_current.c_str( ) );
+}
+
+// The engine's project hooks, the front end's and the title sequence's.
+inline void c_world::menu_bind( )
+{
     const race_session_dbs_t dbs = race_dbs( );
     m_menu_engine = front_end_engine_t{ };
     m_menu_engine.m_fade = action_fade_t::created( );
@@ -140,23 +167,6 @@ inline void c_world::menu_enter( )
         }
 #endif
     };
-    {
-        std::vector< std::uint8_t > bytes;
-        if ( !m_menu_input && m_archive.read( "VuDBAsset/InputDB", bytes ) )
-        {
-            m_menu_input_db = c_reader( bytes ).parse( );
-            m_menu_input = std::make_shared< platform_input_t >( );
-            platform_input_init( *m_menu_input, m_menu_input_db );
-            saves_input( *m_menu_input );
-        }
-    }
-    m_menu_engine.m_platform = [ this ]( const char* what, int ) {
-        if ( std::strcmp( what, "cloud" ) == 0 )   // 0x4BF96D 0x5547F0, 0x4BF978 0x4ABD60: the pair
-            saves_commit( );
-    };
-    m_menu = std::make_unique< c_front_end >( m_menu_engine, m_constant_db );
-    m_menu->enter( m_menu_util );
-    LOG_SUCCESS( "front end: VuFrontEndGameMode, the first screen %s", m_menu->m_current.c_str( ) );
 }
 
 // Slot 3: 0x4BF9B0, its data step over gameutil +0x50; the GameData the Action mode's load takes.
