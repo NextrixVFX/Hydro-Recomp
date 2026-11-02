@@ -153,10 +153,12 @@
     <ClInclude Include="workspace\core\boat\tick.hxx" />
     <ClInclude Include="workspace\core\boat\track.hxx" />
     <ClInclude Include="workspace\core\boat\update.hxx" />
+    <ClInclude Include="workspace\core\game\docked.hxx" />
     <ClInclude Include="workspace\core\game\game.hxx" />
     <ClInclude Include="workspace\core\game\input.hxx" />
     <ClInclude Include="workspace\core\game\packages.hxx" />
     <ClInclude Include="workspace\core\game\plugs.hxx" />
+    <ClInclude Include="workspace\core\game\scripted.hxx" />
     <ClInclude Include="workspace\core\game\settings.hxx" />
     <ClInclude Include="workspace\core\game\types.hxx" />
     <ClInclude Include="workspace\core\game\unlock.hxx" />

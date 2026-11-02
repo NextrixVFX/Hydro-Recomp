@@ -183,6 +183,9 @@
     <ClInclude Include="workspace\core\boat\update.hxx">
       <Filter>workspace\core\boat</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\core\game\docked.hxx">
+      <Filter>workspace\core\game</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\core\game\game.hxx">
       <Filter>workspace\core\game</Filter>
     </ClInclude>
@@ -193,6 +196,9 @@
       <Filter>workspace\core\game</Filter>
     </ClInclude>
     <ClInclude Include="workspace\core\game\plugs.hxx">
+      <Filter>workspace\core\game</Filter>
+    </ClInclude>
+    <ClInclude Include="workspace\core\game\scripted.hxx">
       <Filter>workspace\core\game</Filter>
     </ClInclude>
     <ClInclude Include="workspace\core\game\settings.hxx">
