@@ -5,6 +5,7 @@
 #include <workspace/core/ui/champ.hxx>
 #include <workspace/core/ui/common.hxx>
 #include <workspace/core/ui/controls.hxx>
+#include <workspace/core/ui/fade.hxx>
 #include <workspace/core/ui/glyphs.hxx>
 #include <workspace/core/ui/message.hxx>
 #include <workspace/core/ui/pages.hxx>
@@ -2666,7 +2667,9 @@ inline bool verify_ui_slider_frame( )
                     const std::size_t to = index + 1 < all.size( ) ? all[ index + 1 ].m_words[ 3 ] : static_cast< std::size_t >( buffer.m_used );
                     return std::string( buffer.m_memory.begin( ) + static_cast< std::ptrdiff_t >( from ), buffer.m_memory.begin( ) + static_cast< std::ptrdiff_t >( to ) );
                 };
-                if ( std::memcmp( x.m_words + 4, y.m_words + 4, 16 ) != 0 || payload( sort, a, static_cast< std::size_t >( d.m_first + c ) ) != payload( direct, b, static_cast< std::size_t >( at + c ) ) )
+                const std::string left = payload( sort, a, static_cast< std::size_t >( d.m_first + c ) ), right = payload( direct, b, static_cast< std::size_t >( at + c ) );
+                const std::size_t common = left.size( ) < right.size( ) ? left.size( ) : right.size( );   // a later leaf's 16-byte alignment can pad the framed record
+                if ( std::memcmp( x.m_words + 4, y.m_words + 4, 16 ) != 0 || common == 0 || left.compare( 0, common, right, 0, common ) != 0 )
                     ++failed;
             }
             at += size;
@@ -2678,6 +2681,66 @@ inline bool verify_ui_slider_frame( )
     else
         LOG_ERROR( "slider frame: %d differ (%d leaves, %d calls, %d commands)", failed, leaves, calls, commands );
     return failed == 0;
+}
+
+// Batch 32: the actions a menu reaches on its way to a race against retail's (case menu_actions): VuRetVal, the broadcast, the game-data root
+// after: VuStartActionGameUIAction 0x470A80, VuClearGameResultsUIAction 0x4721A0, VuSetMenuPresenceUIAction 0x4050B0 through c_ui_action,
+// VuSetBoatConfigPlayerEntity's 0x44EF10 / 0x44EEA0 through ui_set_single_player / ui_boat_player_index (run_input's arms).
+inline bool verify_ui_menu_actions( )
+{
+    int failed = 0, broadcasts = 0;
+    for ( std::size_t k = 0; k < g_golden_mac_rows_count; ++k )
+    {
+        const golden_mac_row_t& g = g_golden_mac_rows[ k ];
+        const std::vector< std::uint8_t > blob = ui_unhex( g.m_doc );
+        value_t root = c_reader( blob ).parse( );
+        std::string before, after;
+        vujb_dump( root, before );
+        ui_params_t params;
+        const std::vector< std::uint8_t > records = ui_unhex( g.m_records );
+        if ( !records.empty( ) )
+            std::memcpy( params.m_bytes, records.data( ), records.size( ) );
+        params.m_size = static_cast< int >( records.size( ) );
+        std::uint32_t ret = 0;
+        int logs = 0;
+        std::uint32_t hash = 0;
+        std::string sent;
+        ui_action_kind_t kind;
+        if ( ui_action_kind_of( g.m_class, kind ) )
+        {
+            c_ui_action action( kind, g.m_text );
+            action.m_root = &root;
+            action.m_broadcast = [ & ]( std::uint32_t h, const ui_params_t& p ) { ++logs; hash = h; sent = ui_hex( p ); };
+            ret = action.trigger( params );
+        }
+        else if ( std::strcmp( g.m_plug, "SetSinglePlayer" ) == 0 )
+            ret = ui_set_single_player( root );
+        else
+            ui_boat_player_index( root, params );
+        vujb_dump( root, after );
+        broadcasts += logs;
+        const bool same = before == g.m_before && after == g.m_after && ret == g.m_ret && logs == g.m_logs && ( !logs || ( hash == g.m_hash && sent == g.m_params ) );
+        if ( !same && ++failed <= 6 )
+            LOG_ERROR( "menu action %s . %s row %d differs: after '%s', retail '%s'", g.m_class, g.m_plug, static_cast< int >( k ), after.c_str( ), g.m_after );
+    }
+    if ( failed == 0 )
+        LOG_SUCCESS( "the menu's actions match retail's (%d runs, %d broadcasts): OnStartActionGame 0x470A80, GameResults clear 0x4721A0, presence 0x4050B0, 0x44EF10, 0x44EEA0: VuRetVal, broadcast, root",
+                     static_cast< int >( g_golden_mac_rows_count ), broadcasts );
+    else
+        LOG_ERROR( "the menu's actions FAILED %d of %d", failed, static_cast< int >( g_golden_mac_rows_count ) );
+    return failed == 0;
+}
+
+// A record's bytes (the words 4 .. 7, then the payload up to the next command's offset - the sorts' earlier offsets differ).
+inline std::string ui_record_bytes( const ui_gfx_sort_t& q, std::size_t index )
+{
+    const auto& all = q.m_commands[ q.m_index ];
+    const auto& buffer = q.m_buffers[ q.m_index ];
+    const std::size_t from = all[ index ].m_words[ 3 ];
+    const std::size_t to = index + 1 < all.size( ) ? all[ index + 1 ].m_words[ 3 ] : static_cast< std::size_t >( buffer.m_used );
+    std::string out( reinterpret_cast< const char* >( all[ index ].m_words + 4 ), 16 );
+    out.append( buffer.m_memory.begin( ) + static_cast< std::ptrdiff_t >( from ), buffer.m_memory.begin( ) + static_cast< std::ptrdiff_t >( to ) );
+    return out;
 }
 
 // Batch 29, ROUTING only (each draw / callback is compared with retail by its own check): ui_screen_inputs over a bound Screens/RaceResults
@@ -2747,7 +2810,7 @@ inline bool verify_ui_screen_inputs( )
                 for ( int c = 0; c < d.m_commands && c < static_cast< int >( b.size( ) ); ++c )
                 {
                     ++commands;
-                    if ( std::memcmp( a[ static_cast< std::size_t >( d.m_first + c ) ].m_words + 4, b[ static_cast< std::size_t >( c ) ].m_words + 4, 16 ) != 0 )
+                    if ( ui_record_bytes( sort, static_cast< std::size_t >( d.m_first + c ) ) != ui_record_bytes( direct, static_cast< std::size_t >( c ) ) )
                         ++failed;
                 }
             }
@@ -2829,6 +2892,225 @@ inline bool verify_ui_screen_inputs( )
     return failed == 0;
 }
 
+// Batch 32, ROUTING only (0x4578D0 / 0x448F50 / 0x44FB60 are checked against retail by their own cases): ui_platform_of's keys reach the right
+// profile answer; ui_screen_inputs over bound Screens/GameConfigRace and BoatConfig, built by config_setup + project_initialize as the menu
+// does, draws each selector row: its label and shown choice go through VuStringDB, its seven textures by their property names, the boat
+// stat's two by theirs, the two fonts by HeadingFont / ValueFont.
+inline bool verify_ui_selector_frame( )
+{
+    int failed = 0, rows = 0, stats = 0, keys = 0;
+    {
+        std::vector< std::string > calls;
+        const auto note = [ &calls ]( const std::string& what ) { calls.push_back( what ); };
+        ui_profile_t p;
+        p.unlock = [ note ]( int slot, const std::string& a, const std::string& b, const std::string& c ) { note( "unlock " + std::to_string( slot ) + " " + a + " " + b + " " + c ); return true; };
+        p.license = [ note ] { note( "license" ); return true; };
+        p.store_beta = [ note ] { note( "beta" ); return false; };
+        p.progress = [ note ]( const std::string& v ) { note( "progress " + v ); return true; };
+        p.package = [ note ]( const std::string& a ) { note( "package " + a ); return false; };
+        p.champ_done = [ note ]( const std::string& a ) { note( "champ " + a ); return true; };
+        p.champ_rank = [ ]( const std::string& ) { return 3; };
+        p.race_done = [ note ]( const std::string& a, const std::string& b, const std::string& c ) { note( "race " + a + " " + b + " " + c ); return false; };
+        p.race_rank = [ ]( const std::string&, const std::string&, const std::string& ) { return 5; };
+        p.ghost_done = [ note ]( const std::string& a ) { note( "ghost " + a ); return true; };
+        const auto platform = ui_platform_of( p );
+        struct row_t { const char* key; const char* call; bool first; int second; };
+        static const row_t k_rows[] = { { "92|n|v", "unlock 92 n v ", true, 0 }, { "100|m|t|c", "unlock 100 m t c", true, 0 }, { "license", "license", true, 0 }, { "4D3170", "beta", false, 0 },
+                                        { "132|v", "progress v", true, 0 }, { "144|a", "package a", false, 0 }, { "88|c", "champ c", true, 3 }, { "48|m|t|c", "race m t c", false, 5 }, { "124|t", "ghost t", true, 0 } };
+        for ( const row_t& r : k_rows )
+        {
+            calls.clear( );
+            const std::pair< bool, int > got = platform( r.key );
+            ++keys;
+            if ( calls.size( ) != 1u || calls[ 0 ] != r.call || got.first != r.first || got.second != r.second )
+            {
+                LOG_ERROR( "ui_platform_of( %s ): '%s' %d %d", r.key, calls.empty( ) ? "" : calls[ 0 ].c_str( ), static_cast< int >( got.first ), got.second );
+                ++failed;
+            }
+        }
+    }
+    const ui_loaded_t& loaded = ui_loaded( );
+    const value_t option_db = ui_cx_document( 4 ), track_db = ui_cx_document( 2 ), boat_db = ui_cx_document( 0 ), skin_db = ui_cx_document( 1 ), champ_db = ui_cx_document( 3 );
+    for ( const char* asset : { "Screens/GameConfigRace", "Screens/BoatConfig" } )
+    {
+        entity_t* root = nullptr;
+        for ( std::size_t p = 0; p < g_golden_ui_projects_count; ++p )
+            if ( std::strcmp( g_golden_ui_projects[ p ].m_asset, asset ) == 0 && !loaded.trees[ p ].empty( ) )
+                root = const_cast< entity_t* >( loaded.trees[ p ][ 0 ].second );
+        if ( !root )
+        {
+            LOG_ERROR( "selector frame: %s not loaded", asset );
+            ++failed;
+            continue;
+        }
+        value_t data;
+        ui_bind_hooks_t hooks;
+        hooks.m_root = &data;
+        hooks.m_option_db = &option_db;
+        hooks.m_track_db = &track_db;
+        hooks.m_boat_db = &boat_db;
+        hooks.m_skin_db = &skin_db;
+        hooks.m_champ_db = &champ_db;
+        hooks.m_font_db = &ui_font_db( 0 );
+        hooks.m_platform = ui_platform_of( ui_profile_all_unlocked( ) );
+        c_ui_binding binding( *root, hooks );
+        binding.config_setup( );
+        binding.project_initialize( );
+        std::vector< std::string > strings, textures, fonts;
+        const ui_texture_t texture{ 0x1111u, 64, 32 };
+        ui_screen_env_t env;
+        env.m_fontdb = &ui_font_db( 0 );
+        env.m_font_asset = [ &fonts ]( const std::string& a ) { fonts.push_back( a ); return 0x0F0E0D0Cu; };
+        env.m_string7 = [ &strings ]( const std::string& id ) { strings.push_back( id ); return id + "~"; };
+        env.m_string6 = env.m_string7;
+        env.m_asset_texture = [ &textures, &texture ]( const std::string& a ) -> const ui_texture_t* { textures.push_back( a ); return &texture; };
+        const ui_frame_inputs_t in = ui_screen_inputs( binding, env );
+        ui_gfx_sort_t sort;
+        ui_lv_sort( sort );
+        ui_impl_t impl;
+        const ui_frame_t frame = ui_screen_frame( *root, impl, sort, 1.0f, 4, &in );
+        const auto has = [ ]( const std::vector< std::string >& list, const std::string& what ) { return std::find( list.begin( ), list.end( ), what ) != list.end( ); };
+        const auto text_of = [ ]( const entity_t& e, const char* name ) { const ui_slot_t* v = ui_property_value( e, name ); return v ? v->m_text : std::string( ); };
+        for ( const ui_frame_draw_t& d : frame.m_draws )
+        {
+            const entity_t& e = *d.m_entity;
+            if ( d.m_kind == ui_frame_kind_t::stat )
+            {
+                ++stats;
+                if ( !d.m_emitted || !binding.stat( e ) || !has( textures, text_of( e, "Tick Off Texture" ) ) || !has( textures, text_of( e, "Tick On Texture" ) ) )
+                    ++failed;
+            }
+            if ( d.m_kind != ui_frame_kind_t::config )
+                continue;
+            const ui_config_entity_t* config = binding.config( e );
+            if ( !config || !d.m_emitted || d.m_commands <= 0 || config->m_options.empty( ) )
+            {
+                LOG_ERROR( "selector frame: %s: bound %d, emitted %d, %d commands", asset, config ? 1 : 0, static_cast< int >( d.m_emitted ), d.m_commands );
+                ++failed;
+                continue;
+            }
+            std::string heading, value;
+            std::uint8_t params[ 60 ];
+            ui_font_params( ui_font_db( 0 ), text_of( e, "HeadingFont" ), params, heading );
+            ui_font_params( ui_font_db( 0 ), text_of( e, "ValueFont" ), params, value );
+            if ( !has( fonts, heading ) || !has( fonts, value ) || !has( textures, text_of( e, "ValueTexture" ) ) )
+                ++failed;
+            for ( const value_t* option : config->m_options )
+            {
+                const ui_config_combo_t& c = config->m_combos[ static_cast< std::size_t >( ui_json_as_int( member( *option, "ComboBoxID" ) ) ) ];
+                const int shown = ui_fistp32( c.m_shown );
+                ++rows;
+                if ( !has( strings, c.m_string_id ) || ( !c.m_choice_ids.empty( ) && !has( strings, c.m_choice_ids[ static_cast< std::size_t >( shown ) ] ) ) )
+                    ++failed;
+                if ( shown > 0 && !has( textures, text_of( e, "LeftArrowTexture" ) ) && !has( textures, text_of( e, "SelectedLeftArrowTexture" ) ) )
+                    ++failed;
+                if ( shown < static_cast< int >( c.m_choice_ids.size( ) ) - 1 && !has( textures, text_of( e, "RightArrowTexture" ) ) && !has( textures, text_of( e, "SelectedRightArrowTexture" ) ) )
+                    ++failed;
+            }
+        }
+        binding.project_release( );
+    }
+    if ( rows == 0 || stats == 0 )
+        ++failed;
+    if ( failed == 0 )
+        LOG_SUCCESS( "ui_screen_inputs draws the selectors (ROUTING): %d rows on GameConfigRace + BoatConfig, %d boat stats, %d platform keys", rows, stats, keys );
+    else
+        LOG_ERROR( "the selector frame FAILED %d checks (%d rows, %d stats)", failed, rows, stats );
+    return failed == 0;
+}
+
+// Batch 32: VuScreenFade* against retail (case screen_fade): the weight bits of slot 12 0x43EB50 / 0x43F060, then the tick 0x43E710's calls of
+// 0x507830: colour, rect, the key word left at each call, the depth.
+inline bool verify_ui_screen_fade( )
+{
+    int failed = 0, drawn = 0, ones = 0, zeros = 0, ramps = 0;
+    ui_gfx_sort_t sort;
+    ui_lv_sort( sort );
+    const auto bits = [ ]( float v ) { std::uint32_t u; std::memcpy( &u, &v, 4 ); return u; };
+    const auto real = [ ]( unsigned u ) { float v; std::memcpy( &v, &u, 4 ); return v; };
+    for ( std::size_t k = 0; k < g_golden_sfd_rows_count; ++k )
+    {
+        const golden_sfd_row_t& g = g_golden_sfd_rows[ k ];
+        ui_screen_fade_t f;
+        f.m_box = g.m_box != 0;
+        std::memcpy( f.m_colour, &g.m_colour, 4 );
+        for ( int a = 0; a < 3; ++a )
+        {
+            f.m_inner[ a ] = real( g.m_inner[ a ] );
+            f.m_position[ a ] = real( g.m_pos[ a ] );
+            f.m_scale[ a ] = real( g.m_scale[ a ] );
+            for ( int b = 0; b < 3; ++b )
+                f.m_axis[ a ][ b ] = real( g.m_axis[ a * 3 + b ] );
+        }
+        const float eye[ 3 ] = { real( g.m_eye[ 0 ] ), real( g.m_eye[ 1 ] ), real( g.m_eye[ 2 ] ) };
+        const float weight = f.m_box ? ui_fade_box( f, eye ) : ui_fade_ellipsoid( f, eye );
+        ones += weight == 1.0f ? 1 : 0;
+        zeros += weight == 0.0f ? 1 : 0;
+        ramps += weight != 1.0f && weight != 0.0f ? 1 : 0;
+        bool same = bits( weight ) == g.m_weight;
+        std::vector< ui_fade_view_t > views;
+        for ( int v = 0; v < g.m_views; ++v )
+        {
+            ui_fade_view_t view;
+            view.m_rect[ 0 ] = 0.0f;
+            view.m_rect[ 1 ] = 0.25f * static_cast< float >( v );
+            view.m_rect[ 2 ] = 1.0f;
+            view.m_rect[ 3 ] = 0.5f;
+            for ( int a = 0; a < 3; ++a )
+                view.m_eye[ a ] = v == 0 ? eye[ a ] : eye[ a ] + static_cast< float >( v );
+            views.push_back( view );
+        }
+        // Each call's key: the prefix of the viewports up to it.
+        int at = 0;
+        std::vector< ui_fade_view_t > prefix;
+        ui_font_draw_env_t env;
+        std::uint32_t key = g.m_key0;
+        for ( const ui_fade_view_t& view : views )
+        {
+            prefix.assign( 1u, view );
+            prefix[ 0 ] = view;
+            sort.m_key_hi = key;
+            sort.m_commands[ sort.m_index ].clear( );
+            sort.m_buffers[ sort.m_index ].m_used = 0;
+            // the viewport index in the key: the k-th draw of the whole list
+            std::vector< ui_fade_view_t > upto( views.begin( ), views.begin( ) + ( &view - views.data( ) ) + 1 );
+            std::vector< ui_fade_view_t > mute = upto;
+            for ( std::size_t m = 0; m + 1 < mute.size( ); ++m )
+                mute[ m ].m_eye[ 0 ] = mute[ m ].m_eye[ 1 ] = mute[ m ].m_eye[ 2 ] = 1e30f;   // outside: no draw before the last
+            ui_fade_draw( sort, env, f, mute );
+            const auto& commands = sort.m_commands[ sort.m_index ];
+            if ( commands.empty( ) )
+                continue;
+            key = sort.m_key_hi;
+            ++drawn;
+            if ( at >= g.m_calls || commands.size( ) != 1u )
+            {
+                same = false;
+                break;
+            }
+            const golden_sfd_call_t& c = g_golden_sfd_calls[ g.m_first + at++ ];
+            const std::uint8_t* record = sort.m_buffers[ sort.m_index ].m_memory.data( ) + commands[ 0 ].m_words[ 3 ];
+            std::uint32_t colour, rect[ 4 ];
+            std::memcpy( &colour, record + 0x40, 4 );
+            std::memcpy( rect, record + 0x44, 16 );
+            if ( colour != c.m_colour || std::memcmp( rect, c.m_rect, 16 ) != 0 || key != c.m_key || c.m_depth != 0x3F800000u )
+                same = false;
+        }
+        if ( at != g.m_calls )
+            same = false;
+        if ( !same && ++failed <= 6 )
+            LOG_ERROR( "screen fade row %d (box %d): weight 0x%08X, retail 0x%08X; %d calls of %d", static_cast< int >( k ), g.m_box, bits( weight ), g.m_weight, at, g.m_calls );
+    }
+    if ( ones == 0 || zeros == 0 || ramps == 0 || drawn == 0 )
+        ++failed;
+    if ( failed == 0 )
+        LOG_SUCCESS( "VuScreenFade matches retail: %d volumes (slot 12 0x43EB50 / 0x43F060: %d full, %d out, %d on the ramp), the tick 0x43E710's %d draws: colour, rect, key, depth",
+                     static_cast< int >( g_golden_sfd_rows_count ), ones, zeros, ramps, drawn );
+    else
+        LOG_ERROR( "the screen fade FAILED %d of %d (%d full, %d out, %d ramp, %d drawn)", failed, static_cast< int >( g_golden_sfd_rows_count ), ones, zeros, ramps, drawn );
+    return failed == 0;
+}
+
 inline bool verify_ui_widgets_all( )
 {
     bool ok = true;
@@ -2840,6 +3122,9 @@ inline bool verify_ui_widgets_all( )
     ok = verify_ui_award_screen( ) && ok;
     ok = verify_ui_champ_bind( ) && ok;
     ok = verify_ui_font_wrap( ) && ok;
+    ok = verify_ui_menu_actions( ) && ok;
+    ok = verify_ui_selector_frame( ) && ok;
+    ok = verify_ui_screen_fade( ) && ok;
     ok = verify_ui_screen_inputs( ) && ok;
     ok = verify_ui_slider_frame( ) && ok;
     ok = verify_ui_common_screen( ) && ok;

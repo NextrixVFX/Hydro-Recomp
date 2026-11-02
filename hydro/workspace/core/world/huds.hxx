@@ -387,6 +387,7 @@ inline ui_screen_env_t c_world::ui_screen_environment( )
         return id && !id->m_text.empty( ) ? string_db_get( m_string_db, id->m_text ) : std::string( );
     };
     env.m_texture = in.m_texture;
+    env.m_asset_texture = [ this ]( const std::string& asset ) { return m_ui_pass->texture_asset( asset ); };   // UI batch 32: selectors, buttons, boat stats, sliders
 #if HYDRO_UI_TEXT
     env.m_font_asset = [ this ]( const std::string& asset ) { return m_ui_pass->font_asset( asset ); };
 #endif

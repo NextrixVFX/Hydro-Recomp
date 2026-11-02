@@ -78,6 +78,8 @@ inline void c_world::action_enter( )
     m_has_chosen = false;
 }
 
+inline float g_menu_dt = 0.0f;   // the tick manager's delta the screen tick sees (UI batch 32; c_world's member when world.hxx takes it)
+
 inline ui_bind_hooks_t c_world::menu_hooks( )
 {
     ui_bind_hooks_t hooks;
@@ -93,6 +95,26 @@ inline ui_bind_hooks_t c_world::menu_hooks( )
         return ui_ret_t{ };
     };
     hooks.m_input = [ this ]( int pad, const char* name ) { return m_menu_input && m_menu_input->manager.pressed( pad, name ); };
+    // The selectors (UI batch 32): one world per process, so these documents stay here until c_world holds them (world.hxx is the world agent's).
+    static value_t option_db, champ_db, font_db, skin_db;
+    const auto db = [ this ]( const char* asset, value_t& out ) -> const value_t* {
+        if ( out.tag == 0 )
+        {
+            std::vector< std::uint8_t > bytes;
+            if ( !m_archive.read( asset, bytes ) )
+                return nullptr;
+            out = c_reader( bytes ).parse( );
+        }
+        return &out;
+    };
+    hooks.m_option_db = db( "VuDBAsset/OptionDB", option_db );
+    hooks.m_champ_db = db( "VuDBAsset/ChampDB", champ_db );
+    hooks.m_font_db = db( "VuDBAsset/FontDB", font_db );
+    hooks.m_skin_db = db( "VuDBAsset/SkinDB", skin_db );
+    hooks.m_boat_db = &m_boat_db;
+    hooks.m_track_db = &m_track_db;
+    hooks.m_platform = ui_platform_of( ui_profile_all_unlocked( ) );   // the declared scaffold profile, as --front-end-defaults (the save-backed one: the world's)
+    hooks.m_delta = [ this ] { return g_menu_dt; };
     return hooks;
 }
 
@@ -150,13 +172,19 @@ inline void c_world::menu_bind( )
         LOG_INFO( "front end: screen %s loaded (project %d)", name.c_str( ), id );
         return id;
     };
-    m_menu_engine.m_init_project = [ this ]( int id ) { m_menu_projects[ id ].binding->project_initialize( ); };
+    m_menu_engine.m_init_project = [ this ]( int id ) {
+        m_menu_projects[ id ].binding->config_setup( );
+        m_menu_projects[ id ].binding->project_initialize( );
+    };
     m_menu_engine.m_release_project = [ this ]( int id ) {
         m_menu_projects[ id ].binding->project_release( );
         m_menu_projects.erase( id );
     };
     m_menu_engine.m_is_screen = [ this ]( int id ) { return ui_common_is_screen( *m_menu_projects[ id ].root ); };
-    m_menu_engine.m_screen_tick = [ this ]( int id, float dt, bool input ) { m_menu_projects[ id ].binding->tick( dt, input ); };
+    m_menu_engine.m_screen_tick = [ this ]( int id, float dt, bool input ) {
+        g_menu_dt = dt;
+        m_menu_projects[ id ].binding->tick( dt, input );
+    };
     m_menu_engine.m_screen_draw = [ this ]( int id, float alpha ) {
 #if HYDRO_UI_PASS
         if ( m_ui_pass )
@@ -194,7 +222,7 @@ inline void c_world::menu_any_key( )
         return;
     bool any = false;
     const std::uint8_t* pressed = m_menu_input->device.pressed( );
-    for ( int k = 0; k < 256 && !any; ++k )
+    for ( int k = 0; k < 81 && !any; ++k )   // m_pressed +0xFF holds 81 keys (0x5391C0)
         any = pressed[ k ] != 0;
     const std::uint32_t buttons = m_menu_input->device.controller( 0 ).buttons;
     any = any || ( buttons & ~m_menu_pad ) != 0u;
@@ -236,8 +264,10 @@ inline const std::string& c_world::menu_tick( float dt )
         m_menu_engine.m_control_method = static_cast< std::uint32_t >( m_menu_input->device.control_method( ) );
     }
     ++m_menu_frames;
-    menu_any_key( );
+    // Decision, in registration order: the mode manager 0x4CBFD0 (boot) before the screen's 0x423650 (its slot 6), so a key that sets the next
+    // screen is not read again by that screen in the same frame.
     const std::string& next = m_menu->tick( dt );
+    menu_any_key( );
     m_menu_engine.m_fade.tick( dt, nullptr );
     return next;
 }

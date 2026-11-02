@@ -93,6 +93,13 @@ inline std::uint32_t ui_set_single_player( value_t& root )
     return 0;
 }
 
+// VuSetBoatConfigPlayerEntity's SetIndex 0x44EEA0: BoatConfig.CurPlayerIndex (cleared, then an int) = the first record as an int (0x4237B0; else 0).
+inline void ui_boat_player_index( value_t& root, const ui_params_t& params )
+{
+    ui_params_reader_t r( params );
+    ui_json_set_int( ui_json_child( ui_json_child( root, "BoatConfig" ), "CurPlayerIndex" ), ui_params_read_int( r ) );
+}
+
 // ---------------------------------------------------------------------------
 // VuBaseConfigEntity (ctor 0x4471C0, vtable 0x73C4D4) - the base of the game
 // and boat selectors (VuGameConfigEntity ctor 0x45CC80 / vtable 0x73D1DC,

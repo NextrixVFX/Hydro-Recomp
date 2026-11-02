@@ -127,7 +127,8 @@ public:
         }
         if ( m_on_input )
             m_on_input( *link.m_entity, name, params, true );
-        c_ui_action action( kind, ui_action_screen( *link.m_entity, kind == ui_action_kind_t::set_game_mode ? "Game Mode" : "Screen" ) );
+        const char* node = kind == ui_action_kind_t::set_game_mode ? "Game Mode" : kind == ui_action_kind_t::start_game ? "Type" : "Screen";
+        c_ui_action action( kind, ui_action_screen( *link.m_entity, node ) );
         action.m_broadcast = m_broadcast;
         action.m_root = m_root;
         out.m_words[ 0 ] = action.trigger( params );
