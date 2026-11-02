@@ -363,7 +363,8 @@ struct gfx_device_t
     }
 
     // 0x540B50 vt +0xB4. `slots`: the low 16 bits the sampler slot, the high 16 (arithmetic) the view slot. Null: both unbound,
-    // on the whole word as a slot, as retail passes it.
+    // on the whole word as a slot, as retail passes it. TRAP: on a real device a packed word like 0x30002 is an out of range start slot and D3D11 stomps its state
+    // (found by the wiring experiment, batch 35): a shader whose texture exists must never reach this with null.
     void set_texture( std::uint32_t slots, const gfx_texture_t* texture )
     {
         if ( texture == nullptr )

@@ -1272,6 +1272,7 @@ inline bool verify_gfx_direct( )
 
     water_pass_source_t source;
     source.m_read = [ & ]( const std::string& entry, std::vector< std::uint8_t >& out ) { return archive.read( entry.c_str( ), out ); };
+    // the pack's Water/WakeFroth exists, the view is this test's checker
     source.m_texture = [ & ]( const std::string& name ) { return name == "Water/WakeFroth" ? foam->m_view : gfx_handle_t{ 0 }; };
     ok = pass.create( source ) && ok;
     const int shader = pass.add_shader( water_pass_t::default_desc( 1u ) );
