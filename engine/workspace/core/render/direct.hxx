@@ -56,6 +56,18 @@ struct gfx_direct_t final : gfx_api_t
         m_device->CreateDepthStencilView( as< ID3D11Resource >( t ), nullptr, &o );
         return out( o );
     }
+    gfx_handle_t create_vertex_shader( const void* code, std::uint32_t size ) override
+    {
+        ID3D11VertexShader* o = nullptr;
+        m_device->CreateVertexShader( code, size, nullptr, &o );
+        return out( o );
+    }
+    gfx_handle_t create_pixel_shader( const void* code, std::uint32_t size ) override
+    {
+        ID3D11PixelShader* o = nullptr;
+        m_device->CreatePixelShader( code, size, nullptr, &o );
+        return out( o );
+    }
     gfx_handle_t create_blend( const gfx_blend_desc_t& d ) override
     {
         ID3D11BlendState* o = nullptr;

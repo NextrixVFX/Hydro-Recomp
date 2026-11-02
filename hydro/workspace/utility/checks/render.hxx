@@ -2595,5 +2595,6 @@ inline bool verify_render_all( )
     ok = verify_text_word_wrap( ) && ok;
     ok = verify_gfx_sort_life( ) && ok;
     ok = verify_gfx_device( ) && ok;
+    ok = verify_gfx_program( ) && ok;
     return ok;
 }

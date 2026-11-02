@@ -85,6 +85,8 @@ struct gfx_api_t
     virtual gfx_handle_t create_texture( const gfx_texture_desc_t& d ) = 0;         // +0x14
     virtual gfx_handle_t create_target_view( gfx_handle_t texture ) = 0;            // +0x24 (null description)
     virtual gfx_handle_t create_depth_view( gfx_handle_t texture ) = 0;             // +0x28 (null description)
+    virtual gfx_handle_t create_vertex_shader( const void* code, std::uint32_t size ) = 0;   // +0x30 (code, size, 0, &out)
+    virtual gfx_handle_t create_pixel_shader( const void* code, std::uint32_t size ) = 0;    // +0x3C (code, size, 0, &out)
     virtual gfx_handle_t create_blend( const gfx_blend_desc_t& d ) = 0;             // +0x50
     virtual gfx_handle_t create_depth( const gfx_depth_desc_t& d ) = 0;             // +0x54
     virtual gfx_handle_t create_raster( const gfx_raster_desc_t& d ) = 0;           // +0x58
@@ -143,6 +145,9 @@ struct gfx_stage_t
     bool m_dirty = false;
     const void* m_data = nullptr;
     std::uint32_t m_size = 0;
+    // render/program.hxx's part: +4 references, +0xC the DXBC's hash, +0x24 the code, the memory behind m_data.
+    std::uint32_t m_refs = 1, m_hash = 0, m_kind = 0;
+    std::vector< std::uint8_t > m_code, m_memory;
 };
 
 // VuD3d11ShaderProgram's +0x10 / +0x14.

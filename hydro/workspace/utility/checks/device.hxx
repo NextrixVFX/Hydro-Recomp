@@ -1,6 +1,7 @@
 #pragma once
 
 #include <workspace/core/render/gfx.hxx>
+#include <workspace/core/render/program.hxx>
 
 #include <cstdint>
 #include <cstring>
@@ -40,6 +41,15 @@ struct gfx_check_api_t : gfx_api_t
     gfx_handle_t create_texture( const gfx_texture_desc_t& d ) override { return created( 2, d, 11 ); }
     gfx_handle_t create_target_view( gfx_handle_t t ) override { rec( { 3, id( t ), m_next } ); return m_next++; }
     gfx_handle_t create_depth_view( gfx_handle_t t ) override { rec( { 4, id( t ), m_next } ); return m_next++; }
+    static std::uint32_t code_hash( const void* code, std::uint32_t size )
+    {
+        std::uint32_t h = 0x811C9DC5u;
+        for ( std::uint32_t i = 0; i < size; ++i )
+            h = ( h ^ static_cast< const std::uint8_t* >( code )[ i ] ) * 0x1000193u;
+        return h;
+    }
+    gfx_handle_t create_vertex_shader( const void* c, std::uint32_t s ) override { rec( { 37, s, code_hash( c, s ), m_next } ); return m_next++; }
+    gfx_handle_t create_pixel_shader( const void* c, std::uint32_t s ) override { rec( { 38, s, code_hash( c, s ), m_next } ); return m_next++; }
     gfx_handle_t create_blend( const gfx_blend_desc_t& d ) override
     {
         return created( 5, d, 66 );
@@ -267,5 +277,120 @@ inline bool verify_gfx_device( )
         return true;
     }
     LOG_ERROR( "gfx_device FAILED %d of %d words (cursor %zu of %zu)", g.failed, g.compared, g.at, g.size );
+    return false;
+}
+
+// The stage constants' copy really stores here: the case compares the memory.
+struct gfx_program_check_api_t : gfx_check_api_t
+{
+    void copy( void* to, std::uint32_t room, const void* from, std::uint32_t count ) override
+    {
+        rec( { 39, room, count } );
+        std::memcpy( to, from, count );
+    }
+};
+
+// Case gfx_program: blobs built by the case through load, release, lookups and all the setters; the log and each stage's memory.
+inline bool verify_gfx_program( )
+{
+    anim_cursor_t g;
+    g.w = g_golden_gpg_words;
+    g.size = g_golden_gpg_size;
+    g.where = "gfx_program";
+    unsigned ops = 0;
+    gfx_program_check_api_t api;
+    gfx_programs_t set( api );
+    std::vector< gfx_program_t* > live;
+    const unsigned blobs = g.take( );
+    std::vector< std::vector< std::uint8_t > > streams( blobs );
+    for ( auto& s : streams )
+    {
+        s.resize( g.take( ) );
+        for ( std::size_t i = 0; i < s.size( ); i += 4 )
+        {
+            const std::uint32_t w = g.take( );
+            std::memcpy( s.data( ) + i, &w, std::min< std::size_t >( 4, s.size( ) - i ) );
+        }
+    }
+    const unsigned rows = g.take( );
+    for ( unsigned r = 0; r < rows; ++r )
+    {
+        ++ops;
+        api.m_log.clear( );
+        const unsigned op = g.take( );
+        const unsigned which = g.take( );
+        const unsigned index = g.take( );
+        const unsigned count = g.take( );
+        std::uint32_t data[ 64 ];
+        const unsigned words = g.take( );
+        for ( unsigned i = 0; i < words; ++i )
+            data[ i ] = g.take( );
+        gfx_program_t* p = which < live.size( ) ? live[ which ] : nullptr;
+        const gfx_constant_slot_t* c = p && index < p->m_constants.size( ) ? &p->m_constants[ index ] : nullptr;
+        const auto* bytes = reinterpret_cast< const std::uint8_t* >( data );
+        switch ( op )
+        {
+        case 0:
+        {
+            gfx_program_t* made = set.load( streams[ index ].data( ) );
+            live.push_back( made );
+            break;
+        }
+        case 1:
+            set.release( p );
+            live.erase( live.begin( ) + which );
+            break;
+        case 2: gfx_programs_t::set_bool( api, *p, *c, static_cast< std::uint8_t >( data[ 0 ] ) ); break;
+        case 3: gfx_programs_t::set_word( api, *p, *c, data[ 0 ] ); break;
+        case 4: gfx_programs_t::set_vec3( api, *p, *c, data ); break;
+        case 5: gfx_programs_t::set_matrix( api, *p, *c, data ); break;
+        case 6: gfx_programs_t::set_vec2( api, *p, *c, data ); break;
+        case 7: gfx_programs_t::set_vec4( api, *p, *c, data ); break;
+        case 8: gfx_programs_t::set_colour3( api, *p, *c, bytes ); break;
+        case 9: gfx_programs_t::set_colour4( api, *p, *c, bytes ); break;
+        case 10: gfx_programs_t::set_bools( api, *p, *c, bytes, count ); break;
+        case 11: gfx_programs_t::set_words( api, *p, *c, data, count ); break;
+        case 12: gfx_programs_t::set_matrices( api, *p, *c, data, count ); break;
+        case 13: gfx_programs_t::set_vectors( api, *p, *c, data, count ); break;
+        case 14:
+        {
+            // A lookup by a name the case wrote into `data`.
+            const char* name = reinterpret_cast< const char* >( data );
+            const gfx_constant_slot_t* found = p->constant( name );
+            g.eq( found ? static_cast< std::uint32_t >( found - p->m_constants.data( ) ) + 1u : 0u, g.take( ) );
+            g.eq( static_cast< std::uint32_t >( p->sampler( name ) ), g.take( ) );
+            break;
+        }
+        default: g.eq( op, 0xFFFFFFFFu );
+        }
+        const unsigned logged = g.take( );
+        g.eq( static_cast< std::uint32_t >( api.m_log.size( ) ), logged );
+        for ( unsigned i = 0; i < logged; ++i )
+            g.eq( i < api.m_log.size( ) ? api.m_log[ i ] : 0xDEADBEEFu, g.take( ) );
+        g.eq( static_cast< std::uint32_t >( set.m_programs.size( ) ), g.take( ) );
+        g.eq( static_cast< std::uint32_t >( set.m_stages.size( ) ), g.take( ) );
+        const unsigned shown = g.take( );
+        g.eq( static_cast< std::uint32_t >( live.size( ) ), shown );
+        for ( unsigned i = 0; i < shown && i < live.size( ); ++i )
+        {
+            const gfx_program_t& q = *live[ i ];
+            g.eq( q.m_refs, g.take( ) );
+            for ( const gfx_stage_t* s : { q.m_vertex, q.m_pixel } )
+            {
+                g.eq( s->m_refs, g.take( ) );
+                g.eq( s->m_dirty ? 1u : 0u, g.take( ) );
+                g.eq( s->m_size, g.take( ) );
+                g.eq( gfx_check_api_t::code_hash( s->m_memory.data( ), s->m_size ), g.take( ) );
+                g.eq( gfx_check_api_t::code_hash( s->m_code.data( ), static_cast< std::uint32_t >( s->m_code.size( ) ) ), g.take( ) );
+            }
+        }
+    }
+    g.eq( static_cast< std::uint32_t >( g.at ), static_cast< std::uint32_t >( g.size ) );
+    if ( !g.failed )
+    {
+        LOG_SUCCESS( "gfx_program matches retail's VuD3d11ShaderProgram (load 0x5AC0C0, setters, sharing, dtors) on %u ops: %d words exact", ops, g.compared );
+        return true;
+    }
+    LOG_ERROR( "gfx_program FAILED %d of %d words (cursor %zu of %zu)", g.failed, g.compared, g.at, g.size );
     return false;
 }
