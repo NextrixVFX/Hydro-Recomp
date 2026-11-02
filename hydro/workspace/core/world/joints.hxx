@@ -16,8 +16,8 @@
 // having made nothing else that this reads.
 //   0x5F57E0 the first component whose type chain holds 0x736E18: VuOffsetAttachComponent 0x75182C or VuAnimatedAttachComponent 0x75829C;
 //   0x5F5810 the first holding 0x736968: VuMotionComponent 0x74E984 (one per entity in every captured class).
-// A motion's owner IF slot 0 is `m_moved` (c_world::motion_child by class); slots 1 / 2 of the classes that are children here
-// (corona 0x755BC8, static pfx 0x755EB4, audio emitter 0x756EA0) are the nullsub 0x401560.
+// A motion's owner IF slot 0 is `m_moved` (c_world::motion_child by class); slots 1 / 2 are `m_claim`: the props' 0x546D80 / 0x546DB0;
+// corona 0x755BC8, static pfx 0x755EB4, audio emitter 0x756EA0 hold the nullsub 0x401560.
 // An animated parent's update 0x61E010 reads its instance's +0x18 node matrices: `m_instance` (c_world::prop_instance) answers the
 // instance; none (no model): UNKNOWN, the update not run, counted (`unknown( )`).
 class c_joints
@@ -56,6 +56,7 @@ public:
     }
     void on_moved( moved_t moved ) { m_moved = std::move( moved ); }
     void on_instance( instance_t instance ) { m_instance = std::move( instance ); }
+    void on_claim( std::function< void( entity_t&, bool ) > claim ) { m_claim = std::move( claim ); }
 
     void add( entity_t& entity, const attach_properties_t& p, entity_t* parent, entity_t* child )
     {
@@ -136,6 +137,17 @@ public:
                     if ( x.owner->m_moved )
                         x.owner->m_moved( *x.entity, x.m.matrix, x.m.linear, x.m.angular );
                 };
+                // Slots 1 / 2: the props' 0x546D80 / 0x546DB0 (race_session_motion_claim names its classes; the nullsub's answer nothing there).
+                m.m.attached = []( void* u ) {
+                    motion_t& x = *static_cast< motion_t* >( u );
+                    if ( x.owner->m_claim )
+                        x.owner->m_claim( *x.entity, true );
+                };
+                m.m.detached = []( void* u ) {
+                    motion_t& x = *static_cast< motion_t* >( u );
+                    if ( x.owner->m_claim )
+                        x.owner->m_claim( *x.entity, false );
+                };
                 return &m;
             }
         return nullptr;
@@ -208,5 +220,6 @@ private:
     std::map< const entity_t*, motion_t > m_motions;
     moved_t m_moved;
     instance_t m_instance;
+    std::function< void( entity_t&, bool ) > m_claim;
     int m_unknown = 0;
 };

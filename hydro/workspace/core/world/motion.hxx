@@ -87,6 +87,7 @@ inline void c_world::motions_game_initialize( )
         motion_child( child, matrix, linear, angular );
     } );
     m_joints.on_instance( [ this ]( entity_t& parent ) { return prop_instance( parent ); } );
+    m_joints.on_claim( [ this ]( entity_t& child, bool on ) { race_session_motion_claim( m_race, child, on ); } );
     m_joints.game_initialize( );
     for ( rotator_t& motion : m_rotators )
     {
@@ -185,8 +186,8 @@ inline void c_world::animated_attach_tick( )
 }
 
 // A child's motion IF slot 0 by class: VuCoronaEntity 0x5DC3B0 setWorldTransform( the matrix, notify 1 ), the corona's draw reads the
-// world; VuStaticPfxEntity 0x5EB4C0 the world (0x534C00( 0 )) then its +0x94 system's setMatrix; VuAudioEmitterEntity 0x5F3D80. Any
-// other class's is not read: UNKNOWN, not run, counted.
+// world; VuStaticPfxEntity 0x5EB4C0 the world (0x534C00( 0 )) then its +0x94 system's setMatrix; VuAudioEmitterEntity 0x5F3D80; the
+// props 0x546BD0. Any other class's is not read: UNKNOWN, not run, counted.
 inline void c_world::motion_child( entity_t& child, const float* matrix, const float* linear, const float* angular )
 {
     ( void ) angular;
@@ -224,6 +225,14 @@ inline void c_world::motion_child( entity_t& child, const float* matrix, const f
         std::memcpy( record, matrix, 64 );
         std::memcpy( record + 16, linear, 16 );
         audio_emitter_motion( static_cast< audio_emitter_state_t* >( child.m_state.get( ) )->value, record, h );
+        return;
+    }
+    // The props' IF 0x73A13C / VuRampEntity's 0x73B04C / VuAnimatedPropEntity's 0x756228: slot 0 is the same 0x546BD0 / 0x5ED4F0 a keyframe
+    // target runs (ecx + 0xC's +0x18 = the attach's matrix): the world, the draw, the kinematic step of the body, its own attach children.
+    if ( child.m_type == "VuPropEntity" || child.m_type == "VuRampEntity" || child.m_type == "VuBreakablePropEntity" || child.m_type == "VuAnimatedPropEntity" )
+    {
+        bool stepped = true;
+        race_session_motion_update( m_race, child, stepped, matrix, linear, angular );
         return;
     }
     ++m_motion_unknown;
