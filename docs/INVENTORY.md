@@ -18,10 +18,10 @@ Subsystems come from the RTTI class whose vtable holds the function (1253 classe
 
 | | functions | bytes of code |
 |---|---:|---:|
-| verified | 3622 | 1224953 |
+| verified | 3628 | 1228835 |
 | callee | 762 | 166899 |
-| cited | 631 | 195283 |
-| absent | 3623 | 639125 |
+| cited | 626 | 191441 |
+| absent | 3622 | 639085 |
 | **all** | **8638** | **2226260** |
 
 ## By subsystem
@@ -30,12 +30,12 @@ Sorted by code size. Counts are functions; the last column is the share of that 
 
 | subsystem | functions | verified | callee | cited | absent | verified bytes |
 |---|---:|---:|---:|---:|---:|---:|
-| unattributed | 1845 | 820 | 300 | 146 | 579 | 405971 of 695394 |
+| unattributed | 1845 | 823 | 300 | 143 | 579 | 408691 of 695394 |
 | physics (Bullet) | 646 | 450 | 17 | 46 | 133 | 129764 of 256657 |
 | entity / component / script framework | 1094 | 550 | 119 | 58 | 367 | 125565 of 207438 |
-| HUD / UI / fonts | 648 | 262 | 76 | 49 | 261 | 98006 of 184315 |
+| HUD / UI / fonts | 648 | 265 | 76 | 46 | 261 | 99168 of 184315 |
 | game modes / race | 766 | 245 | 43 | 82 | 396 | 108828 of 179957 |
-| rendering / gfx | 552 | 243 | 37 | 55 | 217 | 65419 of 126915 |
+| rendering / gfx | 552 | 243 | 37 | 56 | 216 | 65419 of 126915 |
 | water | 325 | 219 | 27 | 38 | 41 | 65094 of 96416 |
 | boat | 264 | 198 | 22 | 21 | 23 | 71290 of 87400 |
 | engine core / math / containers | 391 | 125 | 16 | 42 | 208 | 35390 of 76072 |
@@ -58,8 +58,8 @@ Over-approximate (a referenced vtable brings every slot) and under-approximate (
 
 | tier | functions | verified | callee | cited | absent | runtime / STL / thunk | platform layer | game + engine logic not verified |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| race | 4905 | 2751 | 542 | 472 | 1140 | 68 | 610 | 1781 |
-| game | 2431 | 856 | 215 | 146 | 1214 | 77 | 313 | 1265 |
+| race | 4905 | 2757 | 542 | 466 | 1140 | 68 | 610 | 1775 |
+| game | 2431 | 856 | 215 | 147 | 1213 | 77 | 313 | 1265 |
 | service | 452 | 11 | 2 | 10 | 429 | 45 | 98 | 306 |
 | dead | 850 | 4 | 3 | 3 | 840 | 61 | 126 | 660 |
 
