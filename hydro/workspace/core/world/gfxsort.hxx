@@ -273,6 +273,40 @@ struct gfx_sort_t : ui_gfx_sort_t
         ui_gfx_sort_t::submit( type, material, m->m_key, chunk, c ? c->m_key : 0, callback, depth );
     }
 
+    // 0x50B7B0 (type, material, chunk, callback, depth): the other key: type and material in the high word above the set's bits, 0x2000, the chunk's key astride the
+    // two words, and the depth itself in 24 bits (not 1 - depth as in 0x429010, no bit 24). Same command.
+    void submit_keyed( std::uint32_t type, std::uint32_t material, std::uint32_t chunk, std::uint32_t callback, float depth )
+    {
+        const gfx_material_t* m = m_hooks.material( material );
+        const std::uint32_t bits = static_cast< std::uint32_t >( ui_fistp64_trunc( depth * 16777215.0f ) ) & 0xFFFFFFu;  // 0x6F784C
+        std::uint32_t lo = m_key_lo | bits;
+        std::uint32_t hi = ( ( ( type << 11 ) | m->m_key ) << 3 ) | m_key_hi | 0x2000u;
+        if ( chunk )
+        {
+            const std::uint32_t key = m_hooks.chunk( chunk )->m_key;
+            lo |= key << 24;
+            hi |= key >> 8;
+        }
+        command( lo, hi, callback, material, chunk, type );
+    }
+
+    // 0x50B250's command: the key's bits alone, type 0, no material.
+    void submit_bare( std::uint32_t callback ) { command( m_key_lo, m_key_hi, callback, 0, 0, 0 ); }
+
+    void command( std::uint32_t lo, std::uint32_t hi, std::uint32_t callback, std::uint32_t material, std::uint32_t chunk, std::uint32_t type )
+    {
+        std::vector< ui_gfx_command_t >& list = m_commands[ m_index ];
+        list.resize( list.size( ) + 1 );
+        ui_gfx_command_t& c = list.back( );
+        c.m_words[ 0 ] = lo;
+        c.m_words[ 1 ] = hi;
+        c.m_words[ 2 ] = callback;
+        c.m_words[ 3 ] = static_cast< std::uint32_t >( m_offset );
+        c.m_words[ 4 ] = material;
+        c.m_words[ 5 ] = chunk;
+        c.m_words[ 6 ] = ( c.m_words[ 6 ] & 0xFFFF0000u ) | ( type & 0xFFFFu );
+    }
+
     // 0x53ACA0, the tick "Draw"'s callee: the frame time.
     void tick( float dt ) { m_time += dt; }
 

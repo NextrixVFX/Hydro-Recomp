@@ -3,9 +3,15 @@
 #include <workspace/core/world/dbrt.hxx>
 #include <workspace/core/world/gfxsort.hxx>
 #include <workspace/core/world/lights.hxx>
+#include <workspace/core/world/instance.hxx>
+#include <workspace/core/world/primitive.hxx>
+#include <workspace/core/world/drawer.hxx>
 #include <workspace/core/world/skeleton.hxx>
 
+#include <array>
 #include <cstdint>
+#include <deque>
+#include <memory>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -998,6 +1004,752 @@ inline bool verify_gfx_lights( )
     return false;
 }
 
+// Case gfx_draw_manager: every call of the manager's collaborators, logged as the case logged it (kind, object, params flag).
+struct gfx_dm_check_t : gfx_draw_hooks_t
+{
+    using log_t = std::vector< std::array< unsigned, 3 > >;
+    struct method_t : gfx_draw_method_t
+    {
+        void call( const void* params ) override { m_log->push_back( { m_kind, m_id, static_cast< unsigned >( params == m_want ) } ); }
+        log_t* m_log = nullptr;
+        unsigned m_kind = 0, m_id = 0;
+        const void* m_want = nullptr;
+    };
+    struct entry_t : gfx_draw_entry_t
+    {
+        void call( ) override { m_log->push_back( { 11u, m_id, 0u } ); }
+        log_t* m_log = nullptr;
+        unsigned m_id = 0;
+    };
+    void lights_submit( const gfx_draw_params_t& p ) override { m_log.push_back( { 7u, 0u, static_cast< unsigned >( &p == m_want ) } ); }
+    bool composer_present( ) override { return m_composer; }
+    void composer_draw( const gfx_draw_params_t& p ) override { m_log.push_back( { 8u, 0u, static_cast< unsigned >( &p == m_want ) } ); }
+    void register_tick( ) override { m_calls.push_back( 3u ); }
+    void register_flush( ) override { m_calls.push_back( 5u ); }
+    void unregister_tick( ) override { m_calls.push_back( 4u ); }
+    void unregister_flush( ) override { m_calls.push_back( 6u ); }
+    log_t m_log;
+    std::vector< unsigned > m_calls;
+    bool m_composer = false;
+    const void* m_want = nullptr;
+};
+
+// Case gfx_draw_manager: world/drawer.hxx against retail's creator 0x5A7320, ctor 0x5A73B0, add / remove / update, draw 0x5A75E0 (walk + leaf 0x5A7A90), shadow 0x5A7730 (leaf 0x5A7AF0),
+// list remove 0x5A7800 with its growth, flush 0x5A7980, tick 0x5A79F0, dtor 0x5A7540, release 0x5A7310.
+inline bool verify_gfx_draw_manager( )
+{
+    anim_cursor_t g;
+    g.w = g_golden_gdm_words;
+    g.size = g_golden_gdm_size;
+    g.where = "gfx_draw_manager";
+    const auto real = []( std::uint32_t u ) { float f; std::memcpy( &f, &u, 4 ); return f; };
+    gfx_dm_check_t hooks;
+    g_gfx_draw_manager = nullptr;
+    gfx_draw_manager_t* manager = gfx_draw_manager_create( hooks );
+    g.eq( 1u, g.take( ) );                     // the dev page: not recreated, the golden's first call
+    g.eq( hooks.m_calls.size( ) > 0 ? hooks.m_calls[ 0 ] : 0u, g.take( ) );
+    g.eq( hooks.m_calls.size( ) > 1 ? hooks.m_calls[ 1 ] : 0u, g.take( ) );
+    g.eq( 0x5A79F0u, g.take( ) );
+    g.eq( 0x5A7980u, g.take( ) );
+    g.eq( static_cast< unsigned >( manager->m_capacity ), g.take( ) );
+    g.eq( 0u, g.take( ) );
+    static gfx_drawable_t objects[ 40 ];
+    static gfx_dm_check_t::method_t draws[ 40 ], shadows[ 40 ];
+    static gfx_dm_check_t::entry_t entries[ 32 ];
+    gfx_draw_params_t params;
+    gfx_shadow_params_t shadow;
+    gfx_check_hooks_t sort_hooks;
+    gfx_sort_t sort( sort_hooks );
+    for ( unsigned i = 0; i < 40; ++i )
+    {
+        objects[ i ] = gfx_drawable_t( );
+        draws[ i ].m_log = &hooks.m_log;
+        draws[ i ].m_kind = 9;
+        draws[ i ].m_id = i;
+        draws[ i ].m_want = &params;
+        shadows[ i ].m_log = &hooks.m_log;
+        shadows[ i ].m_kind = 10;
+        shadows[ i ].m_id = i;
+        shadows[ i ].m_want = &shadow;
+        objects[ i ].m_draw = i % 11 == 10 ? nullptr : &draws[ i ];
+        objects[ i ].m_shadow = i % 13 == 12 ? nullptr : &shadows[ i ];
+    }
+    for ( unsigned i = 0; i < 32; ++i )
+    {
+        entries[ i ].m_log = &hooks.m_log;
+        entries[ i ].m_id = i;
+    }
+    hooks.m_want = &params;
+    const auto compare_log = [ & ]( )
+    {
+        const unsigned n = g.take( );
+        g.eq( static_cast< unsigned >( hooks.m_log.size( ) ), n );
+        for ( unsigned i = 0; i < n; ++i )
+            for ( unsigned k = 0; k < 3; ++k )
+                g.eq( i < hooks.m_log.size( ) ? hooks.m_log[ i ][ k ] : 0xDEADBEEFu, g.take( ) );
+        hooks.m_log.clear( );
+    };
+    const unsigned steps = g.take( );
+    int calls = 0;
+    for ( unsigned s = 0; s < steps; ++s )
+    {
+        const unsigned op = g.take( );
+        if ( op == 0 || op == 2 )
+        {
+            gfx_drawable_t& d = objects[ g.take( ) ];
+            if ( op == 0 )
+                d.m_mask = static_cast< std::uint8_t >( g.take( ) );
+            for ( float& f : d.m_aabb )
+                f = real( g.take( ) );
+            if ( op == 0 )
+                manager->add( d );
+            else
+                manager->update( d );
+        }
+        else if ( op == 1 )
+            manager->remove( objects[ g.take( ) ] );
+        else if ( op == 3 )
+        {
+            params.m_reflecting = static_cast< std::uint8_t >( g.take( ) );
+            hooks.m_composer = g.take( ) != 0;
+            gfx_camera_t camera;
+            for ( float& f : camera.m_planes )
+                f = real( g.take( ) );
+            for ( float& f : params.m_clip )
+                f = real( g.take( ) );
+            params.m_camera = &camera;
+            manager->draw( params );
+            calls += static_cast< int >( hooks.m_log.size( ) );
+            compare_log( );
+        }
+        else if ( op == 4 )
+        {
+            gfx_shadow_volume_t volume;
+            volume.m_count = static_cast< int >( g.take( ) );
+            shadow.m_clip_flag = static_cast< std::uint8_t >( g.take( ) );
+            for ( int i = 0; i < 4 * volume.m_count; ++i )
+                volume.m_planes[ i ] = real( g.take( ) );
+            for ( float& f : shadow.m_clip )
+                f = real( g.take( ) );
+            shadow.m_volume = &volume;
+            manager->draw_shadow( shadow );
+            calls += static_cast< int >( hooks.m_log.size( ) );
+            compare_log( );
+        }
+        else
+        {
+            const unsigned n = g.take( ), flush = g.take( ), gone = g.take( );
+            sort.m_key_lo = g.take( );
+            sort.m_key_hi = g.take( );
+            manager->m_list.clear( );
+            for ( unsigned i = 0; i < n; ++i )
+                manager->m_list.push_back( &entries[ g.take( ) ] );
+            manager->list_remove( &entries[ gone ] );
+            const unsigned left = g.take( );
+            g.eq( static_cast< unsigned >( manager->m_list.size( ) ), left );
+            for ( unsigned i = 0; i < left; ++i )
+                g.eq( i < manager->m_list.size( ) ? static_cast< gfx_dm_check_t::entry_t* >( manager->m_list[ i ] )->m_id : 0xDEADBEEFu, g.take( ) );
+            if ( flush )
+                manager->flush( sort );
+            compare_log( );
+            g.eq( sort.m_key_lo, g.take( ) );
+            g.eq( sort.m_key_hi, g.take( ) );
+            g.eq( static_cast< unsigned >( manager->m_list.size( ) ), g.take( ) );
+        }
+        g.eq( static_cast< unsigned >( manager->m_drawn ), g.take( ) );
+        g.eq( static_cast< unsigned >( manager->m_culled ), g.take( ) );
+        g.eq( static_cast< unsigned >( manager->m_shadow_drawn ), g.take( ) );
+        g.eq( static_cast< unsigned >( manager->m_shadow_culled ), g.take( ) );
+        g.eq( static_cast< unsigned >( manager->m_tree.m_count ), g.take( ) );
+        if ( g.take( ) )
+        {
+            g.take( );                         // the dev page's query
+            manager->tick( );
+            g.eq( static_cast< unsigned >( manager->m_drawn ), g.take( ) );
+            g.eq( static_cast< unsigned >( manager->m_culled ), g.take( ) );
+            g.eq( static_cast< unsigned >( manager->m_shadow_drawn ), g.take( ) );
+            g.eq( static_cast< unsigned >( manager->m_shadow_culled ), g.take( ) );
+        }
+    }
+    const unsigned runs = g.take( );
+    for ( unsigned r = 0; r < runs; ++r )
+    {
+        g.take( );                             // the row's length
+        const unsigned count = g.take( ), cap = g.take( );
+        manager->m_list.clear( );
+        for ( unsigned i = 0; i < count; ++i )
+            manager->m_list.push_back( &entries[ i ] );
+        manager->m_capacity = static_cast< int >( cap );
+        manager->list_remove( &entries[ 0 ] );
+        const unsigned left = g.take( );
+        g.eq( static_cast< unsigned >( manager->m_list.size( ) ), left );
+        g.eq( static_cast< unsigned >( manager->m_capacity ), g.take( ) );
+        g.take( );                             // a new block or not: the vector's business
+        for ( unsigned i = 0; i < left; ++i )
+            g.eq( i < manager->m_list.size( ) ? static_cast< gfx_dm_check_t::entry_t* >( manager->m_list[ i ] )->m_id : 0xDEADBEEFu, g.take( ) );
+    }
+    manager->m_list.clear( );
+    hooks.m_calls.clear( );
+    delete manager;
+    gfx_draw_manager_release( );
+    for ( unsigned i = 0; i < 2; ++i )
+        g.eq( i < hooks.m_calls.size( ) ? hooks.m_calls[ i ] : 0u, g.take( ) );
+    g.eq( 1u, g.take( ) );
+    g.eq( 1u, g.take( ) );
+    g.eq( static_cast< unsigned >( g_gfx_draw_manager != nullptr ), g.take( ) );
+    if ( g.failed == 0 && g.at == g.size )
+    {
+        LOG_SUCCESS( "gfx_draw_manager matches retail's Vu3dDrawManager (0x5A7320, 0x5A73B0, 0x5A75E0, 0x5A7730, 0x5A7800, 0x5A7980, 0x5A79F0, 0x5A7A90, 0x5A7AF0, 0x5A7540, 0x5A7310) on %u steps, "
+                     "%d collaborator calls: %d words exact", steps, calls, g.compared );
+        return true;
+    }
+    LOG_ERROR( "gfx_draw_manager FAILED %d of %d words (cursor %zu of %zu)", g.failed, g.compared, g.at, g.size );
+    return false;
+}
+
+// Case gfx_primitives: world/primitive.hxx against retail's builders 0x507BE0 .. 0x50B250, the keyed submit 0x50B7B0, the sphere test 0x50C250 and the segment / triangle test 0x50C6B0.
+inline bool verify_gfx_primitives( )
+{
+    anim_cursor_t g;
+    g.w = g_golden_gpr_words;
+    g.size = g_golden_gpr_size;
+    g.where = "gfx_primitives";
+    const auto real = []( std::uint32_t u ) { float f; std::memcpy( &f, &u, 4 ); return f; };
+    const auto bits = []( float f ) { std::uint32_t u; std::memcpy( &u, &f, 4 ); return u; };
+    gfx_check_hooks_t hooks;
+    static const std::uint32_t k_material_keys[ 4 ] = { 0x3FF, 0x001, 0x155, 0x2AA }, k_chunk_keys[ 3 ] = { 0x7FF, 0x401, 0x0AB };
+    hooks.m_materials.resize( 4 );
+    hooks.m_chunks.resize( 3 );
+    for ( int i = 0; i < 4; ++i )
+        hooks.m_materials[ i ].m_key = k_material_keys[ i ];
+    for ( int i = 0; i < 3; ++i )
+        hooks.m_chunks[ i ].m_key = k_chunk_keys[ i ];
+    gfx_sort_t sort( hooks );
+    sort.m_buffers[ 0 ].m_memory.resize( 0xF0000 );
+    sort.m_buffers[ 0 ].m_capacity = 0xF0000;
+    sort.m_buffers[ 1 ].m_memory.resize( 0xF0000 );
+    sort.m_buffers[ 1 ].m_capacity = 0xF0000;
+    sort.m_buffers[ 1 ].m_used = 0x35;
+    gfx_util_t util{ sort };
+    util.m_flat = 1;
+    util.m_lines = 2;
+    util.m_lines2 = 3;
+    util.m_lit = 4;
+    const unsigned rows = g.take( );
+    for ( unsigned row = 0; row < rows; ++row )
+    {
+        const unsigned fn = g.take( );
+        sort.m_index = static_cast< std::int32_t >( g.take( ) );
+        sort.m_key_lo = g.take( );
+        sort.m_key_hi = g.take( );
+        const std::uint32_t colour = g.take( ), colour2 = g.take( ), a = g.take( ), b = g.take( );
+        const std::uint32_t fw[ 3 ] = { g.take( ), g.take( ), g.take( ) };
+        const float f0 = real( fw[ 0 ] ), f1 = real( fw[ 1 ] ), f2 = real( fw[ 2 ] );
+        float va[ 16 ], vb[ 16 ], m0[ 16 ], m1[ 16 ], v[ 4 ], top[ 16 ];
+        for ( float& x : va )
+            x = real( g.take( ) );
+        for ( float& x : vb )
+            x = real( g.take( ) );
+        for ( float& x : m0 )
+            x = real( g.take( ) );
+        for ( float& x : m1 )
+            x = real( g.take( ) );
+        for ( float& x : v )
+            x = real( g.take( ) );
+        for ( float& x : top )
+            x = real( g.take( ) );
+        util.m_top = top;
+        switch ( fn )
+        {
+        case 0: util.ellipse( colour, va, a ); break;
+        case 1: util.line_2d( colour, va, vb ); break;
+        case 2: util.line_3d( colour, va, vb, m0 ); break;
+        case 3: util.line_3d_two( va, colour, vb, colour2, m0 ); break;
+        case 4:
+        {
+            float points[ 20 ];
+            std::memcpy( points, va, sizeof( va ) );
+            std::memcpy( points + 16, vb, 16 );
+            util.strip_lines( colour, points, m0 );
+            break;
+        }
+        case 5: util.aabb_lines( colour, va, m0 ); break;
+        case 6: util.shape_508780( colour, a, m0, f0, f1 ); break;
+        case 7: util.shape_508A40( colour, a, b, m0, f0 ); break;
+        case 8: util.shape_508E30( colour, f2, m0, f0, f1 ); break;
+        case 9: util.shape_509050( colour, va, vb, v, f2, m0 ); break;
+        case 10: util.quad_fill( colour, va, m0 ); break;
+        case 11: util.lit_509810( colour, va, m0, m1, v ); break;
+        case 12: util.lit_shape( k_gfx_cb_509A40, colour, a, m0, m1, v, f0, f1 ); break;
+        case 13: util.lit_509E80( colour, a, b, m0, m1, v, f0 ); break;
+        case 14: util.lit_shape( k_gfx_cb_50A420, colour, a, m0, m1, v, f0, f1 ); break;
+        case 15: util.lit_shape( k_gfx_cb_50A890, colour, a, m0, m1, v, f0, f1 ); break;
+        case 16: util.key_command( a, colour2 ); break;
+        default:
+            sort.allocate( 0x20 );
+            sort.submit_keyed( a, ( b >> 8 ) + 1, b & 0xFF, fw[ 1 ], f0 );
+            break;
+        }
+        const unsigned at = g.take( ), used = g.take( ), count = g.take( );
+        g.eq( static_cast< unsigned >( sort.m_offset ), at );
+        g.eq( static_cast< unsigned >( sort.m_buffers[ sort.m_index ].m_used ), used );
+        const std::uint8_t* record = sort.m_buffers[ sort.m_index ].m_memory.data( ) + at;
+        for ( unsigned i = 0; i < count; ++i )
+        {
+            std::uint32_t w;
+            std::memcpy( &w, record + 4 * i, 4 );
+            g.eq( w, g.take( ) );
+        }
+        const ui_gfx_command_t& c = sort.m_commands[ sort.m_index ].back( );
+        for ( int i = 0; i < 7; ++i )
+            g.eq( i == 6 ? c.m_words[ i ] & 0xFFFFu : c.m_words[ i ], g.take( ) );
+    }
+    const unsigned spheres = g.take( );
+    int visible = 0;
+    for ( unsigned s = 0; s < spheres; ++s )
+    {
+        float planes[ 24 ], centre[ 3 ];
+        for ( float& x : planes )
+            x = real( g.take( ) );
+        for ( float& x : centre )
+            x = real( g.take( ) );
+        const float radius = real( g.take( ) );
+        const bool in = gfx_sphere_visible( planes, centre, radius );
+        visible += in;
+        g.eq( static_cast< unsigned >( in ), g.take( ) );
+    }
+    const unsigned triangles = g.take( );
+    int hits = 0;
+    for ( unsigned t = 0; t < triangles; ++t )
+    {
+        float p[ 15 ], hit[ 3 ] = { };
+        for ( float& x : p )
+            x = real( g.take( ) );
+        const bool in = gfx_segment_triangle( p, p + 3, p + 6, p + 9, p + 12, hit );
+        hits += in;
+        g.eq( static_cast< unsigned >( in ), g.take( ) );
+        for ( const float x : hit )
+        {
+            const std::uint32_t w = g.take( );
+            g.eq( in ? bits( x ) : w, w );
+        }
+    }
+    if ( g.failed == 0 && g.at == g.size )
+    {
+        LOG_SUCCESS( "gfx_primitives matches retail's VuGfxUtil builders (0x507BE0 .. 0x50B250), 0x50B7B0, 0x50C250 (%d of %u visible) and 0x50C6B0 (%d of %u hit) on %u rows: %d words exact",
+                     visible, spheres, hits, triangles, rows, g.compared );
+        return true;
+    }
+    LOG_ERROR( "gfx_primitives FAILED %d of %d words (cursor %zu of %zu)", g.failed, g.compared, g.at, g.size );
+    return false;
+}
+
+// Case gfx_static_model: world/instance.hxx against retail's draw 0x520130, 0x5215A0, 0x521960 and 0x535220 on seeded fake scenes.
+struct gfx_model_map_check_t : gfx_material_map_t
+{
+    std::uint32_t map( std::uint32_t name ) override
+    {
+        for ( const auto& e : m_table )
+            if ( e.first == name )
+                return e.second;
+        return 0;
+    }
+    std::vector< std::pair< std::uint32_t, std::uint32_t > > m_table;
+};
+
+struct gfx_model_scene_t
+{
+    std::vector< std::unique_ptr< gfx_scene_node_t > > m_nodes;
+    std::vector< std::unique_ptr< gfx_scene_mesh_t > > m_meshes;
+    std::vector< std::unique_ptr< gfx_scene_part_t > > m_parts;
+    std::vector< const gfx_scene_node_t* > m_roots;
+    std::vector< const gfx_scene_mesh_t* > m_mesh_table;
+};
+
+inline const gfx_scene_node_t* gfx_model_read_node( anim_cursor_t& g, gfx_model_scene_t& scene, const std::vector< gfx_scene_material_t >& rows )
+{
+    const auto real = []( std::uint32_t u ) { float f; std::memcpy( &f, &u, 4 ); return f; };
+    scene.m_nodes.push_back( std::make_unique< gfx_scene_node_t >( ) );
+    gfx_scene_node_t* n = scene.m_nodes.back( ).get( );
+    for ( float& f : n->m_matrix )
+        f = real( g.take( ) );
+    for ( float& f : n->m_aabb )
+        f = real( g.take( ) );
+    if ( g.take( ) )
+    {
+        scene.m_meshes.push_back( std::make_unique< gfx_scene_mesh_t >( ) );
+        gfx_scene_mesh_t* m = scene.m_meshes.back( ).get( );
+        n->m_mesh = m;
+        const unsigned index = g.take( );
+        if ( scene.m_mesh_table.size( ) <= index )
+            scene.m_mesh_table.resize( index + 1 );
+        scene.m_mesh_table[ index ] = m;
+        for ( float& f : m->m_min )
+            f = real( g.take( ) );
+        for ( float& f : m->m_max )
+            f = real( g.take( ) );
+        const unsigned parts = g.take( );
+        for ( unsigned i = 0; i < parts; ++i )
+        {
+            scene.m_parts.push_back( std::make_unique< gfx_scene_part_t >( ) );
+            gfx_scene_part_t* p = scene.m_parts.back( ).get( );
+            p->m_id = g.take( );
+            p->m_row = &rows[ g.take( ) ];
+            p->m_chunk = g.take( ) + 1;
+            for ( float& f : p->m_aabb )
+                f = real( g.take( ) );
+            m->m_parts.push_back( p );
+        }
+    }
+    const unsigned kids = g.take( );
+    for ( unsigned i = 0; i < kids; ++i )
+        n->m_children.push_back( gfx_model_read_node( g, scene, rows ) );
+    return n;
+}
+
+inline bool verify_gfx_static_model( )
+{
+    anim_cursor_t g;
+    g.w = g_golden_gsm_words;
+    g.size = g_golden_gsm_size;
+    g.where = "gfx_static_model";
+    const auto real = []( std::uint32_t u ) { float f; std::memcpy( &f, &u, 4 ); return f; };
+    gfx_check_hooks_t hooks;
+    hooks.m_materials.resize( g.take( ) );
+    for ( gfx_material_t& m : hooks.m_materials )
+        m.m_key = g.take( );
+    hooks.m_chunks.resize( g.take( ) );
+    for ( gfx_chunk_t& c : hooks.m_chunks )
+        c.m_key = g.take( );
+    gfx_sort_t sort( hooks );
+    sort.m_buffers[ 0 ].m_memory.resize( 0x2C0000 );
+    sort.m_buffers[ 0 ].m_capacity = 0x2C0000;
+    std::vector< gfx_scene_material_t > rows( g.take( ) );
+    gfx_model_map_check_t map;
+    for ( gfx_scene_material_t& r : rows )
+    {
+        r.m_name = g.take( );
+        r.m_skip = static_cast< std::uint8_t >( g.take( ) );
+        r.m_flag_1d = static_cast< std::uint8_t >( g.take( ) );
+        r.m_by_depth = static_cast< std::uint8_t >( g.take( ) );
+        r.m_type = g.take( );
+        r.m_material = g.take( ) + 1;
+        r.m_depth_material = g.take( ) + 1;
+        map.m_table.push_back( { r.m_name, g.take( ) + 1 } );
+        r.m_casts = static_cast< std::uint8_t >( g.take( ) );
+        r.m_shadow_material = g.take( ) + 1;
+    }
+    const unsigned draws = g.take( );
+    gfx_model_scene_t scene;
+    int commands = 0;
+    const auto compare_commands = [ & ]( )
+    {
+        const unsigned count = g.take( );
+        g.eq( static_cast< unsigned >( sort.m_commands[ 0 ].size( ) ), count );
+        commands += static_cast< int >( count );
+        for ( unsigned c = 0; c < count; ++c )
+        {
+            const unsigned words = g.take( );
+            if ( c >= sort.m_commands[ 0 ].size( ) )
+            {
+                for ( unsigned i = 0; i < words; ++i )
+                    g.eq( 0xDEADBEEFu, g.take( ) );
+                continue;
+            }
+            const ui_gfx_command_t& cmd = sort.m_commands[ 0 ][ c ];
+            for ( unsigned i = 0; i < 7; ++i )
+            {
+                std::uint32_t w = cmd.m_words[ i ];
+                if ( i == 4 || i == 5 )
+                    w -= 1;
+                if ( i == 6 )
+                    w &= 0xFFFFu;
+                g.eq( w, g.take( ) );
+            }
+            const std::uint8_t* r = sort.m_buffers[ 0 ].m_memory.data( ) + cmd.m_words[ 3 ];
+            for ( unsigned i = 0; i + 7 < words; ++i )
+            {
+                std::uint32_t w;
+                std::memcpy( &w, r + 4 * i, 4 );
+                if ( i == 0x13 )
+                    w &= 0xFFu;
+                g.eq( w, g.take( ) );
+            }
+        }
+    };
+    const auto fresh = [ & ]( )
+    {
+        sort.m_commands[ 0 ].clear( );
+        sort.m_buffers[ 0 ].m_used = 0;
+        std::fill( sort.m_buffers[ 0 ].m_memory.begin( ), sort.m_buffers[ 0 ].m_memory.begin( ) + 0x10000, static_cast< std::uint8_t >( 0 ) );
+    };
+    for ( unsigned d = 0; d < draws; ++d )
+    {
+        const unsigned trees = g.take( );
+        if ( trees )
+        {
+            scene = gfx_model_scene_t( );
+            for ( unsigned i = 0; i < trees; ++i )
+                scene.m_roots.push_back( gfx_model_read_node( g, scene, rows ) );
+        }
+        sort.m_key_lo = g.take( );
+        sort.m_key_hi = g.take( );
+        gfx_static_model_t model;
+        model.m_colour = g.take( );
+        model.m_word = g.take( );
+        model.m_lod = real( g.take( ) );
+        model.m_byte_1c = static_cast< std::uint8_t >( g.take( ) );
+        model.m_two_pass = static_cast< std::uint8_t >( g.take( ) );
+        model.m_map = g.take( ) ? &map : nullptr;
+        model.m_scene = &scene.m_roots;
+        model.m_meshes = &scene.m_mesh_table;
+        gfx_draw_params_t params;
+        gfx_camera_t camera;
+        params.m_second_depth = static_cast< std::uint8_t >( g.take( ) );
+        params.m_lod = real( g.take( ) );
+        camera.m_far = real( g.take( ) );
+        for ( float& f : camera.m_eye )
+            f = real( g.take( ) );
+        for ( int i = 0; i < 3; ++i )
+            params.m_eye[ i ] = real( g.take( ) );
+        for ( float& f : params.m_clip )
+            f = real( g.take( ) );
+        for ( float& f : camera.m_planes )
+            f = real( g.take( ) );
+        float parent[ 16 ];
+        for ( float& f : parent )
+            f = real( g.take( ) );
+        params.m_camera = &camera;
+        fresh( );
+        model.draw( sort, parent, params );
+        compare_commands( );
+        g.eq( sort.m_key_lo, g.take( ) );
+        g.eq( sort.m_key_hi, g.take( ) );
+        fresh( );
+        model.prefetch( sort );
+        compare_commands( );
+        fresh( );
+        gfx_shadow_params_t shadow;
+        gfx_shadow_volume_t volume;
+        std::vector< gfx_shadow_cascade_t > cascades;
+        for ( int i = 0; i < 3; ++i )
+            shadow.m_eye[ i ] = real( g.take( ) );
+        shadow.m_lod = real( g.take( ) );
+        for ( float& f : shadow.m_clip )
+            f = real( g.take( ) );
+        volume.m_count = static_cast< int >( g.take( ) );
+        for ( int i = 0; i < 4 * volume.m_count; ++i )
+            volume.m_planes[ i ] = real( g.take( ) );
+        cascades.resize( g.take( ) );
+        for ( gfx_shadow_cascade_t& c : cascades )
+        {
+            c.m_volume.m_count = static_cast< int >( g.take( ) );
+            for ( float& f : c.m_matrix )
+                f = real( g.take( ) );
+            for ( int i = 0; i < 4 * c.m_volume.m_count; ++i )
+                c.m_volume.m_planes[ i ] = real( g.take( ) );
+        }
+        shadow.m_volume = &volume;
+        shadow.m_cascades = static_cast< int >( cascades.size( ) );
+        shadow.m_cascade = cascades.data( );
+        model.draw_shadow( sort, parent, shadow );
+        compare_commands( );
+        g.eq( sort.m_key_lo, g.take( ) );
+        g.eq( sort.m_key_hi, g.take( ) );
+    }
+    const unsigned boxes = g.take( );
+    int visible = 0;
+    for ( unsigned b = 0; b < boxes; ++b )
+    {
+        float a[ 8 ], m[ 16 ];
+        gfx_draw_params_t p;
+        gfx_camera_t camera;
+        for ( float& f : a )
+            f = real( g.take( ) );
+        for ( float& f : m )
+            f = real( g.take( ) );
+        for ( int i = 0; i < 3; ++i )
+            p.m_eye[ i ] = real( g.take( ) );
+        p.m_lod = real( g.take( ) );
+        for ( float& f : p.m_clip )
+            f = real( g.take( ) );
+        for ( float& f : camera.m_planes )
+            f = real( g.take( ) );
+        const float size = real( g.take( ) );
+        p.m_camera = &camera;
+        const bool in = gfx_box_visible( p, a, m, size );
+        visible += in;
+        g.eq( static_cast< unsigned >( in ), g.take( ) );
+    }
+    if ( g.failed == 0 && g.at == g.size )
+    {
+        LOG_SUCCESS( "gfx_static_model matches retail's VuStaticModelInstance draw (0x520130, 0x5215A0, 0x521960), shadow (0x5201B0, 0x520670, 0x5354B0, 0x535740, 0x5A8580), prefetch 0x520200 on %u draws, %d commands, and 0x535220 on %u boxes (%d visible): %d words exact",
+                     draws, commands, boxes, visible, g.compared );
+        return true;
+    }
+    LOG_ERROR( "gfx_static_model FAILED %d of %d words (cursor %zu of %zu)", g.failed, g.compared, g.at, g.size );
+    return false;
+}
+
+// Case gfx_animated_model: world/instance.hxx against retail's draw 0x532AD0, shadow 0x533060 and prefetch 0x5333A0 on seeded fake meshes.
+inline bool verify_gfx_animated_model( )
+{
+    anim_cursor_t g;
+    g.w = g_golden_gam_words;
+    g.size = g_golden_gam_size;
+    g.where = "gfx_animated_model";
+    const auto real = []( std::uint32_t u ) { float f; std::memcpy( &f, &u, 4 ); return f; };
+    gfx_check_hooks_t hooks;
+    hooks.m_materials.resize( g.take( ) );
+    for ( gfx_material_t& m : hooks.m_materials )
+        m.m_key = g.take( );
+    hooks.m_chunks.resize( g.take( ) );
+    for ( gfx_chunk_t& c : hooks.m_chunks )
+        c.m_key = g.take( );
+    gfx_sort_t sort( hooks );
+    sort.m_buffers[ 0 ].m_memory.resize( 0x2C0000 );
+    sort.m_buffers[ 0 ].m_capacity = 0x2C0000;
+    std::vector< gfx_scene_material_t > rows( g.take( ) );
+    gfx_model_map_check_t map;
+    for ( gfx_scene_material_t& r : rows )
+    {
+        r.m_name = g.take( );
+        r.m_skip = static_cast< std::uint8_t >( g.take( ) );
+        r.m_flag_1d = static_cast< std::uint8_t >( g.take( ) );
+        r.m_by_depth = static_cast< std::uint8_t >( g.take( ) );
+        r.m_type = g.take( );
+        r.m_material = g.take( ) + 1;
+        r.m_depth_material = g.take( ) + 1;
+        map.m_table.push_back( { r.m_name, g.take( ) + 1 } );
+        r.m_casts = static_cast< std::uint8_t >( g.take( ) );
+        r.m_shadow_material = g.take( ) + 1;
+    }
+    int commands = 0;
+    const auto compare_commands = [ & ]( )
+    {
+        const unsigned count = g.take( );
+        g.eq( static_cast< unsigned >( sort.m_commands[ 0 ].size( ) ), count );
+        commands += static_cast< int >( count );
+        for ( unsigned c = 0; c < count; ++c )
+        {
+            const unsigned words = g.take( );
+            if ( c >= sort.m_commands[ 0 ].size( ) )
+            {
+                for ( unsigned i = 0; i < words; ++i )
+                    g.eq( 0xDEADBEEFu, g.take( ) );
+                continue;
+            }
+            const ui_gfx_command_t& cmd = sort.m_commands[ 0 ][ c ];
+            for ( unsigned i = 0; i < 7; ++i )
+            {
+                std::uint32_t w = cmd.m_words[ i ];
+                if ( i == 4 || i == 5 )
+                    w -= 1;
+                if ( i == 6 )
+                    w &= 0xFFFFu;
+                g.eq( w, g.take( ) );
+            }
+            const std::uint8_t* r = sort.m_buffers[ 0 ].m_memory.data( ) + cmd.m_words[ 3 ];
+            for ( unsigned i = 0; i + 7 < words; ++i )
+            {
+                std::uint32_t w;
+                std::memcpy( &w, r + 4 * i, 4 );
+                if ( i == 0x15 )
+                    w &= 0xFFu;
+                g.eq( w, g.take( ) );
+            }
+        }
+    };
+    const auto fresh = [ & ]( )
+    {
+        sort.m_commands[ 0 ].clear( );
+        sort.m_buffers[ 0 ].m_used = 0;
+        std::fill( sort.m_buffers[ 0 ].m_memory.begin( ), sort.m_buffers[ 0 ].m_memory.begin( ) + 0x10000, static_cast< std::uint8_t >( 0 ) );
+    };
+    const unsigned draws = g.take( );
+    std::deque< gfx_scene_part_t > parts;
+    std::deque< gfx_scene_mesh_t > meshes;
+    std::vector< const gfx_scene_mesh_t* > table;
+    for ( unsigned d = 0; d < draws; ++d )
+    {
+        const unsigned count_meshes = g.take( );
+        if ( count_meshes )
+        {
+            parts.clear( );
+            meshes.clear( );
+            table.clear( );
+            for ( unsigned i = 0; i < count_meshes; ++i )
+            {
+                meshes.emplace_back( );
+                gfx_scene_mesh_t& m = meshes.back( );
+                for ( float& f : m.m_min )
+                    f = real( g.take( ) );
+                for ( float& f : m.m_max )
+                    f = real( g.take( ) );
+                const unsigned n = g.take( );
+                for ( unsigned k = 0; k < n; ++k )
+                {
+                    parts.emplace_back( );
+                    gfx_scene_part_t& p = parts.back( );
+                    p.m_id = g.take( );
+                    p.m_row = &rows[ g.take( ) ];
+                    p.m_chunk = g.take( ) + 1;
+                    m.m_parts.push_back( &p );
+                }
+                table.push_back( &m );
+            }
+        }
+        sort.m_key_lo = g.take( );
+        sort.m_key_hi = g.take( );
+        gfx_animated_model_t model;
+        model.m_colour = g.take( );
+        model.m_word = g.take( );
+        model.m_model_word = g.take( );
+        model.m_bones = g.take( );
+        model.m_byte = static_cast< std::uint8_t >( g.take( ) );
+        model.m_two_pass = static_cast< std::uint8_t >( g.take( ) );
+        model.m_map = g.take( ) ? &map : nullptr;
+        model.m_meshes = &table;
+        gfx_draw_params_t params;
+        gfx_camera_t camera;
+        params.m_second_depth = static_cast< std::uint8_t >( g.take( ) );
+        camera.m_far = real( g.take( ) );
+        for ( float& f : camera.m_eye )
+            f = real( g.take( ) );
+        float parent[ 16 ];
+        for ( float& f : parent )
+            f = real( g.take( ) );
+        params.m_camera = &camera;
+        fresh( );
+        model.draw( sort, parent, params );
+        compare_commands( );
+        g.eq( sort.m_key_lo, g.take( ) );
+        g.eq( sort.m_key_hi, g.take( ) );
+        fresh( );
+        model.prefetch( sort );
+        compare_commands( );
+        fresh( );
+        gfx_shadow_params_t shadow;
+        std::vector< gfx_shadow_cascade_t > cascades( g.take( ) );
+        for ( gfx_shadow_cascade_t& c : cascades )
+            for ( float& f : c.m_matrix )
+                f = real( g.take( ) );
+        shadow.m_cascades = static_cast< int >( cascades.size( ) );
+        shadow.m_cascade = cascades.data( );
+        model.draw_shadow( sort, parent, shadow );
+        compare_commands( );
+        g.eq( sort.m_key_lo, g.take( ) );
+        g.eq( sort.m_key_hi, g.take( ) );
+    }
+    if ( g.failed == 0 && g.at == g.size )
+    {
+        LOG_SUCCESS( "gfx_animated_model matches retail's VuAnimatedModelInstance draw 0x532AD0, shadow 0x533060, prefetch 0x5333A0 on %u draws, %d commands: %d words exact", draws, commands, g.compared );
+        return true;
+    }
+    LOG_ERROR( "gfx_animated_model FAILED %d of %d words (cursor %zu of %zu)", g.failed, g.compared, g.at, g.size );
+    return false;
+}
+
 inline bool verify_render_all( )
 {
     bool ok = true;
@@ -1006,5 +1758,9 @@ inline bool verify_render_all( )
     ok = verify_gfx_cache( ) && ok;
     ok = verify_gfx_dbrt( ) && ok;
     ok = verify_gfx_lights( ) && ok;
+    ok = verify_gfx_draw_manager( ) && ok;
+    ok = verify_gfx_primitives( ) && ok;
+    ok = verify_gfx_static_model( ) && ok;
+    ok = verify_gfx_animated_model( ) && ok;
     return ok;
 }
