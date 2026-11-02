@@ -157,11 +157,8 @@ private:
     // model_for: models.hxx
     const std::vector< cached_part_t >& model_for( const std::string& asset );
 
-    // place_model: models.hxx
-    // `skin`: per shader, what a skin pass (world/livery.hxx) changed for the draw (livery_draw_of).
     void foliage_build( const entity_t& root );
     void foliage_frame( );
-    void place_model( const std::string& asset, const float* world, int bob = 0, int alpha_override = -1, const float* tint = nullptr, const std::vector< livery_draw_t >* skin = nullptr, int geometry_override = -1, std::vector< int >* out_placements = nullptr, std::vector< std::array< float, 16 > >* out_nodes = nullptr );
 
     const value_t* template_root( const std::string& name )
     {
@@ -638,8 +635,7 @@ private:
     // skin_props: animate.hxx
     void skin_props( float dt );
 
-    // update_static_draws / prop_draw: models.hxx
-    void update_static_draws( );
+    // prop_draw: models.hxx
     void prop_draw( const entity_t& owner );
 
     void wipe_scene( )
@@ -1665,7 +1661,6 @@ public:
         const double props_start = trace::now( );
         skin_props( dt );
         animated_attach_tick( );
-        update_static_draws( );
         trace::frame( ).props += trace::now( ) - props_start;
 
         const double pfx_start = trace::now( );
@@ -1841,12 +1836,8 @@ private:
     {
         model_draw_t draw{};
         float aabb[ 8 ]{};
-        std::vector< int > placements[ 3 ];
-        int shown = -2;   // the instance whose placements are visible (-1 none; -2 before the first frame)
-        // The owner (its Build tick re-hands the draw matrix: a dynamic prop's 0x546130) and each placement's part
-        // node matrix (placed = draw matrix x node, models.hxx place_model).
+        // The owner: its Build tick re-hands the draw matrix (a dynamic prop's 0x546130).
         const entity_t* owner = nullptr;
-        std::vector< std::array< float, 16 > > nodes[ 3 ];
         bool off = false;   // the component off the 3D draw manager (its +0x1E cleared: a hide 0x545F20)
         std::unique_ptr< gfx_static_component_t > retail;   // its instances over stage.hxx's models
     };

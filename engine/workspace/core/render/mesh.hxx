@@ -835,10 +835,7 @@ void c_geometry::draw( )
         constants.color[ 1 ] = item.color[ 1 ];
         constants.color[ 2 ] = item.color[ 2 ];
         constants.color[ 3 ] = item.alpha_test == 11 || item.alpha_test == 2 || item.alpha_test == 14 ? item.color[ 3 ] : item.alpha_test >= 8 ? static_cast< float >( item.alpha_test - 7 ) : 1.0f;
-        const bool retail_blend = item.layer >= 5 && item.alpha_test == 0;   // shader.hxx's branch 5: retail's mode 12 pixel shader
-        if ( retail_blend )
-            constants.color[ 3 ] = item.diffuse_alpha;
-        constants.flags[ 0 ] = retail_blend ? ( item.shading == 1 ? 5.0f : 5.5f ) : item.alpha_test == 12 ? 6.0f : item.alpha_test == 13 ? 6.5f : item.alpha_test == 11 ? 4.0f : item.alpha_test == 10 ? 3.0f : item.alpha_test == 6 || item.alpha_test == 7 ? -1.0f : item.alpha_test == 5 ? 2.0f : item.alpha_test == 3 ? 0.25f : item.alpha_test == 1 ? 1.0f : 0.0f;
+        constants.flags[ 0 ] = item.alpha_test == 12 ? 6.0f : item.alpha_test == 13 ? 6.5f : item.alpha_test == 11 ? 4.0f : item.alpha_test == 10 ? 3.0f : item.alpha_test == 6 || item.alpha_test == 7 ? -1.0f : item.alpha_test == 5 ? 2.0f : item.alpha_test == 3 ? 0.25f : item.alpha_test == 1 ? 1.0f : 0.0f;
         constants.flags[ 2 ] = item.alpha_test == 11 ? item.scroll : 0.0f;
         constants.flags[ 3 ] = item.alpha_test == 11 ? item.surface[ 3 ] : item.alpha_test == 3 ? 0.35f : 0.0f;
         if ( item.alpha_test == 2 || item.alpha_test == 11 )

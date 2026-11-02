@@ -157,9 +157,6 @@ float4 main_ps(output_t input) : SV_Target
     if (flags.x < -0.5)
         uv.y += flags.y * 0.2;
     float4 texel = mesh_tex.Sample(mesh_samp, uv);
-    // Retail's Generic / GenericVertexColor pixel shader at sort type 12 (disassembled from the model's DXBC): texel x the
-    // vertex shader's colour, no fog, no specular. Colour: GenericVertexColor gColor x DiffuseColor x the vertex colour, Generic
-    // the two-sided light x gColor x DiffuseColor. Alpha: gColor.a x DiffuseAlpha, not the vertex's.
     // Foliage/Simple and Foliage/Fog, from their DXBC: alpha below 0.5 discards, texel x the vertex colour, Fog then lerps to
     // gFogColor. Their vertex shaders pass the colour through, unlit.
     if (flags.x > 5.75)
@@ -169,17 +166,6 @@ float4 main_ps(output_t input) : SV_Target
         if (flags.x > 6.25)
             foliage = lerp(foliage, float3(surface.z, surface.w, eye.w), (length(eye.xyz - input.world) - surface.x) / max(surface.y - surface.x, 1));
         return float4(foliage, texel.a * input.color.a);
-    }
-    if (flags.x > 4.75)
-    {
-        float3 vertex_rgb = input.color.rgb;
-        if (flags.x > 5.25)
-        {
-            float3 n = normalize(input.normal);
-            float d = dot(n, -light_dir.xyz);
-            vertex_rgb = amb_light.rgb + front_light.rgb * max(d, 0) + back_light.rgb * max(-d, 0);
-        }
-        return float4(texel.rgb * color.rgb * material.yzw * vertex_rgb, texel.a * color.a);
     }
     if (flags.x > 3.5 && flags.x < 4.5)
     {
