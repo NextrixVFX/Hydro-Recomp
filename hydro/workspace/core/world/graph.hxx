@@ -879,7 +879,7 @@ inline void c_world::on_animation_event( const std::string& owner, const std::st
         ++m_fired;
         return;
     }
-    if ( name == "PlayPfxModelSpace" || name == "Show" || name == "Hide" )
+    if ( name == "PlayPfxModelSpace" )
         count_unhandled( owner, name );
 }
 
