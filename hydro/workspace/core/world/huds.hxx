@@ -264,6 +264,47 @@ inline void c_world::race_broadcast_hash( std::uint32_t hash, const char* name, 
     hud_post( hash, p, origin );
 }
 
+// VuGame's Results enter 0x484110 / exit 0x484250 / tick 0x484280 / draw 0x4842F0 on the UI agent's VuCommonScreen. The
+// project load is 0x4B4360 through the UI's world (ui_hud_load, as the HUDs). A screen's broadcasts reach the race's bus
+// ("OnUserNext" 0x483170) and the live HUDs; no HUD is its origin (-1). m_frame stays null: the results leaf 0x46A500 has
+// no render pass yet. g 0x758FD4 +0x34 (the game's paused word): nothing writes it, so false.
+inline void c_world::bind_game_screens( )
+{
+    ui_game_screens_t& g = m_race.screens;
+    g.m_load = [ this ]( const std::string& name ) -> std::unique_ptr< entity_t > {
+        const std::string asset = "VuProjectAsset/" + name;
+        std::vector< std::uint8_t > bytes;
+        if ( !m_archive.read( asset.c_str( ), bytes ) )
+        {
+            race_unwired( m_race, asset + " not in the pack - the common screen holds no project (0x4B4360's null +0xC)" );
+            return nullptr;
+        }
+        const value_t root = c_reader( bytes ).parse( );
+        const value_t* project = find( root, "VuProject" );
+        if ( !project )
+            return nullptr;
+        const entity_registry_t registry = build_entity_registry( m_archive.names( "VuTemplateAsset/" ) );
+        return ui_hud_load( *project, race_project_file( m_archive, asset.c_str( ) ), registry,
+                            [ this ]( const std::string& n ) { return template_document( n ); } );
+    };
+    ui_bind_hooks_t hooks;
+    hooks.m_root = &m_race.util;
+    hooks.m_broadcast_out = [ this ]( std::uint32_t hash, const ui_params_t& p ) { race_broadcast_hash( hash, nullptr, p, -1 ); };
+    string_db_ready( );
+    hooks.m_string_db = [ this ]( const char* key ) { return string_db_get( m_string_db, key ? key : "" ); };
+    hooks.m_external = [ this ]( entity_t& e, const char* plug, const ui_params_t& ) {
+        race_unwired( m_race, std::string( "the Results screen's external input " ) + e.m_type + " . " + plug + " (a platform hook) - not run" );
+        return ui_ret_t{ };
+    };
+    g.m_hooks = hooks;
+    m_race.rules.screen_hooks.results_open = [ this ]( const char* project ) { return m_race.screens.results_open( project ); };
+    m_race.rules.screen_hooks.screen = [ this ]( int screen, int verb, float dt ) {
+        if ( screen == 0 )
+            m_race.screens.screen( verb, dt );
+    };
+    m_race.rules.screen_hooks.paused = [ ] { return false; };
+}
+
 // ui_hud_env_fill before each HUD call: the rules' boats (their 0x520 images), the human's index, the count, the
 // settings' units (below), the track's built / circuit answers; the control method g 0x758FC0 +0x18 = the session's
 // (race_world_t::control_method - the input layer's answer, a platform hook: 0, the gamepad method).

@@ -552,6 +552,7 @@ private:
 
     // The race HUD projects and their countdown (world/huds.hxx).
     void load_huds( const char* const* names = k_race_hud_projects );
+    void bind_game_screens( );   // huds.hxx: Results' VuCommonScreen into s.rules.screen_hooks
     void hud( int project, race_hud_verb_t verb, float dt );
     void race_broadcast( const char* name, const ui_params_t* params = nullptr, int origin = -1 );
     void race_broadcast_hash( std::uint32_t hash, const char* name, const ui_params_t& p, int origin );
@@ -1105,6 +1106,7 @@ public:
             project_initialized( );   // the session stopped before 0x4BA060 reached it: the event still goes out
         if ( !started )
             return;
+        bind_game_screens( );
         // THE TEST INPUT (ours, flagged): --input-script answers the platform input hook from a file (world/drive.hxx).
         if ( const char* script = c_engine::option( "input-script" ) )
         {
@@ -1128,8 +1130,8 @@ public:
         // models load) finds the instances' scenes null and leaves every skin empty. Until the boat agent's
         // collision-mesh reader lets 0x420A70 finish, the hulls therefore draw their own materials (the
         // Boat_proxy/Proxy_diffuse placeholder) - retail's state at that point, not a stand-in. The damage pieces'
-        // skins (+0x238, 0x4119F0) are not built here: our renderer does not draw the pieces. The matrix is placed
-        // once: it moves only through the Build tick's +0x49C and the dynamics, both stopped with the sections load.
+        // skins (+0x238, 0x4119F0) are not built here: our renderer does not draw the pieces. race_draw moves the
+        // shown instance each frame (0x41EAE0's matrix).
         for ( std::size_t k = 0; k < m_race.boats.size( ); ++k )
         {
             race_session_boat_t& b = *m_race.boats[ k ];
@@ -1177,7 +1179,9 @@ public:
         }
     }
 
-    // Per frame: the draw 0x41EAE0's instance choice against this frame's eye.
+    // Per frame: the draw 0x41EAE0's instance choice against this frame's eye, and its matrix: the transform's world
+    // (+0x50) . translation( boat +0x49C ), rebuilt each draw (0x41EB47 .. 0x41EB8E) - the placed instance follows the boat.
+    // Our model path keeps a part's node matrix per placement (retail's instance applies it under 0x532AD0 / 0x520130).
     void race_draw( )
     {
         for ( std::size_t k = 0; k < m_race.boats.size( ) && m_race.active; ++k )
@@ -1186,16 +1190,30 @@ public:
             const std::uint8_t* transform = m_race.start_boats[ k ].transform;
             if ( !transform )
                 continue;
-            const int pick = race_boat_draw_instance( b.graph.objects[ 0 ].image.data( ), transform, m_eye );
-            if ( pick == b.shown )
+            const std::uint8_t* boat = b.graph.objects[ 0 ].image.data( );
+            const int pick = race_boat_draw_instance( boat, transform, m_eye );
+            if ( pick != b.shown )
+            {
+                if ( b.shown >= 0 )
+                    for ( int handle : b.placements[ b.shown ] )
+                        c_engine::show( handle, false );
+                if ( pick >= 0 )
+                    for ( int handle : b.placements[ pick ] )
+                        c_engine::show( handle, true );
+                b.shown = pick;
+            }
+            if ( pick < 0 )
                 continue;
-            if ( b.shown >= 0 )
-                for ( int handle : b.placements[ b.shown ] )
-                    c_engine::show( handle, false );
-            if ( pick >= 0 )
-                for ( int handle : b.placements[ pick ] )
-                    c_engine::show( handle, true );
-            b.shown = pick;
+            float m[ 16 ];
+            race_boat_draw_matrix( boat, transform, m );
+            const int at[ 3 ] = { 0xC4, 0xDC, 0xF4 };
+            const std::vector< cached_part_t >& parts = model_for( b.io.boat_strings[ at[ pick ] ] );
+            for ( std::size_t i = 0; i < b.placements[ pick ].size( ) && i < parts.size( ); ++i )
+            {
+                float placed[ 16 ];
+                math_multiply( placed, m, parts[ i ].node );
+                c_engine::move( b.placements[ pick ][ i ], placed );
+            }
         }
     }
 

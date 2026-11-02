@@ -854,7 +854,7 @@ inline void pfx_process_tick( pfx_heap_t& h, std::uint32_t r, std::uint32_t b, f
         // Retail returns before the fluids are touched without a boat or with dt
         // at most FLT_EPSILON; past that it needs them, the hull view and both hooks.
         const bool runs = boat != nullptr && _mm_comige_ss( _mm_set_ss( 1.1920929e-07f ), _mm_set_ss( dt ) ) == 0;
-        if ( !found || ( runs && ( boat->hull == nullptr || solver == nullptr || f.prepare == nullptr || f.point == nullptr ) ) )
+        if ( !found || ( runs && ( boat->hull == nullptr || solver == nullptr || solver->mesh == nullptr || f.prepare == nullptr || f.point == nullptr ) ) )
         {
             ++f.unrecreated;
             break;

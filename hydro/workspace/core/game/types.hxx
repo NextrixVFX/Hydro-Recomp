@@ -1336,6 +1336,8 @@ inline const action_kind_t* entity_action_kind( const std::string& cls )
 {
     static const action_kind_t kinds[] = {
         HYDRO_ACTION_KIND( "VuDelayEntity", delay_properties_t, delay_construct, delay_load ),
+        HYDRO_ACTION_KIND( "VuPowerUpBoostEntity", powerup_properties_t, powerup_construct, powerup_load ),
+        HYDRO_ACTION_KIND( "VuPowerUpTriggerEntity", powerup_properties_t, powerup_construct, powerup_load ),
         HYDRO_ACTION_KIND( "VuBooleanEntity", boolean_properties_t, boolean_construct, boolean_load ),
         HYDRO_ACTION_KIND( "VuGenericEventEntity", generic_event_properties_t, generic_event_construct, generic_event_load ),
         HYDRO_ACTION_KIND( "VuRotateMotionEntity", rotate_motion_properties_t, rotate_motion_construct, rotate_motion_load ),

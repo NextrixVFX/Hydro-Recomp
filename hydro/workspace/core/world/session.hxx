@@ -13,6 +13,8 @@
 #include <workspace/core/boat/thunk.hxx>
 #include <workspace/core/dynamics/contact.hxx>
 #include <workspace/core/trigger/volume.hxx>
+#include <workspace/core/boat/powerup.hxx>
+#include <workspace/core/ui/common.hxx>
 #include <workspace/core/ui/config.hxx>
 #include <workspace/core/world/blend.hxx>
 #include <workspace/core/world/bodies.hxx>
@@ -75,6 +77,16 @@
 // - The signed-in player's name (the human entry's Driver Name) is a platform
 //   service: empty here.
 
+struct race_session_boat_t;
+
+// The load hooks' user (race_session_sections): the boat, its archive, the rendering assets' next handle.
+struct race_session_load_ctx_t
+{
+    race_session_boat_t* b = nullptr;
+    const c_archive* archive = nullptr;
+    std::uint32_t next = 1;
+};
+
 struct race_session_boat_t
 {
     boat_graph_t graph;
@@ -101,6 +113,10 @@ struct race_session_boat_t
     std::string stop;         // where it stopped (UNKNOWN), when it did
     std::string name, boat, skin;
     boat_mesh_library_t meshes;   // the collision / fluids meshes the sections load created
+    // The user of io.hooks: the BOAT's, not one static. The hooks outlive the sections load (0x419FF0's 0x5243A0 runs them at
+    // gameInitialize); on a shared context every boat's fluids asset landed in the last loaded boat's library, so its handle
+    // answered nothing in its own: a null solver mesh in the hull spray 0x4CE760 (the 11-01 crash, +0x50 = mesh->triangles).
+    race_session_load_ctx_t load_ctx{ };
     std::unique_ptr< boat_thunk_t > thunk;   // the step callback's context (boat/thunk.hxx), persistent
     std::vector< std::uint32_t > excluded;   // the solver's +0x34 array words this step
     std::uint8_t draw_added = 0, instigator_registered = 0;
@@ -204,6 +220,7 @@ struct race_session_t
     // pfx_frame_t's boats / fluids (the words the boat processes hold -> their readers): one entry per boat, kept current by Build step 5.
     ghost_manager_t ghost;              // VuGhostManager g 0x758FC8 (world/ghost.hxx)
     pause_menu_t pause;                 // the pause menu VuActionGameMode +0x60: its gate only (world/pause.hxx)
+    ui_game_screens_t screens;          // VuGame +0x84 the Results VuCommonScreen 0x73F588 (ui/common.hxx; bound by c_world::bind_game_screens)
     tire_track_manager_t tire_tracks;   // VuTireTrackManager g 0x7590F4 (world/tiretrack.hxx; its lists stay empty in retail)
     std::string ghost_error;            // VuGhostGame +0x740 (a string key, ShowError's message)
     std::vector< pfx_frame_boat_t > pfx_boats;
@@ -266,6 +283,20 @@ struct race_session_t
     // The level's static bodies (world/bodies.hxx) and their collision mesh assets.
     boat_mesh_library_t level_meshes;
     std::vector< std::unique_ptr< level_body_t > > level_bodies;
+    // The level's power-ups made live (world/pickups.hxx): their bodies are in level_bodies too.
+    struct powerup_live_t
+    {
+        struct race_session_t* session = nullptr;
+        entity_t* entity = nullptr;
+        powerup_t p;
+        bool boost = false;
+        std::uint8_t randomize = 1;           // +0x138
+        std::vector< std::uint8_t > image;    // what 0x43DB40 reads: +0x13C the energy, +0x140 the multiplayer byte
+        level_body_t* body = nullptr;         // +0x114
+    };
+    std::vector< std::unique_ptr< powerup_live_t > > powerups;
+    value_t powerup_db;                       // VuDBAsset/PowerUpDB
+    int powerups_applied = 0;                 // ours: the census
     // The level's dynamic game props made live (world/dynprop.hxx): their bodies are in level_bodies too.
     struct dyn_prop_t
     {
@@ -739,15 +770,9 @@ inline bool race_session_sections( race_session_boat_t& b, const value_t& boatdb
     // world's gravity are not wired: the surface hook is absent, so a load that
     // got that far would stop there rather than use a stand-in.
     io.dynamics = true;
-    struct ctx_t
-    {
-        race_session_boat_t* b;
-        const c_archive* archive;
-        std::uint32_t next = 1;
-    };
-    static thread_local ctx_t ctx{ };
-    ctx = ctx_t{ &b, &archive, 1 };
-    io.hooks.user = &ctx;
+    using ctx_t = race_session_load_ctx_t;
+    b.load_ctx = ctx_t{ &b, &archive, 1 };
+    io.hooks.user = &b.load_ctx;
     io.hooks.exists = []( void* u, const char* type, const std::string& n )
     {
         const ctx_t& c = *static_cast< ctx_t* >( u );
@@ -1715,6 +1740,8 @@ inline bool race_session_dynamic_prop( race_session_t& s, entity_t& e, const bod
     return true;
 }
 
+inline bool race_session_powerup( race_session_t& s, entity_t& e, std::uint32_t& id, const c_archive& archive );   // world/pickups.hxx
+
 inline void race_session_level_bodies( race_session_t& s, entity_t& tree, const c_archive& archive )
 {
     if ( !s.dynamics )
@@ -1740,6 +1767,8 @@ inline void race_session_level_bodies( race_session_t& s, entity_t& tree, const 
         for ( auto& c : e.m_children )
             self( self, *c );
         if ( race_session_gfx_game_initialize( s, e ) )
+            return;
+        if ( race_session_powerup( s, e, id, archive ) )
             return;
         if ( dynamic_prop_class( e.m_type ) )   // the mine's slot 6 0x438CF0 included (race_session_dynamic_prop)
         {

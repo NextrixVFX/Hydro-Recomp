@@ -256,6 +256,7 @@
     <ClInclude Include="workspace\core\world\pfxmgr.hxx" />
     <ClInclude Include="workspace\core\world\pfxsim.hxx" />
     <ClInclude Include="workspace\core\world\pfxstatic.hxx" />
+    <ClInclude Include="workspace\core\world\pickups.hxx" />
     <ClInclude Include="workspace\core\world\primitive.hxx" />
     <ClInclude Include="workspace\core\world\query.hxx" />
     <ClInclude Include="workspace\core\world\race.hxx" />
