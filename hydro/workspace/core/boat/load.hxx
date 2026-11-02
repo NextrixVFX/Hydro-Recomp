@@ -88,6 +88,9 @@ struct boat_load_t
     // on the controller (boat +0x234) and its boat_pfx_fill_hooks_t. Null: the step stays the four logged calls.
     bool ( *pfx_fill )( void* user, const value_t& fallback, const value_t& own, const boat_driver_t& driver, bool create ) = nullptr;
     void* pfx_user = nullptr;
+    // 0x5322C0 on the model instance +0x2A4 (world/rig.hxx): null, the logged call only.
+    void ( *model0 )( void* user, const std::string& name ) = nullptr;
+    void* model_user = nullptr;
 };
 
 inline std::uint32_t load_word( const std::uint8_t* b, int at )
@@ -245,6 +248,8 @@ inline bool boat_load_sections( boat_load_t& io )
     boat_read_default( b, io.boat_strings, fallback, io.driver );
     boat_read_default( b, io.boat_strings, own, io.driver );
     call( 0x5322C0, "model0", io.boat_strings[ 0xC4 ] );
+    if ( io.model0 )
+        io.model0( io.model_user, io.boat_strings[ 0xC4 ] );
     call( 0x5322C0, "model1", io.boat_strings[ 0xDC ] );
     call( 0x520080, "model2", io.boat_strings[ 0xF4 ] );
     for ( int at : { 0x270, 0x274, 0x278, 0x280, 0x284, 0x288 } )

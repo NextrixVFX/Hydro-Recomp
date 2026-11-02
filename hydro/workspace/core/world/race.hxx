@@ -628,6 +628,8 @@ struct race_boat_init_hooks_t
     std::function< void( ) > instigator;
     // 0x419FF0 on the pfx controller +0x234 (boat effects.hxx boat_pfx_create); null: the row only.
     std::function< void( ) > pfx_create;
+    // 0x410610 on the animation +0x230 (world/rig.hxx boat_rig_create); null: the row only.
+    std::function< void( ) > anim_create;
 };
 
 inline void race_boat_game_initialize( const void* boat, tick_manager_t& tm, const tick_handler_t& decision, const tick_handler_t& build,
@@ -654,6 +656,8 @@ inline void race_boat_game_initialize( const void* boat, tick_manager_t& tm, con
     if ( hooks.engine_ready && hooks.engine_ready( ) )
         call( "FMOD start engine+0xC4 0xE7E7" );
     call( "0x410610 anim" );
+    if ( hooks.anim_create )
+        hooks.anim_create( );
     call( "0x419FF0 part234" );
     if ( hooks.pfx_create )
         hooks.pfx_create( );
