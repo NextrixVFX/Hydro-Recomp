@@ -2738,6 +2738,7 @@ inline bool verify_water_all( )
     ok = verify_dynamics_create( ) && ok;
     ok = verify_logic_plugs( ) && ok;
     ok = verify_game_plugs( ) && ok;
+    ok = verify_front_props( ) && ok;
     ok = verify_logic_game( ) && ok;
     ok = verify_logic_types( ) && ok;
     ok = verify_control_entity( ) && ok;

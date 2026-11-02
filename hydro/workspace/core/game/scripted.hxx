@@ -50,6 +50,8 @@ inline void logic_once_per_lap( logic_entity_t& e, logic_retval_t& out, const ui
 // VuParams' adds 0x4051A0 (type 3, one byte) and 0x405120 (type 2, the float's four bytes).
 inline void scripted_add_bool( ui_params_t& p, std::uint8_t v )
 {
+    if ( p.m_size + 5 > 0x80 )
+        return;
     const std::uint32_t type = 3u;
     std::memcpy( p.m_bytes + p.m_size, &type, 4 );
     p.m_bytes[ p.m_size + 4 ] = v;
@@ -58,6 +60,8 @@ inline void scripted_add_bool( ui_params_t& p, std::uint8_t v )
 
 inline void scripted_add_float( ui_params_t& p, std::uint32_t bits )
 {
+    if ( p.m_size + 8 > 0x80 )
+        return;
     const std::uint32_t type = 2u;
     std::memcpy( p.m_bytes + p.m_size, &type, 4 );
     std::memcpy( p.m_bytes + p.m_size + 4, &bits, 4 );

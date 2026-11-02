@@ -7,6 +7,7 @@
 // consumed, the state words / text after, the VuRand after. The "*ctor" rows: logic_construct's words against the ctor's.
 
 #include <workspace/core/assets/reader.hxx>
+#include <workspace/core/game/docked.hxx>
 #include <workspace/core/world/logic.hxx>
 
 #include <string>
@@ -2579,5 +2580,110 @@ inline bool verify_game_plugs( )
         LOG_SUCCESS( "game/scripted.hxx's plugs match retail: %u vectors, %d fires and service calls", n, fires );
     else
         LOG_ERROR( "game_plugs FAILED %d", bad );
+    return bad == 0;
+}
+
+// VuDockedBoatEntity and VuPosterEntity against retail (case front_props, cases/frontprops.py): each script step's service log, the boat's Locked byte, the colour, gameutil +0x50's dump.
+inline bool verify_front_props( )
+{
+    save_words_t c{ g_golden_front_props_words };
+    const unsigned runs = c.next( );
+    int bad = 0, steps = 0;
+    for ( unsigned v = 0; v < runs; ++v )
+    {
+        const auto read = [ ]( const std::string& raw, value_t& out ) {
+            out = value_t{ };
+            c_reader::read_at_start( std::vector< std::uint8_t >( raw.begin( ), raw.end( ) ), out );
+        };
+        value_t game, db;
+        read( c.str( ), game );
+        read( c.str( ), db );
+        std::vector< std::string > log;
+        std::map< std::uint32_t, std::uint8_t > locks;
+        std::map< std::uint32_t, unsigned > crazy;
+        const unsigned count = c.next( );
+        std::vector< std::string > made;   // the golden's boat answers are in step order
+        value_t yes, no;
+        no.tag = 6u;
+        no.kind = value_t::kind_t::object;
+        yes = no;
+        value_t& flag = json_member( yes, "IsCrazy" );
+        flag.tag = 3u;
+        flag.kind = value_t::kind_t::integer;
+        flag.integer = 1;
+        std::vector< unsigned > answers;
+        const unsigned na = c.next( );
+        for ( unsigned k = 0; k < na; ++k )
+            answers.push_back( c.next( ) );
+        std::size_t next = 0u;
+        std::uint32_t handle = 0u;
+        docked_hooks_t h;
+        h.game_data = &game;
+        h.boat_db = &db;
+        h.make = [ & ]( const value_t& d ) {
+            std::string t;
+            vujb_dump( d, t );
+            log.push_back( "make " + t );
+            crazy[ ++handle ] = next < answers.size( ) ? answers[ next++ ] : 0u;
+            return handle;
+        };
+        h.drop = [ & ]( std::uint32_t ) { log.push_back( "drop" ); };
+        h.db = [ & ]( std::uint32_t b ) -> const value_t& { return crazy[ b ] ? yes : no; };
+        h.set_skin = [ & ]( std::uint32_t, const value_t& s ) {
+            std::string t;
+            vujb_dump( s, t );
+            log.push_back( "skin " + t + " 1" );
+        };
+        h.set_locked = [ & ]( std::uint32_t b, std::uint8_t l ) { locks[ b ] = l; };
+        h.voice = [ & ]( const char* e ) { log.push_back( std::string( "voice " ) + e ); };
+        h.tick_on = [ & ] { log.push_back( "tick" ); };
+        h.tick_off = [ & ] { log.push_back( "untick" ); };
+        bool has = true;
+        poster_hooks_t ph;
+        ph.game_data = &game;
+        ph.has_asset = [ & ]( const std::string& ) { return has; };
+        ph.reload = [ & ] { log.push_back( "reload" ); };
+        docked_boat_t e;
+        for ( unsigned k = 0; k < count; ++k )
+        {
+            const unsigned op = c.next( );
+            has = c.next( ) != 0u;
+            ui_params_t in{ };
+            in.m_size = static_cast< int >( c.next( ) );
+            std::memcpy( in.m_bytes, c.s, 128 );
+            c.s += 32;
+            const unsigned want_color = c.next( ), want_locked = c.next( );
+            log.clear( );
+            unsigned color = 0u;
+            switch ( op )
+            {
+            case 0: docked_initialize( e, h ); break;
+            case 1: docked_change( e, in, h ); break;
+            case 2: docked_reset( e, h ); break;
+            case 3: poster_change( in, ph ); break;
+            case 4: poster_reset( ph ); break;
+            case 5: color = poster_color( game ); log.push_back( "draw" ); break;
+            default: docked_release( e, h ); break;
+            }
+            const unsigned nl = c.next( );
+            bool same = nl == log.size( );
+            for ( unsigned j = 0; j < nl; ++j )
+            {
+                const std::string t = c.str( );
+                same = j < log.size( ) && log[ j ] == t && same;
+            }
+            const std::string dump = c.str( );
+            std::string got;
+            vujb_dump( game, got );
+            same = same && got == dump && ( op != 5u || color == want_color ) && ( op == 0u || op == 6u || locks[ e.boat ] == want_locked );
+            ++steps;
+            if ( !same && bad++ < 8 )
+                LOG_ERROR( "front_props run %u step %u (op %u) differs from retail", v, k, op );
+        }
+    }
+    if ( bad == 0 )
+        LOG_SUCCESS( "VuDockedBoatEntity and VuPosterEntity match retail: %u runs, %d steps", runs, steps );
+    else
+        LOG_ERROR( "front_props FAILED %d", bad );
     return bad == 0;
 }
