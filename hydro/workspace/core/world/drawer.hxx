@@ -38,13 +38,30 @@ struct gfx_draw_params_t
     std::uint8_t m_second_depth = 0;    // +0x2C
 };
 
-// VuGfxDrawShadowParams, as 0x5A7730 reads it.
+// The light's volume: up to 12 planes (0xC0 bytes), +0xC0 the count.
+struct gfx_shadow_volume_t
+{
+    float m_planes[ 48 ] = { };
+    int m_count = 0;
+};
+
+// A cascade, 0x104 bytes: +0 the matrix, +0x40 its volume.
+struct gfx_shadow_cascade_t
+{
+    float m_matrix[ 16 ] = { };
+    gfx_shadow_volume_t m_volume;
+};
+
+// VuGfxDrawShadowParams, as 0x5A7730 / 0x5354B0 / 0x535740 read it.
 struct gfx_shadow_params_t
 {
-    const float* m_planes = nullptr;    // [+0x14] +0
-    int m_count = 0;                    // [+0x14] +0xC0
+    float m_eye[ 3 ] = { };             // +0
+    const gfx_shadow_volume_t* m_volume = nullptr;    // +0x14
+    int m_cascades = 0;                 // +0x18
+    const gfx_shadow_cascade_t* m_cascade = nullptr;  // +0x1C
+    float m_lod = 0.0f;                 // +0x20
     std::uint8_t m_clip_flag = 0;       // +0x24 also the mask a drawable must carry
-    float m_clip[ 4 ] = { };            // +0x28 one more plane, when +0x24 is set
+    float m_clip[ 4 ] = { };            // +0x28 the plane the two box tests always read; the walk's one more when +0x24 is set
 };
 
 // A VuMethod's call, vt+8.
@@ -150,10 +167,10 @@ struct gfx_draw_manager_t
     {
         float planes[ 52 ];
         int count = 0;
-        if ( p.m_count > 0 )
+        if ( p.m_volume->m_count > 0 )
         {
-            std::memcpy( planes, p.m_planes, static_cast< std::size_t >( p.m_count ) * 16 );
-            count = p.m_count;
+            std::memcpy( planes, p.m_volume->m_planes, static_cast< std::size_t >( p.m_volume->m_count ) * 16 );
+            count = p.m_volume->m_count;
         }
         if ( p.m_clip_flag )
         {

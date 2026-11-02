@@ -1121,14 +1121,14 @@ inline bool verify_gfx_draw_manager( )
         }
         else if ( op == 4 )
         {
-            shadow.m_count = static_cast< int >( g.take( ) );
+            gfx_shadow_volume_t volume;
+            volume.m_count = static_cast< int >( g.take( ) );
             shadow.m_clip_flag = static_cast< std::uint8_t >( g.take( ) );
-            float cascade[ 52 ];
-            for ( int i = 0; i < 4 * shadow.m_count; ++i )
-                cascade[ i ] = real( g.take( ) );
+            for ( int i = 0; i < 4 * volume.m_count; ++i )
+                volume.m_planes[ i ] = real( g.take( ) );
             for ( float& f : shadow.m_clip )
                 f = real( g.take( ) );
-            shadow.m_planes = cascade;
+            shadow.m_volume = &volume;
             manager->draw_shadow( shadow );
             calls += static_cast< int >( hooks.m_log.size( ) );
             compare_log( );
@@ -1360,6 +1360,7 @@ struct gfx_model_scene_t
     std::vector< std::unique_ptr< gfx_scene_mesh_t > > m_meshes;
     std::vector< std::unique_ptr< gfx_scene_part_t > > m_parts;
     std::vector< const gfx_scene_node_t* > m_roots;
+    std::vector< const gfx_scene_mesh_t* > m_mesh_table;
 };
 
 inline const gfx_scene_node_t* gfx_model_read_node( anim_cursor_t& g, gfx_model_scene_t& scene, const std::vector< gfx_scene_material_t >& rows )
@@ -1376,6 +1377,10 @@ inline const gfx_scene_node_t* gfx_model_read_node( anim_cursor_t& g, gfx_model_
         scene.m_meshes.push_back( std::make_unique< gfx_scene_mesh_t >( ) );
         gfx_scene_mesh_t* m = scene.m_meshes.back( ).get( );
         n->m_mesh = m;
+        const unsigned index = g.take( );
+        if ( scene.m_mesh_table.size( ) <= index )
+            scene.m_mesh_table.resize( index + 1 );
+        scene.m_mesh_table[ index ] = m;
         for ( float& f : m->m_min )
             f = real( g.take( ) );
         for ( float& f : m->m_max )
@@ -1428,50 +1433,14 @@ inline bool verify_gfx_static_model( )
         r.m_material = g.take( ) + 1;
         r.m_depth_material = g.take( ) + 1;
         map.m_table.push_back( { r.m_name, g.take( ) + 1 } );
+        r.m_casts = static_cast< std::uint8_t >( g.take( ) );
+        r.m_shadow_material = g.take( ) + 1;
     }
     const unsigned draws = g.take( );
     gfx_model_scene_t scene;
     int commands = 0;
-    for ( unsigned d = 0; d < draws; ++d )
+    const auto compare_commands = [ & ]( )
     {
-        const unsigned trees = g.take( );
-        if ( trees )
-        {
-            scene = gfx_model_scene_t( );
-            for ( unsigned i = 0; i < trees; ++i )
-                scene.m_roots.push_back( gfx_model_read_node( g, scene, rows ) );
-        }
-        sort.m_key_lo = g.take( );
-        sort.m_key_hi = g.take( );
-        gfx_static_model_t model;
-        model.m_colour = g.take( );
-        model.m_word = g.take( );
-        model.m_lod = real( g.take( ) );
-        model.m_byte_1c = static_cast< std::uint8_t >( g.take( ) );
-        model.m_two_pass = static_cast< std::uint8_t >( g.take( ) );
-        model.m_map = g.take( ) ? &map : nullptr;
-        model.m_scene = &scene.m_roots;
-        gfx_draw_params_t params;
-        gfx_camera_t camera;
-        params.m_second_depth = static_cast< std::uint8_t >( g.take( ) );
-        params.m_lod = real( g.take( ) );
-        camera.m_far = real( g.take( ) );
-        for ( float& f : camera.m_eye )
-            f = real( g.take( ) );
-        for ( int i = 0; i < 3; ++i )
-            params.m_eye[ i ] = real( g.take( ) );
-        for ( float& f : params.m_clip )
-            f = real( g.take( ) );
-        for ( float& f : camera.m_planes )
-            f = real( g.take( ) );
-        float parent[ 16 ];
-        for ( float& f : parent )
-            f = real( g.take( ) );
-        params.m_camera = &camera;
-        sort.m_commands[ 0 ].clear( );
-        sort.m_buffers[ 0 ].m_used = 0;
-        std::fill( sort.m_buffers[ 0 ].m_memory.begin( ), sort.m_buffers[ 0 ].m_memory.begin( ) + 0x10000, static_cast< std::uint8_t >( 0 ) );
-        model.draw( sort, parent, params );
         const unsigned count = g.take( );
         g.eq( static_cast< unsigned >( sort.m_commands[ 0 ].size( ) ), count );
         commands += static_cast< int >( count );
@@ -1504,6 +1473,84 @@ inline bool verify_gfx_static_model( )
                 g.eq( w, g.take( ) );
             }
         }
+    };
+    const auto fresh = [ & ]( )
+    {
+        sort.m_commands[ 0 ].clear( );
+        sort.m_buffers[ 0 ].m_used = 0;
+        std::fill( sort.m_buffers[ 0 ].m_memory.begin( ), sort.m_buffers[ 0 ].m_memory.begin( ) + 0x10000, static_cast< std::uint8_t >( 0 ) );
+    };
+    for ( unsigned d = 0; d < draws; ++d )
+    {
+        const unsigned trees = g.take( );
+        if ( trees )
+        {
+            scene = gfx_model_scene_t( );
+            for ( unsigned i = 0; i < trees; ++i )
+                scene.m_roots.push_back( gfx_model_read_node( g, scene, rows ) );
+        }
+        sort.m_key_lo = g.take( );
+        sort.m_key_hi = g.take( );
+        gfx_static_model_t model;
+        model.m_colour = g.take( );
+        model.m_word = g.take( );
+        model.m_lod = real( g.take( ) );
+        model.m_byte_1c = static_cast< std::uint8_t >( g.take( ) );
+        model.m_two_pass = static_cast< std::uint8_t >( g.take( ) );
+        model.m_map = g.take( ) ? &map : nullptr;
+        model.m_scene = &scene.m_roots;
+        model.m_meshes = &scene.m_mesh_table;
+        gfx_draw_params_t params;
+        gfx_camera_t camera;
+        params.m_second_depth = static_cast< std::uint8_t >( g.take( ) );
+        params.m_lod = real( g.take( ) );
+        camera.m_far = real( g.take( ) );
+        for ( float& f : camera.m_eye )
+            f = real( g.take( ) );
+        for ( int i = 0; i < 3; ++i )
+            params.m_eye[ i ] = real( g.take( ) );
+        for ( float& f : params.m_clip )
+            f = real( g.take( ) );
+        for ( float& f : camera.m_planes )
+            f = real( g.take( ) );
+        float parent[ 16 ];
+        for ( float& f : parent )
+            f = real( g.take( ) );
+        params.m_camera = &camera;
+        fresh( );
+        model.draw( sort, parent, params );
+        compare_commands( );
+        g.eq( sort.m_key_lo, g.take( ) );
+        g.eq( sort.m_key_hi, g.take( ) );
+        fresh( );
+        model.prefetch( sort );
+        compare_commands( );
+        fresh( );
+        gfx_shadow_params_t shadow;
+        gfx_shadow_volume_t volume;
+        std::vector< gfx_shadow_cascade_t > cascades;
+        for ( int i = 0; i < 3; ++i )
+            shadow.m_eye[ i ] = real( g.take( ) );
+        shadow.m_lod = real( g.take( ) );
+        for ( float& f : shadow.m_clip )
+            f = real( g.take( ) );
+        volume.m_count = static_cast< int >( g.take( ) );
+        for ( int i = 0; i < 4 * volume.m_count; ++i )
+            volume.m_planes[ i ] = real( g.take( ) );
+        cascades.resize( g.take( ) );
+        for ( gfx_shadow_cascade_t& c : cascades )
+        {
+            c.m_volume.m_count = static_cast< int >( g.take( ) );
+            for ( float& f : c.m_matrix )
+                f = real( g.take( ) );
+            for ( int i = 0; i < 4 * c.m_volume.m_count; ++i )
+                c.m_volume.m_planes[ i ] = real( g.take( ) );
+        }
+        shadow.m_volume = &volume;
+        shadow.m_cascades = static_cast< int >( cascades.size( ) );
+        shadow.m_cascade = cascades.data( );
+        model.draw_shadow( sort, parent, shadow );
+        compare_commands( );
         g.eq( sort.m_key_lo, g.take( ) );
         g.eq( sort.m_key_hi, g.take( ) );
     }
@@ -1533,7 +1580,7 @@ inline bool verify_gfx_static_model( )
     }
     if ( g.failed == 0 && g.at == g.size )
     {
-        LOG_SUCCESS( "gfx_static_model matches retail's VuStaticModelInstance draw (0x520130, 0x5215A0, 0x521960) on %u draws, %d commands, and 0x535220 on %u boxes (%d visible): %d words exact",
+        LOG_SUCCESS( "gfx_static_model matches retail's VuStaticModelInstance draw (0x520130, 0x5215A0, 0x521960), shadow (0x5201B0, 0x520670, 0x5354B0, 0x535740, 0x5A8580), prefetch 0x520200 on %u draws, %d commands, and 0x535220 on %u boxes (%d visible): %d words exact",
                      draws, commands, boxes, visible, g.compared );
         return true;
     }
