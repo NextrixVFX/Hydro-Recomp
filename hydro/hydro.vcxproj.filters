@@ -552,6 +552,9 @@
     <ClInclude Include="workspace\core\world\motion.hxx">
       <Filter>workspace\core\world</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\core\world\msgbox.hxx">
+      <Filter>workspace\core\world</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\core\world\opening.hxx">
       <Filter>workspace\core\world</Filter>
     </ClInclude>

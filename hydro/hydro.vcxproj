@@ -276,6 +276,7 @@
     <ClInclude Include="workspace\core\world\models.hxx" />
     <ClInclude Include="workspace\core\world\modes.hxx" />
     <ClInclude Include="workspace\core\world\motion.hxx" />
+    <ClInclude Include="workspace\core\world\msgbox.hxx" />
     <ClInclude Include="workspace\core\world\opening.hxx" />
     <ClInclude Include="workspace\core\world\pause.hxx" />
     <ClInclude Include="workspace\core\world\pfx.hxx" />

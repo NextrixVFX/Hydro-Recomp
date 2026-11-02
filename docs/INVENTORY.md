@@ -18,10 +18,10 @@ Subsystems come from the RTTI class whose vtable holds the function (1253 classe
 
 | | functions | bytes of code |
 |---|---:|---:|
-| verified | 3674 | 1244367 |
-| callee | 765 | 164779 |
-| cited | 629 | 188789 |
-| absent | 3570 | 628325 |
+| verified | 3675 | 1244467 |
+| callee | 764 | 164679 |
+| cited | 634 | 189414 |
+| absent | 3565 | 627700 |
 | **all** | **8638** | **2226260** |
 
 ## By subsystem
@@ -33,12 +33,12 @@ Sorted by code size. Counts are functions; the last column is the share of that 
 | unattributed | 1845 | 824 | 300 | 145 | 576 | 408720 of 695394 |
 | physics (Bullet) | 646 | 451 | 17 | 46 | 132 | 129825 of 256657 |
 | entity / component / script framework | 1094 | 564 | 117 | 59 | 354 | 130475 of 207438 |
-| HUD / UI / fonts | 648 | 277 | 77 | 43 | 251 | 105506 of 184315 |
-| game modes / race | 766 | 248 | 43 | 83 | 392 | 109146 of 179957 |
+| HUD / UI / fonts | 648 | 278 | 76 | 45 | 249 | 105606 of 184315 |
+| game modes / race | 766 | 248 | 43 | 85 | 390 | 109146 of 179957 |
 | rendering / gfx | 552 | 246 | 36 | 55 | 215 | 65802 of 126915 |
 | water | 325 | 219 | 27 | 38 | 41 | 65094 of 96416 |
 | boat | 264 | 198 | 22 | 22 | 22 | 71290 of 87400 |
-| engine core / math / containers | 391 | 135 | 21 | 44 | 191 | 38594 of 76072 |
+| engine core / math / containers | 391 | 135 | 21 | 45 | 190 | 38594 of 76072 |
 | other classes | 731 | 12 | 5 | 5 | 709 | 6660 of 67698 |
 | assets | 286 | 131 | 31 | 20 | 104 | 19256 of 61239 |
 | particles | 215 | 185 | 5 | 14 | 11 | 39264 of 45495 |
@@ -58,8 +58,8 @@ Over-approximate (a referenced vtable brings every slot) and under-approximate (
 
 | tier | functions | verified | callee | cited | absent | runtime / STL / thunk | platform layer | game + engine logic not verified |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| race | 4905 | 2767 | 542 | 465 | 1131 | 68 | 610 | 1768 |
-| game | 2431 | 891 | 218 | 151 | 1171 | 77 | 313 | 1232 |
+| race | 4905 | 2767 | 542 | 467 | 1129 | 68 | 610 | 1768 |
+| game | 2431 | 892 | 217 | 154 | 1168 | 77 | 313 | 1231 |
 | service | 452 | 11 | 2 | 10 | 429 | 45 | 98 | 306 |
 | dead | 850 | 5 | 3 | 3 | 839 | 61 | 126 | 659 |
 
