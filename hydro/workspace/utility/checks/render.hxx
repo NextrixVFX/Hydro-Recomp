@@ -2575,6 +2575,7 @@ inline bool verify_gfx_animated_model( )
 }
 
 #include <workspace/utility/checks/device.hxx>
+#include <workspace/utility/checks/hudpass.hxx>
 
 inline bool verify_render_all( )
 {
@@ -2595,5 +2596,6 @@ inline bool verify_render_all( )
     ok = verify_text_word_wrap( ) && ok;
     ok = verify_gfx_sort_life( ) && ok;
     ok = verify_gfx_device( ) && ok;
+    ok = verify_ui_record_draws( ) && ok;
     return ok;
 }

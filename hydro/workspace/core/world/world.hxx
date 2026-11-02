@@ -34,6 +34,7 @@
 #include <workspace/core/world/action.hxx>
 #include <workspace/core/world/settings.hxx>
 #include <workspace/core/world/sorted.hxx>
+#include <workspace/core/world/hudpass.hxx>
 #include <workspace/core/world/foliage.hxx>
 #include <workspace/core/assets/texture.hxx>
 #include <workspace/utility/logger.hxx>
