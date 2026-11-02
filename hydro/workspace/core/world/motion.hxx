@@ -86,6 +86,7 @@ inline void c_world::motions_game_initialize( )
     m_joints.on_moved( [ this ]( entity_t& child, const float* matrix, const float* linear, const float* angular ) {
         motion_child( child, matrix, linear, angular );
     } );
+    m_joints.on_instance( [ this ]( entity_t& parent ) { return prop_instance( parent ); } );
     m_joints.game_initialize( );
     for ( rotator_t& motion : m_rotators )
     {
@@ -93,6 +94,67 @@ inline void c_world::motions_game_initialize( )
             motion.motion = m_joints.find_motion( motion.target );
         if ( motion.initially_active )
             rotator_activate( motion );
+    }
+}
+
+// The instance of an animated prop that has attach records (joints.hxx), made on first use: 0x5EC300's model component loads "Model
+// Asset" as the boat's does (world/skeleton.hxx skel_model_create), its clip the prop's VuPlayAnimationEntity's.
+inline skel_instance_t* c_world::prop_instance( entity_t& e )
+{
+    const auto found = m_prop_skels.find( &e );
+    if ( found != m_prop_skels.end( ) )
+        return &found->second->model.instance;
+    const std::string path = entity_path( e );
+    for ( const animated_t& item : m_animated )
+    {
+        if ( item.path != path )
+            continue;
+        std::vector< std::uint8_t > blob;
+        if ( !m_archive.read( ( "VuAnimatedModelAsset/" + item.asset ).c_str( ), blob ) )
+            return nullptr;
+        auto s = std::make_unique< prop_skel_t >( );
+        if ( !skel_model_create( s->model, blob.data( ), blob.size( ) ) || s->model.instance.skeleton == nullptr )
+            return nullptr;
+        skel_animated_init( s->animated, *s->model.instance.skeleton );
+        std::vector< std::uint8_t > clip;
+        if ( !item.clip.empty( ) && m_archive.read( ( "VuAnimationAsset/" + item.clip ).c_str( ), clip ) &&
+             skel_animation_load( clip.data( ), clip.size( ), s->clip ) )
+        {
+            s->control.animation = &s->clip;
+            s->has_clip = true;
+        }
+        skel_instance_t* i = &s->model.instance;
+        m_prop_skels[ &e ] = std::move( s );
+        return i;
+    }
+    return nullptr;
+}
+
+// VuAnimatedPropEntity's tick 0x5ED030 as the attach records see it: the pose (0x5169E0's time: the old path's control; 0x516CF0,
+// 0x532720), then its attach component's slot 14 with the transform's world and zero velocities (0x5ED3BE), whether a clip plays or not.
+inline void c_world::animated_attach_tick( )
+{
+    for ( auto& pair : m_prop_skels )
+    {
+        prop_skel_t& s = *pair.second;
+        const std::string path = entity_path( *pair.first );
+        for ( const animated_t& item : m_animated )
+            if ( item.path == path && s.has_clip && item.playing )
+            {
+                if ( !s.added )
+                {
+                    skel_animated_add( s.animated, &s.control );
+                    s.added = true;
+                }
+                s.control.time = item.control.time;
+                if ( skel_animated_build( s.animated ) )
+                    skel_instance_set_pose( s.model.instance, &s.animated );
+            }
+        const transform_component_t* t = entity_transform( *pair.first );
+        if ( !t )
+            continue;
+        const float zero[ 4 ] = { };
+        m_joints.parent_moved( *pair.first, t->world, zero, zero );
     }
 }
 

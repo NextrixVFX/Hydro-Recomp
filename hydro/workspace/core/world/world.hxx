@@ -473,6 +473,8 @@ private:
     void motions_game_initialize( );
     void rotator_activate( rotator_t& motion );
     void rotator_deactivate( rotator_t& motion );
+    skel_instance_t* prop_instance( entity_t& e );
+    void animated_attach_tick( );
     bool motion_release( const entity_t& e );
 
 
@@ -614,6 +616,7 @@ private:
         m_initialized.clear( );
         m_ifs.clear( );
         m_joints.clear( );
+        m_prop_skels.clear( );
         m_motion_unknown = 0;
         m_refs.clear( );
         m_booleans.clear( );
@@ -1421,6 +1424,7 @@ public:
 
         const double props_start = trace::now( );
         skin_props( dt );
+        animated_attach_tick( );
         update_static_draws( );
         trace::frame( ).props += trace::now( ) - props_start;
 
@@ -1711,6 +1715,17 @@ private:
     std::set< std::string > m_start_lights;
     std::set< std::string > m_ifs;
     c_joints m_joints;
+    // An animated prop with attach records: its VuAnimatedModelInstance (+0x64 +0x68) and VuAnimatedSkeleton (+0x100), on
+    // world/skeleton.hxx; the clip's time is the old pose path's control (animate.hxx). FLAGGED: one clip, no blend (0x5ED067's fade).
+    struct prop_skel_t
+    {
+        skel_model_t model;
+        skel_animation_t clip;
+        skel_animated_t animated;
+        skel_control_t control;
+        bool has_clip = false, added = false;
+    };
+    std::map< entity_t*, std::unique_ptr< prop_skel_t > > m_prop_skels;
     int m_motion_unknown = 0;   // a motion child's IF slot 0 not read
     // (entity, refName) -> the full path the ref points at.
     std::map< std::pair< std::string, std::string >, std::string > m_refs;

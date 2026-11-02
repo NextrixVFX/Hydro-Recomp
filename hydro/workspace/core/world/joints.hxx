@@ -3,6 +3,7 @@
 #include <workspace/core/world/attach.hxx>
 #include <workspace/core/world/rotate.hxx>
 #include <workspace/core/world/race.hxx>
+#include <workspace/core/world/skeleton.hxx>
 
 #include <cstdint>
 #include <functional>
@@ -17,17 +18,19 @@
 //   0x5F5810 the first holding 0x736968: VuMotionComponent 0x74E984 (one per entity in every captured class).
 // A motion's owner IF slot 0 is `m_moved` (c_world::motion_child by class); slots 1 / 2 of the classes that are children here
 // (corona 0x755BC8, static pfx 0x755EB4, audio emitter 0x756EA0) are the nullsub 0x401560.
-// UNKNOWN: an animated parent's update 0x61E010 needs its instance's +0x18 node matrices, and c_world's animated props do not hold
-// them yet (animate.hxx's old pose path): the record is kept, its update is not run, counted (`unknown( )`).
+// An animated parent's update 0x61E010 reads its instance's +0x18 node matrices: `m_instance` (c_world::prop_instance) answers the
+// instance; none (no model): UNKNOWN, the update not run, counted (`unknown( )`).
 class c_joints
 {
 public:
     using moved_t = std::function< void( entity_t& child, const float* matrix, const float* linear, const float* angular ) >;
+    using instance_t = std::function< skel_instance_t*( entity_t& parent ) >;
 
     struct host_t
     {
         entity_t* entity = nullptr;
         bool animated = false;
+        skel_instance_t* instance = nullptr;   // the animated component's +0x10
         attach_component_t c;
     };
     struct motion_t
@@ -52,6 +55,7 @@ public:
         m_unknown = 0;
     }
     void on_moved( moved_t moved ) { m_moved = std::move( moved ); }
+    void on_instance( instance_t instance ) { m_instance = std::move( instance ); }
 
     void add( entity_t& entity, const attach_properties_t& p, entity_t* parent, entity_t* child )
     {
@@ -102,7 +106,13 @@ public:
             return;
         if ( it->second.animated )
         {
-            ++m_unknown;
+            if ( it->second.instance == nullptr )
+            {
+                ++m_unknown;
+                return;
+            }
+            it->second.c.bones = it->second.instance->matrices.data( );
+            attach_animated_update( it->second.c, world, linear, angular );
             return;
         }
         attach_offset_update( it->second.c, world, linear, angular );
@@ -150,10 +160,10 @@ private:
         h.user = this;
         h.find_attach = []( void* u, entity_t* e ) { return static_cast< c_joints* >( u )->find_attach( e ); };
         h.find_motion = []( void* u, entity_t* e ) { return static_cast< c_joints* >( u )->find_motion( e ); };
-        h.attach = []( void*, host_t* c, motion_t* m, const float* relative, const std::string& ) {
-            // Slot 12. findNodeByName 0x52F3C0 answers through the animated parent's skeleton: not held (see the head): node 0.
+        h.attach = []( void*, host_t* c, motion_t* m, const float* relative, const std::string& node ) {
+            // Slot 12; findNodeByName 0x52F3C0 on the animated parent's skeleton (no instance: UNKNOWN, node 0; its update is not run).
             if ( c->animated )
-                attach_animated_attach( c->c, m->m, relative, 0 );
+                attach_animated_attach( c->c, m->m, relative, c->instance ? skel_instance_find_node( *c->instance, node.c_str( ) ) : 0 );
             else
                 attach_offset_attach( c->c, m->m, relative );
         };
@@ -186,6 +196,8 @@ private:
                 h.entity = e;
                 h.animated = c.m_vtable == 0x75829Cu;
                 h.c.entity = e;
+                if ( h.animated && m_instance )
+                    h.instance = m_instance( *e );
                 return &h;
             }
         return nullptr;
@@ -195,5 +207,6 @@ private:
     std::map< const entity_t*, host_t > m_hosts;
     std::map< const entity_t*, motion_t > m_motions;
     moved_t m_moved;
+    instance_t m_instance;
     int m_unknown = 0;
 };
