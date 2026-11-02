@@ -2045,6 +2045,153 @@ struct gfx_corona_check_ray_t : gfx_corona_ray_t
     std::vector< float > m_seen;
 };
 
+// Case gfx_corona_entity: world/corona.hxx against retail's 0x5E9B60, 0x61D000, 0x5E9BD0, 0x61CE30, 0x50CDF0, 0x50CE20.
+struct gfx_corona_entity_check_ray_t : gfx_corona_entity_ray_t
+{
+    bool blocked( const float from[ 3 ], const float to[ 3 ], std::uint32_t mask ) override
+    {
+        const bool hit = m_seeds[ m_used++ ] != 0;
+        for ( int i = 0; i < 3; ++i )
+            m_seen.push_back( from[ i ] );
+        for ( int i = 0; i < 3; ++i )
+            m_seen.push_back( to[ i ] );
+        m_masks.push_back( mask );
+        return hit;
+    }
+    unsigned m_seeds[ 4 ] = { };
+    unsigned m_used = 0;
+    std::vector< float > m_seen;
+    std::vector< std::uint32_t > m_masks;
+};
+
+inline bool verify_gfx_corona_entity( )
+{
+    anim_cursor_t g;
+    g.w = g_golden_gce_words;
+    g.size = g_golden_gce_size;
+    g.where = "gfx_corona_entity";
+    const auto real = []( std::uint32_t u ) { float f; std::memcpy( &f, &u, 4 ); return f; };
+    const auto bits = []( float f ) { std::uint32_t u; std::memcpy( &u, &f, 4 ); return u; };
+    static std::uint8_t image[ 0x2E0 ];
+    static collision_object_t object;
+    static int surface_answer;
+    gfx_corona_collision_ray_t bullet;
+    bullet.m_image = []( void*, const collision_object_t& ) { return static_cast< const std::uint8_t* >( image ); };
+    bullet.m_surface = []( void*, const collision_object_t&, int ) { return surface_answer; };
+    const unsigned rows = g.take( );
+    int kinds[ 4 ] = { };
+    for ( unsigned r = 0; r < rows; ++r )
+    {
+        const std::size_t words = g.take( );
+        const std::size_t stop = g.at + words;
+        const unsigned kind = g.take( );
+        ++kinds[ kind & 3u ];
+        if ( kind == 0 )
+        {
+            gfx_corona_entity_t e;
+            const int count = static_cast< int >( g.take( ) );
+            e.m_speed = real( g.take( ) );
+            e.m_radius = real( g.take( ) );
+            e.m_mask = g.take( );
+            const float dt = real( g.take( ) );
+            e.m_phase = real( g.take( ) );
+            float position[ 3 ];
+            for ( float& f : position )
+                f = real( g.take( ) );
+            for ( std::uint8_t& b : e.m_request )
+                b = static_cast< std::uint8_t >( g.take( ) );
+            for ( float& f : e.m_visible )
+                f = real( g.take( ) );
+            std::vector< gfx_sun_view_t > views( count );
+            for ( gfx_sun_view_t& v : views )
+                for ( float& f : v.m_camera.m_eye )
+                    f = real( g.take( ) );
+            gfx_corona_entity_check_ray_t ray;
+            for ( unsigned& u : ray.m_seeds )
+                u = g.take( );
+            e.tick( position, views.data( ), count, ray, dt );
+            const unsigned casts = static_cast< unsigned >( ray.m_masks.size( ) );
+            g.eq( casts, g.take( ) );
+            for ( unsigned i = 0; i < casts; ++i )
+            {
+                for ( int k = 0; k < 6; ++k )
+                    g.eq( bits( ray.m_seen[ i * 6u + k ] ), g.take( ) );
+                g.eq( ray.m_masks[ i ], g.take( ) );
+            }
+            for ( std::uint8_t b : e.m_request )
+                g.eq( b, g.take( ) );
+            for ( float f : e.m_visible )
+                g.eq( bits( f ), g.take( ) );
+            g.eq( bits( e.m_phase ), g.take( ) );
+        }
+        else if ( kind == 1 )
+        {
+            gfx_corona_entity_t e;
+            e.m_radius = real( g.take( ) );
+            float low[ 3 ], high[ 3 ];
+            e.aabb( low, high );
+            for ( float f : low )
+                g.eq( bits( f ), g.take( ) );
+            for ( float f : high )
+                g.eq( bits( f ), g.take( ) );
+        }
+        else if ( kind == 2 )
+        {
+            const std::uint8_t flags = static_cast< std::uint8_t >( g.take( ) );
+            const std::int16_t group = static_cast< std::int16_t >( g.take( ) );
+            const std::uint32_t mask = g.take( );
+            object.internal_type = static_cast< int >( g.take( ) );
+            g.eq( gfx_corona_ray_wants_mask( flags, group, mask ) ? 1u : 0u, g.take( ) );
+            image[ 0x2D0 ] = flags;
+            std::memcpy( image + 0x2CA, &group, 2 );
+            bullet.m_use_mask = true;
+            bullet.m_mask = mask;
+            g.eq( bullet.wants( object ) ? 1u : 0u, g.take( ) );
+        }
+        else
+        {
+            const bool in_world = g.take( ) != 0;
+            const bool info = g.take( ) != 0;
+            const bool shape = g.take( ) != 0;
+            const unsigned surface = g.take( );
+            const int triangle = info ? static_cast< int >( g.take( ) ) : ( g.take( ), -1 );
+            surface_answer = shape ? static_cast< int >( surface ) : -1;
+            const float fraction = real( g.take( ) );
+            bullet.m_result = gfx_corona_result_t( );
+            bullet.m_result.m_fraction = real( g.take( ) );
+            bullet.m_hit = false;
+            for ( int i = 0; i < 12; ++i )
+            {
+                const std::uint32_t u = g.take( );
+                std::memcpy( image + 0x10 + 4 * i, &u, 4 );
+            }
+            float normal[ 4 ];
+            for ( float& f : normal )
+                f = real( g.take( ) );
+            g.eq( bits( bullet.add( object, triangle, fraction, normal, in_world ) ), g.take( ) );
+            g.eq( bullet.m_hit ? 1u : 0u, g.take( ) );
+            g.eq( bullet.m_result.m_body ? 1u : 0u, g.take( ) );
+            g.eq( bits( bullet.m_result.m_fraction ), g.take( ) );
+            g.eq( bullet.m_result.m_triangle, g.take( ) );
+            for ( int i = 0; i < 3; ++i )
+                g.eq( bullet.m_result.m_normal[ i ], g.take( ) );
+        }
+        if ( g.at != stop )
+        {
+            LOG_ERROR( "gfx_corona_entity: row %u used %zu of %zu words", r, g.at + words - stop, words );
+            return false;
+        }
+    }
+    if ( g.failed == 0 && g.at == g.size && kinds[ 0 ] > 0 && kinds[ 1 ] > 0 && kinds[ 2 ] > 0 && kinds[ 3 ] > 0 )
+    {
+        LOG_SUCCESS( "gfx_corona_entity matches retail's VuCoronaEntity tick 0x5E9B60 + 0x61D000, aabb 0x5E9BD0, ray result 0x61CE30, RayTestWrapper 0x50CDF0 / 0x50CE20: %d words, rows %d / %d / %d / %d",
+            g.compared, kinds[ 0 ], kinds[ 1 ], kinds[ 2 ], kinds[ 3 ] );
+        return true;
+    }
+    LOG_ERROR( "gfx_corona_entity FAILED %d of %d words (cursor %zu of %zu)", g.failed, g.compared, g.at, g.size );
+    return false;
+}
+
 inline bool verify_gfx_corona( )
 {
     anim_cursor_t g;
@@ -2379,6 +2526,7 @@ inline bool verify_render_all( )
     ok = verify_gfx_real_model( ) && ok;
     ok = verify_gfx_components( ) && ok;
     ok = verify_gfx_corona( ) && ok;
+    ok = verify_gfx_corona_entity( ) && ok;
     ok = verify_gfx_sort_life( ) && ok;
     return ok;
 }
