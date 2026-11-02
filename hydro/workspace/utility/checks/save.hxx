@@ -1,6 +1,7 @@
 #pragma once
 
 #include <workspace/core/entity/persist.hxx>
+#include <workspace/core/options.hxx>
 #include <workspace/core/save/cloud.hxx>
 #include <workspace/core/save/ghost.hxx>
 #include <workspace/core/save/profile.hxx>
@@ -777,6 +778,36 @@ inline bool verify_ghost_game( )
     return bad == 0;
 }
 
+// c_options against retail's 0x55EB30 + 0x55EDD0 (case options).
+inline bool verify_options( )
+{
+    save_words_t c{ g_golden_options_words };
+    std::vector< std::string > keys( c.next( ) );
+    for ( std::string& k : keys )
+        k = c.str( );
+    const unsigned n = c.next( );
+    int bad = 0;
+    for ( unsigned v = 0; v < n; ++v )
+    {
+        const std::string text = c.str( );
+        c_options options;
+        options.parse( text.c_str( ) );
+        for ( const std::string& key : keys )
+        {
+            const bool want = c.next( ) != 0;
+            const std::string value = c.str( );
+            std::string got = "old";
+            if ( ( options.get( key.c_str( ), got ) != want || got != value ) && bad++ < 6 )
+                LOG_ERROR( "options text '%s' key '%s': '%s', retail '%s'", text.c_str( ), key.c_str( ), got.c_str( ), value.c_str( ) );
+        }
+    }
+    if ( bad == 0 )
+        LOG_SUCCESS( "c_options matches retail's VuParseCommandLine 0x55EB30 0x55EDD0: %u texts x %zu keys", n, keys.size( ) );
+    else
+        LOG_ERROR( "options FAILED %d", bad );
+    return bad == 0;
+}
+
 inline bool verify_save_all( )
 {
     bool ok = verify_save_vujb( );
@@ -786,5 +817,6 @@ inline bool verify_save_all( )
     ok = verify_save_cloud( ) && ok;
     ok = verify_save_script( ) && ok;
     ok = verify_ghost_game( ) && ok;
+    ok = verify_options( ) && ok;
     return ok;
 }
