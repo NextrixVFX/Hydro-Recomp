@@ -2597,5 +2597,6 @@ inline bool verify_render_all( )
     ok = verify_gfx_sort_life( ) && ok;
     ok = verify_gfx_device( ) && ok;
     ok = verify_ui_record_draws( ) && ok;
+    ok = verify_mode_switch( ) && ok;
     return ok;
 }

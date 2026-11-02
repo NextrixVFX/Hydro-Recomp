@@ -1371,11 +1371,8 @@ inline bool load_model_scene( const std::vector< std::uint8_t >& blob, model_t& 
                     part.detail = second;
                 // The one-bit alpha texture is bound by the shader's other two programs' tables (the depth / shadow
                 // passes: "OneBitAlphaTexture" beside "gAlphaTestEnabled") - which retail binds is the renderer's.
-                bool one_bit = false;
-                for ( int other = 1; other < 3; ++other )
-                    for ( const scene_texture_t& t : shader.tables[ other ].textures )
-                        one_bit = one_bit || t.name == "OneBitAlphaTexture";
-                part.alpha_test = model_alpha( part.texture, one_bit );
+                // The cut-out is retail's sort type +0x20 = 3, not the texture's name.
+                part.alpha_test = shader.mode == 3u ? 1 : 0;
                 if ( blend && part.alpha_test == 0 )
                     part.alpha_test = 10;
                 model.parts.push_back( std::move( part ) );
