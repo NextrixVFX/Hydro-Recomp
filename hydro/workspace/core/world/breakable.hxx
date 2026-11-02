@@ -25,6 +25,14 @@
 #include <string>
 #include <xmmintrin.h>
 
+// VuBreakablePropEntity's input "Break" 0x4349F0 (the ctor's plug; thiscall entity, VuRetVal*, params; retn 8): the weak ref +0xE4
+// released (vt+0), the request +0xD0 = 1, VuRetVal 0.
+inline void breakable_on_break( std::uint8_t& request, const void*& target )
+{
+    target = nullptr;
+    request = 1;
+}
+
 struct breakable_t
 {
     std::uint8_t visible = 1;        // VuPropEntity's "Initially Visible" (+0x78)

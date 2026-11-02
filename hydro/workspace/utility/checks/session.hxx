@@ -1928,9 +1928,47 @@ inline bool verify_game_awards( )
     return failed == 0;
 }
 
+// The two prop plugs against retail (case prop_plugs): "Activate" 0x438160 on every flag / state pair, "Break" 0x4349F0.
+inline bool verify_prop_plugs( )
+{
+    const unsigned* p = g_golden_ppl_words;
+    const unsigned na = *p++;
+    int failed = 0;
+    for ( unsigned k = 0; k < na; ++k, p += 6 )
+    {
+        solver_rigid_t b{ };
+        std::memcpy( reinterpret_cast< std::uint8_t* >( &b ) + 0xD8, &p[ 0 ], 4 );
+        std::memcpy( reinterpret_cast< std::uint8_t* >( &b ) + 0xE4, &p[ 1 ], 4 );
+        const unsigned two = 0x40000000u;
+        std::memcpy( reinterpret_cast< std::uint8_t* >( &b ) + 0xE8, &two, 4 );
+        unsigned state, time;
+        dynamic_prop_activate( p[ 2 ] ? reinterpret_cast< std::uint8_t* >( &b ) : nullptr );
+        std::memcpy( &state, reinterpret_cast< std::uint8_t* >( &b ) + 0xE4, 4 );
+        std::memcpy( &time, reinterpret_cast< std::uint8_t* >( &b ) + 0xE8, 4 );
+        if ( state != p[ 3 ] || time != p[ 4 ] || p[ 5 ] != 0u )
+            ++failed;
+    }
+    const unsigned nb = *p++;
+    for ( unsigned k = 0; k < nb; ++k, p += 4 )
+    {
+        std::uint8_t request = static_cast< std::uint8_t >( p[ 0 ] );
+        int x = 0;
+        const void* target = &x;
+        breakable_on_break( request, target );
+        if ( request != p[ 1 ] || target != nullptr || p[ 2 ] != 1u || p[ 3 ] != 0u )
+            ++failed;
+    }
+    if ( failed == 0 )
+        LOG_SUCCESS( "the prop plugs (Activate 0x438160, Break 0x4349F0) match retail on %u + %u vectors", na, nb );
+    else
+        LOG_ERROR( "the prop plugs FAILED on %d of %u vectors", failed, na + nb );
+    return failed == 0;
+}
+
 inline bool verify_session_all( )
 {
     bool ok = true;
+    ok = verify_prop_plugs( ) && ok;
     ok = verify_game_awards( ) && ok;
     ok = verify_pause_gate( ) && ok;
     ok = verify_tire_track( ) && ok;

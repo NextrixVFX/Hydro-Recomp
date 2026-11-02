@@ -1499,6 +1499,29 @@ inline bool race_event_dispatch( race_session_t& s, const std::string& entity, c
             dp->request = 1;
             return true;
         }
+    // VuDynamicGamePropEntity's "Activate" 0x438160 and VuBreakablePropEntity's "Break" 0x4349F0.
+    if ( plug == "Activate" )
+        for ( const auto& dp : s.dyn_props )
+        {
+            std::string path;
+            for ( const entity_t* e = dp->entity; e && e->m_parent; e = e->m_parent )
+                path = path.empty( ) ? e->m_name : e->m_name + "/" + path;
+            if ( path != entity )
+                continue;
+            dynamic_prop_activate( dp->body ? reinterpret_cast< std::uint8_t* >( &dp->body->body ) : nullptr );
+            return true;
+        }
+    if ( plug == "Break" )
+        for ( const auto& br : s.breakables )
+        {
+            std::string path;
+            for ( const entity_t* e = br->entity; e && e->m_parent; e = e->m_parent )
+                path = path.empty( ) ? e->m_name : e->m_name + "/" + path;
+            if ( path != entity )
+                continue;
+            breakable_on_break( br->request, br->target );
+            return true;
+        }
     // VuBreakableDynamicGamePropEntity's "Break" (the ctor's plug 0x433BA0, method 0x433860): the weak ref +0x168 released
     // (vt+0), +0x164 = 1, VuRetVal 0.
     if ( plug == "Break" )
