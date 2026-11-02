@@ -1183,7 +1183,10 @@ inline void race_drive_pfx_frame( race_session_t& s, race_drive_t& r, race_sessi
     pfx_frame_boat_t& e = s.pfx_boats[ r.index ];
     e.address = b.pfx.boat;
     e.view = b.pfx_view.get( );
-    e.records = r.records.empty( ) ? nullptr : r.records.data( );
+    // The engine's +0xF8 records are the ones 0x414760 refills: the thunk's (boat/thunk.hxx). r.records never leave zero: every thrust process with a drive index stood still.
+    std::vector< std::uint8_t >& records = b.thunk && !b.thunk->records.empty( ) ? b.thunk->records : r.records;
+    r.d.records = records.empty( ) ? nullptr : records.data( );
+    e.records = r.d.records;
     std::memcpy( e.position, r.d.transform + 0x80, 12 );
     std::memcpy( e.velocity, r.d.body + 0x140, 12 );
     e.hull = &h;

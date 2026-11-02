@@ -325,6 +325,32 @@ inline void c_world::foliage_build( const entity_t& root )
         m_retail->foliage_materials( m_foliage.m_material );
     const auto walk = [ & ]( const auto& self, const entity_t& e ) -> void
     {
+        // VuDynamicLightEntity: the transform watcher 0x5EE870 (position +0x80, direction +0x60), 0x5C30D0, gameInitialize 0x5EE790 turns it on when Initially On.
+        if ( e.m_type == "VuDynamicLightEntity" && e.m_state && m_retail )
+        {
+            const dynamic_light_t& s = static_cast< const dynamic_light_state_t* >( e.m_state.get( ) )->value;
+            const transform_component_t* t = entity_transform( const_cast< entity_t& >( e ) );
+            if ( t && !e.m_world_unknown )
+            {
+                m_retail->m_dynamic_lights.emplace_back( );
+                gfx_light_t& l = m_retail->m_dynamic_lights.back( );
+                std::memcpy( l.m_position, t->world + 12, 12 );
+                std::memcpy( l.m_direction, t->world + 4, 12 );
+                l.m_diffuse = s.diffuse;
+                l.m_specular = s.specular;
+                l.m_factor = s.factor;
+                l.m_range_a = s.falloff_min;
+                l.m_range_b = s.falloff_max;
+                l.m_cone = s.cone;
+                l.m_penumbra = s.penumbra;
+                l.m_draw_distance = s.draw_distance;
+                l.m_reflecting = s.reflecting;
+                m_retail->m_dynamic.update( l );
+                if ( s.initially_on )
+                    m_retail->m_dynamic.light_on( l );
+                m_light_of[ entity_path( e ) ] = &l;
+            }
+        }
         if ( e.m_type == "VuFoliageEntity" && e.m_state )
         {
             const foliage_state_t& s = *static_cast< const foliage_state_t* >( e.m_state.get( ) );

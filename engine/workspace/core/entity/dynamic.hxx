@@ -49,8 +49,8 @@ inline void dynamic_light_construct( dynamic_light_t& l )
 // to the value its target held when it was registered.
 inline void dynamic_light_load( dynamic_light_t& l, const value_t& properties )
 {
-    dynamic_light_t at_registration;
-    dynamic_light_construct( at_registration );
+    // A later document (the instance over its template) leaves what it does not author: the fallback is the value held now, the first load's being the ctor's.
+    const dynamic_light_t at_registration = l;
     property_bool( properties, "Initially On", l.initially_on, at_registration.initially_on );
     property_color( properties, "Diffuse Color", l.diffuse, at_registration.diffuse );
     property_color( properties, "Specular Color", l.specular, at_registration.specular );

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <functional>
+
 #include <workspace/core/world/pfxload.hxx>
 
 #include <cstdint>
@@ -303,6 +305,7 @@ struct pfx_manager_binding_t
 {
     pfx_runtime_t* rt = nullptr;
     const pfx_library_t* lib = nullptr;
+    std::function< void( const char* ) > named;   // told the path before a create: c_effects loads its asset
 };
 
 inline pfx_manager_ops_t pfx_manager_runtime_ops( pfx_manager_binding_t& b )
@@ -311,6 +314,8 @@ inline pfx_manager_ops_t pfx_manager_runtime_ops( pfx_manager_binding_t& b )
     o.user = &b;
     o.create = []( void* u, const char* path ) {
         pfx_manager_binding_t& x = *static_cast< pfx_manager_binding_t* >( u );
+        if ( x.named )
+            x.named( path );
         return pfx_runtime_create_path( *x.rt, *x.lib, path );
     };
     o.release = []( void* u, std::uint32_t inst ) {

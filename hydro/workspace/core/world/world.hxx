@@ -687,6 +687,13 @@ private:
             c_engine::drop( alpha );
         m_foliage = foliage_manager_t{ };
         m_foliage_entities.clear( );
+        if ( m_retail )
+        {
+            for ( gfx_light_t& l : m_retail->m_dynamic_lights )
+                m_retail->m_dynamic.light_off( l );
+            m_retail->m_dynamic_lights.clear( );
+        }
+        m_light_of.clear( );
         m_pfx.clear( );
         m_draws = 0;
         m_stack.clear( );
@@ -1521,7 +1528,25 @@ public:
             // 0x558AC0 / 0x558C00 after the walk: 0x5BBAA0. Ours, flagged: the level's "Foliage Tint" as loaded for the composer's +0xA8: whether it follows the blended settings is unread.
             const std::uint8_t tint[ 3 ] = { static_cast< std::uint8_t >( m_foliage_tint ), static_cast< std::uint8_t >( m_foliage_tint >> 8 ), static_cast< std::uint8_t >( m_foliage_tint >> 16 ) };
             m_foliage.flush( sort, tint );
+            if ( !p.m_reflecting && c_engine::option( "no-pfx" ) == nullptr )   // VuPfxEntity's Reflect 0, the boats' 0x419CE0 draws nothing there
+                m_pfx.submit( sort, *p.m_camera, m_retail->m_pfx_materials, m_retail->m_pfx_trail_material );
+            if ( !p.m_reflecting )
+                for ( const retail_corona_t& c : m_retail_coronas )
+                    m_retail->corona_submit( sort, c.position, c.colour, c.size, c.rotation, c.amount, c.material );
         };
+        if ( m_retail->pfx_programs( ) )
+        {
+            m_pfx.m_retail = [ this ]( const std::string& name ) { return m_retail->texture( 0u, name ); };
+            m_retail->m_pfx_node = [ this ]( std::uint32_t node ) { return m_pfx.node_bytes( node ); };
+            m_retail->m_pfx_assets = [ this ]( std::uint32_t node, std::uint32_t& colour, std::uint32_t& tile ) {
+                const bool trail = *reinterpret_cast< const std::uint32_t* >( m_pfx.node_bytes( node ) ) == 0x00750294u;
+                const c_effects::node_assets_t& a = trail ? m_pfx.node_assets( node, 0x68u, 0u ) : m_pfx.node_assets( node, 0x3Cu, 0x54u );
+                colour = a.colour;
+                tile = a.tile;
+            };
+        }
+        else
+            LOG_WARNING( "pfx: the renderers' programs did not load: quads and trails stay on the hand path" );
         m_pfx.m_geom_sink = [ this ]( const std::string& asset, const float* matrix, std::uint32_t colour ) {
             gfx_static_model_t*& model = m_retail_geom_models[ asset ];
             if ( model == nullptr )
@@ -1539,6 +1564,19 @@ public:
             g.colour = colour;
             m_retail_geoms.push_back( g );
             return true;
+        };
+        m_coronas.m_sink = [ this ]( const float* position, std::uint32_t colour, float size, float rotation, float amount, const std::string& texture ) {
+            const std::uint32_t material = m_retail->corona_material( texture );
+            if ( material == 0u )
+                return;
+            retail_corona_t c;
+            std::memcpy( c.position, position, 12 );
+            c.colour = colour;
+            c.size = size;
+            c.rotation = rotation;
+            c.amount = amount;
+            c.material = material;
+            m_retail_coronas.push_back( c );
         };
         c_engine::stage_pass( &gfx_retail_t::engine_pass, m_retail.get( ) );
     }
@@ -1746,6 +1784,19 @@ public:
             c_engine::drop( 14 );
         }
         m_coronas.tick( dt );
+        // VuCoronaEntity's occlusion 0x61D000, the race's collision world. SUBSTITUTION: the triangle's material byte +0x29 (0x5E7650) is not loaded: every triangle stops the ray. No world (the front end): visible.
+        if ( m_race.active && m_race.dynamics )
+        {
+            gfx_corona_collision_ray_t ray;
+            ray.m_world = &m_race.dynamics->collision;
+            ray.m_image = []( void*, const collision_object_t& o ) { return reinterpret_cast< const std::uint8_t* >( o.body.object ); };
+            ray.m_surface = []( void*, const collision_object_t&, int ) { return -1; };
+            m_coronas.occlusion( m_eye, [ & ]( const float* from, const float* to ) { return static_cast< gfx_corona_entity_ray_t& >( ray ).blocked( from, to, 0xFFFFFFFFu ); } );
+        }
+        if ( m_retail )
+            if ( m_retail->m_projection[ 0 ] != 0.0f )
+                m_coronas.projection( m_retail->m_projection[ 0 ], m_retail->m_projection[ 5 ] );
+        m_retail_coronas.clear( );
         m_coronas.draw( m_eye, m_target, [ this ]( const std::string& path ) { return texture_for( path ); } );
         trace::frame( ).pfx += trace::now( ) - pfx_start;
     }
@@ -1881,6 +1932,15 @@ private:
     }
     bool m_stage_attached = false, m_stage_bound = false;
     std::unique_ptr< gfx_retail_t > m_retail;
+    std::map< std::string, gfx_light_t* > m_light_of;   // VuDynamicLightEntity by path, for TurnOn / TurnOff
+    struct retail_corona_t
+    {
+        float position[ 3 ];
+        std::uint32_t colour;
+        float size, rotation, amount;
+        std::uint32_t material;
+    };
+    std::vector< retail_corona_t > m_retail_coronas;
     std::vector< std::unique_ptr< gfx_retail_boat_t > > m_retail_boats;
     // VuPfxGeomPattern's particles this frame: 0x5903A0's tail, the model's draw 0x520130 at the particle's matrix and colour.
     struct retail_geom_t

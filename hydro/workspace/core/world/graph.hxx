@@ -110,6 +110,21 @@ inline c_world::retval_t c_world::dispatch( const std::string& entity, const std
             return retval_t{};
         }
 
+    // VuDynamicLightEntity's TurnOn 0x5EDD90, TurnOff 0x5EDDF0: guarded by +0x45 (light_on / light_off), VuRetVal( 0 ).
+    {
+        const auto light = m_light_of.find( entity );
+        if ( light != m_light_of.end( ) )
+        {
+            if ( plug == "TurnOn" && m_retail )
+                m_retail->m_dynamic.light_on( *light->second );
+            else if ( plug == "TurnOff" && m_retail )
+                m_retail->m_dynamic.light_off( *light->second );
+            else
+                count_unhandled( entity, plug );
+            return retval_t{};
+        }
+    }
+
     // VuCoronaEntity's two input plugs. @0x5e8be0 and @0x5e8c30 register
     // and unregister the corona's draw component with the global
     // Vu3dDrawManager, guarded by the same +240 flag, and both return
