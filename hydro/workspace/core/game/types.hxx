@@ -1400,7 +1400,7 @@ struct prop_entity_state_t
 
 inline std::shared_ptr< void > entity_state_for( const std::string& cls )
 {
-    if ( cls == "VuPropEntity" )
+    if ( cls == "VuPropEntity" || cls == "VuRampEntity" )    // VuRampEntity (create 0x43E340): VuPropEntity's ctor 0x5464C0, its properties
         return std::make_shared< prop_entity_state_t >( );
     if ( const action_kind_t* k = entity_action_kind( cls ) )
         return k->m_make( );

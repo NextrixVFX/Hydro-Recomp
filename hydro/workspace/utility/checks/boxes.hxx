@@ -201,3 +201,39 @@ inline bool verify_ui_odds( )
         LOG_SUCCESS( "verify_ui_odds: %u picks, %u ticks, %u touches, %u tilt answers match retail", picks, ticks, touches, tilts );
     return bad == 0;
 }
+
+
+// VuRampEntity's contact callback 0x43E420 against retail (case ramp_contact): the friction's bits and the hull's byte.
+inline bool verify_ramp_contact( )
+{
+    save_words_t c{ g_golden_ramp_contact_words };
+    const unsigned n = c.next( );
+    int bad = 0;
+    for ( unsigned k = 0; k < n; ++k )
+    {
+        contact_record_t r;
+        float v[ 3 ];
+        for ( int j = 0; j < 3; ++j )
+        {
+            const unsigned u = c.next( );
+            std::memcpy( &r.normal[ j ], &u, 4 );
+        }
+        for ( int j = 0; j < 3; ++j )
+        {
+            const unsigned u = c.next( );
+            std::memcpy( &v[ j ], &u, 4 );
+        }
+        r.friction = 0.625f;
+        const bool hit = ramp_contact( r, v );
+        const unsigned want = c.next( ), flag = c.next( );
+        unsigned got;
+        std::memcpy( &got, &r.friction, 4 );
+        if ( got != want || flag != ( hit ? 1u : 0u ) )
+            ++bad;
+    }
+    if ( bad )
+        LOG_ERROR( "ramp_contact FAILED %d of %u", bad, n );
+    else
+        LOG_SUCCESS( "verify_ramp_contact: %u contacts match retail's 0x43E420", n );
+    return bad == 0;
+}

@@ -950,6 +950,15 @@ inline void race_contact_added( void* user, solver_contact_point_t& cp, solver_r
                         b->target = other;
                 };
             }
+        // VuRampEntity's +0x7C part: 0x43E420 (boat/contact.hxx ramp_contact). The other's owner being a boat is the type walk.
+        for ( const auto& lbp : s.level_bodies )
+            if ( &lbp->body.body == self && static_cast< const entity_t* >( lbp->owner )->m_type == "VuRampEntity" )
+                return [ &s, other ]( contact_record_t& rec ) {
+                    for ( const auto& x : s.boats )
+                        if ( &x->body.body == other )
+                            if ( ramp_contact( rec, other->linear_velocity ) )
+                                race_session_image( *x, 0, 0x228 )[ 0x174 ] = 1;
+                };
         return nullptr;
     };
     const auto any_callback = [ & ]( solver_rigid_t* self, solver_rigid_t* other ) -> std::function< void( contact_record_t& ) > {
@@ -1471,7 +1480,7 @@ inline bool race_event_dispatch( race_session_t& s, const std::string& entity, c
         for ( const auto& lb : s.level_bodies )
         {
             const entity_t* o = static_cast< const entity_t* >( lb->owner );
-            if ( !o || ( o->m_type != "VuPropEntity" && o->m_type != "VuBreakablePropEntity" ) )
+            if ( !o || ( o->m_type != "VuPropEntity" && o->m_type != "VuRampEntity" && o->m_type != "VuBreakablePropEntity" ) )
                 continue;
             std::string path;
             for ( const entity_t* e = o; e && e->m_parent; e = e->m_parent )
