@@ -109,6 +109,14 @@ public:
             return pad;
         };
         manager.hooks.key = []( void* u, int key ) { return static_cast< c_input_device* >( u )->m_down[ key ]; };
+        // The profile writer 0x511E50's names. An index outside the table is a binding 0x57E770 answered -1 for: retail reads
+        // what lies before the table, UNKNOWN here: the empty text.
+        manager.hooks.axis_name = []( void*, int index ) -> const char* {
+            return index >= 0 && index < 6 ? g_input_axis_names[ index ].name : "";
+        };
+        manager.hooks.button_name = []( void*, int index ) -> const char* {
+            return index >= 0 && index < 16 ? g_input_button_names[ index ] : "";
+        };
     }
 
     // Slot 5 of the pad 0x57EF40: the first scan, no event (0x57E6B0 zero-fills the arrays). The control method's slot 5

@@ -76,6 +76,13 @@ inline void json_set_float( value_t& j, float v )
     j.tag = 2, j.kind = value_t::kind_t::real, j.real = v;
 }
 
+// 0x4FC640: cleared, tag 4, the text (callers pass it whole: retail's strlen stops at a NUL no name here holds).
+inline void json_set_string( value_t& j, const std::string& v )
+{
+    json_clear( j );
+    j.tag = 4, j.kind = value_t::kind_t::text, j.text = v;
+}
+
 // The low and high dwords of an int64 payload.
 inline std::uint32_t json_lo( const value_t& j )
 {
