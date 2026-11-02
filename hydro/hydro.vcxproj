@@ -236,6 +236,7 @@
     <ClInclude Include="workspace\core\world\control.hxx" />
     <ClInclude Include="workspace\core\world\corona.hxx" />
     <ClInclude Include="workspace\core\world\dbrt.hxx" />
+    <ClInclude Include="workspace\core\world\debris.hxx" />
     <ClInclude Include="workspace\core\world\drawer.hxx" />
     <ClInclude Include="workspace\core\world\drawing.hxx" />
     <ClInclude Include="workspace\core\world\drive.hxx" />

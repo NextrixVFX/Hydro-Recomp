@@ -432,6 +432,9 @@
     <ClInclude Include="workspace\core\world\dbrt.hxx">
       <Filter>workspace\core\world</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\core\world\debris.hxx">
+      <Filter>workspace\core\world</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\core\world\drawer.hxx">
       <Filter>workspace\core\world</Filter>
     </ClInclude>
