@@ -600,6 +600,9 @@
     <ClInclude Include="workspace\core\world\pieces.hxx">
       <Filter>workspace\core\world</Filter>
     </ClInclude>
+    <ClInclude Include="workspace\core\world\playback.hxx">
+      <Filter>workspace\core\world</Filter>
+    </ClInclude>
     <ClInclude Include="workspace\core\world\primitive.hxx">
       <Filter>workspace\core\world</Filter>
     </ClInclude>
