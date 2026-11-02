@@ -4,6 +4,7 @@
 #include <workspace/core/render/program.hxx>
 #include <workspace/core/world/drawing.hxx>
 #include <workspace/core/world/shading.hxx>
+#include <workspace/core/world/waterpass.hxx>
 
 #include <cstdint>
 #include <cstring>
@@ -678,3 +679,206 @@ inline bool verify_water_material( )
     LOG_ERROR( "water_material FAILED %d of %d words (cursor %zu of %zu)", g.failed, g.compared, g.at, g.size );
     return false;
 }
+
+// Item 6 of batch 35: render/direct.hxx on a REAL device, no window: the hardware adapter, WARP when there is none. Retail's own Water/Complex/FogReflect from the pack, a flat 33 x 33
+// grid at z = 0 with a camera above it, the real wave texture, a checker for the foam and a gradient for the reflection. Passes when every object was created, the debug layer's state is not
+// "device removed", the surface covers the screen's lower half, and two wave frames differ (the normals reach the pixels).
+#if HYDRO_HOST_WINDOWS
+inline void water_direct_bmp( const char* path, const std::vector< std::uint8_t >& rgba, int w, int h )
+{
+    std::FILE* f = nullptr;
+    if ( fopen_s( &f, path, "wb" ) != 0 || f == nullptr )
+        return;
+    const std::uint32_t size = 54u + static_cast< std::uint32_t >( w * h * 4 );
+    std::uint8_t head[ 54 ] = { 'B', 'M' };
+    std::memcpy( head + 2, &size, 4 );
+    head[ 10 ] = 54;
+    head[ 14 ] = 40;
+    std::memcpy( head + 18, &w, 4 );
+    const std::int32_t up = -h;
+    std::memcpy( head + 22, &up, 4 );
+    head[ 26 ] = 1;
+    head[ 28 ] = 32;
+    std::fwrite( head, 1, 54, f );
+    std::vector< std::uint8_t > bgra( rgba );
+    for ( std::size_t i = 0; i + 3 < bgra.size( ); i += 4 )
+        std::swap( bgra[ i ], bgra[ i + 2 ] );
+    std::fwrite( bgra.data( ), 1, bgra.size( ), f );
+    std::fclose( f );
+}
+
+inline bool verify_gfx_direct( )
+{
+    gfx_direct_t api;
+    D3D_FEATURE_LEVEL level{};
+    HRESULT hr = D3D11CreateDevice( nullptr, D3D_DRIVER_TYPE_HARDWARE, nullptr, 0, nullptr, 0, D3D11_SDK_VERSION, &api.m_device, &level, &api.m_context );
+    const char* driver = "hardware";
+    if ( FAILED( hr ) )
+    {
+        driver = "WARP";
+        hr = D3D11CreateDevice( nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0, nullptr, 0, D3D11_SDK_VERSION, &api.m_device, &level, &api.m_context );
+    }
+    if ( FAILED( hr ) )
+    {
+        LOG_ERROR( "gfx_direct: no device: 0x%08x", static_cast< unsigned >( hr ) );
+        return false;
+    }
+    bool ok = true;
+    int w = 480, h = 270;
+    c_archive archive;
+    const std::string pack = world_check_pack( );
+    if ( pack.empty( ) || !archive.open( pack.c_str( ) ) )
+    {
+        LOG_ERROR( "gfx_direct: Base.apf did not open" );
+        return false;
+    }
+    // The target, its depth buffer: 0x57F7D0's description, with the read back's staging copy beside it.
+    gfx_texture_desc_t td{ static_cast< std::uint32_t >( w ), static_cast< std::uint32_t >( h ), 1u, 1u, 0x1Cu, 1u, 0u, 0u, 0x28u, 0u, 0u };
+    const gfx_handle_t colour = api.create_texture( td );
+    const gfx_handle_t view = api.create_target_view( colour );
+    water_pass_t pass( api );
+    gfx_handle_t depth = 0;
+    pass.m_device.create_depth_buffer( w, h, depth );
+    ok = ok && colour && view && depth;
+    pass.m_device.m_width = pass.m_device.m_chain_width = w;
+    pass.m_device.m_height = pass.m_device.m_chain_height = h;
+    pass.m_device.m_chain_view = view;
+    pass.m_device.m_chain_depth = depth;
+    pass.m_device.set_target( nullptr );
+
+    // A checker for the foam, a blue gradient for the reflection.
+    gfx_texture_options_t linear;
+    linear.m_min = linear.m_mag = 2;
+    gfx_texture_object_t* foam = gfx_texture_create( api, 16, 16, 4u, linear );
+    gfx_texture_object_t* reflection = gfx_texture_create( api, 64, 64, 4u, linear );
+    std::vector< std::uint32_t > pixels( 16 * 16 );
+    for ( int i = 0; i < 16 * 16; ++i )
+        pixels[ i ] = ( ( i ^ ( i >> 4 ) ) & 1 ) ? 0xFFFFFFFFu : 0x00FFFFFFu;
+    gfx_texture_update( api, *foam, 0, pixels.data( ) );
+    pixels.resize( 64 * 64 );
+    for ( int i = 0; i < 64 * 64; ++i )
+        pixels[ i ] = 0xFF000000u | ( static_cast< std::uint32_t >( 255 - ( i >> 6 ) * 4 ) << 16 ) | ( static_cast< std::uint32_t >( ( i & 63 ) * 4 ) << 8 ) | 0x20u;
+    gfx_texture_update( api, *reflection, 0, pixels.data( ) );
+
+    water_pass_source_t source;
+    source.m_read = [ & ]( const std::string& entry, std::vector< std::uint8_t >& out ) { return archive.read( entry.c_str( ), out ); };
+    source.m_texture = [ & ]( const std::string& name ) { return name == "Water/WakeFroth" ? foam->m_view : gfx_handle_t{ 0 }; };
+    ok = pass.create( source ) && ok;
+    const int shader = pass.add_shader( water_pass_t::default_desc( 1u ) );
+    const water_shader_t& s = *pass.m_shaders[ 0 ];
+    ok = ok && s.m_program && s.m_fresnel_slot >= 0 && s.m_normal_slot >= 0 && s.m_reflection_slot >= 0 && pass.m_missing_programs == 0;
+    if ( !ok )
+    {
+        LOG_ERROR( "gfx_direct: creation failed (device %s)", driver );
+        return false;
+    }
+
+    // Flat water 400 wide, one surface.
+    water_grid_frame_t frame;
+    const int n = 33;
+    for ( int y = 0; y < n; ++y )
+        for ( int x = 0; x < n; ++x )
+        {
+            water_grid_record_t r{ };
+            r.x = -200.0f + 400.0f * static_cast< float >( x ) / static_cast< float >( n - 1 );
+            r.y = -200.0f + 400.0f * static_cast< float >( y ) / static_cast< float >( n - 1 );
+            r.foam = ( x + y ) % 8 == 0 ? 0.8f : 0.0f;
+            r.shade = 1.0f;
+            frame.vertices.push_back( r );
+        }
+    for ( int y = 0; y + 1 < n; ++y )
+        for ( int x = 0; x + 1 < n; ++x )
+        {
+            const std::uint16_t a = static_cast< std::uint16_t >( y * n + x ), b = static_cast< std::uint16_t >( a + 1 ), c = static_cast< std::uint16_t >( a + n ), e = static_cast< std::uint16_t >( c + 1 );
+            for ( const std::uint16_t i : { a, b, c, c, b, e } )
+                frame.indices.push_back( i );
+        }
+    water_grid_draw_t d;
+    d.surface = 0;
+    d.vertex_count = static_cast< int >( frame.vertices.size( ) );
+    d.index_count = static_cast< int >( frame.indices.size( ) );
+    frame.draws.push_back( d );
+
+    // The camera: 12 above the water, looking along +y and down, rows of view * projection (D3D's z, the row vector).
+    water_pass_view_t v;
+    const float eye[ 3 ] = { 0.0f, -40.0f, 12.0f };
+    const float fw[ 3 ] = { 0.0f, 0.9578263f, -0.2873479f }, rt[ 3 ] = { 1.0f, 0.0f, 0.0f }, up[ 3 ] = { 0.0f, 0.2873479f, 0.9578263f };
+    const float near_z = 0.5f, far_z = 800.0f, f = 1.5f;
+    const float a = f / ( static_cast< float >( w ) / static_cast< float >( h ) );
+    const float q = far_z / ( far_z - near_z );
+    const float view_m[ 4 ][ 3 ] = { { rt[ 0 ], up[ 0 ], fw[ 0 ] }, { rt[ 1 ], up[ 1 ], fw[ 1 ] }, { rt[ 2 ], up[ 2 ], fw[ 2 ] },
+                                     { -( rt[ 0 ] * eye[ 0 ] + rt[ 1 ] * eye[ 1 ] + rt[ 2 ] * eye[ 2 ] ), -( up[ 0 ] * eye[ 0 ] + up[ 1 ] * eye[ 1 ] + up[ 2 ] * eye[ 2 ] ),
+                                       -( fw[ 0 ] * eye[ 0 ] + fw[ 1 ] * eye[ 1 ] + fw[ 2 ] * eye[ 2 ] ) } };
+    for ( int r = 0; r < 4; ++r )
+    {
+        v.m_view_proj[ r * 4 + 0 ] = view_m[ r ][ 0 ] * a;
+        v.m_view_proj[ r * 4 + 1 ] = view_m[ r ][ 1 ] * f;
+        v.m_view_proj[ r * 4 + 2 ] = view_m[ r ][ 2 ] * q + ( r == 3 ? -near_z * q : 0.0f );
+        v.m_view_proj[ r * 4 + 3 ] = view_m[ r ][ 2 ];
+    }
+    std::memcpy( v.m_eye, eye, 12 );
+    const float light[ 3 ] = { 0.3f, 0.3f, 0.9f };
+    std::memcpy( v.m_light, light, 12 );
+    v.m_fog_start = 50.0f;
+    v.m_fog_end = 300.0f;
+    const float fog[ 4 ] = { 0.55f, 0.74f, 0.9f, 1.0f };
+    std::memcpy( v.m_fog_colour, fog, 16 );
+    const std::uint8_t ambient[ 4 ] = { 0x2D, 0x3C, 0x42, 0xC0 }, diffuse[ 4 ] = { 0x50, 0x5A, 0xC0, 0x80 };
+    std::memcpy( v.m_statics.m_ambient, ambient, 4 );
+    std::memcpy( v.m_statics.m_diffuse, diffuse, 4 );
+    std::memset( v.m_statics.m_foam_ambient, 0x80, 4 );
+    std::memset( v.m_statics.m_foam_diffuse, 0xFF, 4 );
+    v.m_statics.m_foam_size = 14.0f;
+
+    D3D11_TEXTURE2D_DESC staging{ };
+    reinterpret_cast< ID3D11Texture2D* >( colour )->GetDesc( &staging );
+    staging.BindFlags = 0;
+    staging.Usage = D3D11_USAGE_STAGING;
+    staging.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+    ID3D11Texture2D* copy = nullptr;
+    hr = api.m_device->CreateTexture2D( &staging, nullptr, &copy );
+    const auto frame_at = [ & ]( float dt, std::vector< std::uint8_t >& out )
+    {
+        const std::uint8_t clear[ 4 ] = { 255, 0, 255, 255 };
+        pass.tick( dt );
+        pass.m_device.clear( 3u, clear, 1.0f );
+        pass.draw( frame, v, reflection->m_view, [ shader ]( int ) { return shader; } );
+        api.m_context->CopyResource( copy, reinterpret_cast< ID3D11Resource* >( colour ) );
+        api.m_context->Flush( );
+        D3D11_MAPPED_SUBRESOURCE m{ };
+        api.m_context->Map( copy, 0, D3D11_MAP_READ, 0, &m );
+        out.resize( static_cast< std::size_t >( w * h * 4 ) );
+        for ( int y = 0; y < h; ++y )
+            std::memcpy( out.data( ) + static_cast< std::size_t >( y * w * 4 ), static_cast< const std::uint8_t* >( m.pData ) + static_cast< std::size_t >( y ) * m.RowPitch, static_cast< std::size_t >( w * 4 ) );
+        api.m_context->Unmap( copy, 0 );
+    };
+    std::vector< std::uint8_t > one, two;
+    // The commit that creates a rasterizer state binds null (render/gfx.hxx): D3D11's default, which culls this grid. Found by this test's first run; the frame after has the state.
+    frame_at( 0.05f, one );
+    frame_at( 0.1f, one );
+    frame_at( 1.0f, two );
+    const HRESULT removed = api.m_device->GetDeviceRemovedReason( );
+    int covered = 0, moved = 0;
+    for ( int y = h / 2; y < h; ++y )
+        for ( int x = 0; x < w; ++x )
+        {
+            const std::uint8_t* p = one.data( ) + static_cast< std::size_t >( ( y * w + x ) * 4 );
+            const std::uint8_t* q2 = two.data( ) + static_cast< std::size_t >( ( y * w + x ) * 4 );
+            if ( !( p[ 0 ] == 255 && p[ 1 ] == 0 && p[ 2 ] == 255 ) )
+                ++covered;
+            if ( std::memcmp( p, q2, 3 ) != 0 )
+                ++moved;
+        }
+    const int half = w * ( h - h / 2 );
+    char shot[ 512 ] = { };
+    if ( GetEnvironmentVariableA( "HYDRO_WATER_SHOT", shot, sizeof( shot ) ) != 0 )
+        water_direct_bmp( shot, one, w, h );
+    if ( FAILED( removed ) || covered < half * 9 / 10 || moved < half / 4 )
+    {
+        LOG_ERROR( "gfx_direct FAILED on the %s device: removed 0x%08x, %d of %d covered, %d moved", driver, static_cast< unsigned >( removed ), covered, half, moved );
+        return false;
+    }
+    LOG_SUCCESS( "gfx_direct: render/direct.hxx ran retail's Water/Complex/FogReflect on a real %s device (level 0x%x): %d of %d lower pixels covered, %d moved between two wave frames", driver, static_cast< unsigned >( level ), covered, half, moved );
+    return true;
+}
+#endif
