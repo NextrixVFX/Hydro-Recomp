@@ -207,6 +207,8 @@ public:
 
     // The draw (ours - see the top), into placement group 11 (dropped first, as the old c_pfx did). Texture: path ->
     // texture id; Model: path -> the model's parts (c_world::pfx_parts).
+    std::function< bool( const std::string& asset, const float* matrix, std::uint32_t colour ) > m_geom_sink;
+
     template < typename Texture, typename Model >
     void draw( const float* eye, const float* target, Texture&& texture, Model&& model, const std::vector< std::uint32_t >* systems = nullptr )
     {
@@ -372,6 +374,8 @@ private:
             float placed[ 16 ];
             pfx_geom_draw_matrix( q, d, instance_scale, placed );
             const std::uint32_t c = pfx_geom_draw_colour( q, tint );
+            if ( m_geom_sink && m_geom_sink( name, placed, c ) )
+                continue;   // retail's model draw 0x520130 (world.hxx retail_geoms)
             const float color[ 4 ] = { static_cast< float >( c & 0xFFu ) / 255.0f, static_cast< float >( ( c >> 8 ) & 0xFFu ) / 255.0f,
                                        static_cast< float >( ( c >> 16 ) & 0xFFu ) / 255.0f, static_cast< float >( c >> 24 ) / 255.0f };
             for ( const auto& part : parts )

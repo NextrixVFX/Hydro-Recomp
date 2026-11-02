@@ -118,6 +118,7 @@ struct scene_stage_t
 // n bytes) that 0x5AC240 parses into the program's constant table.
 struct scene_program_t
 {
+    std::uint32_t at = 0;   // where the program's stream starts in the blob: what the device side hands 0x5AC0C0
     scene_stage_t vertex;
     scene_stage_t pixel;
     scene_span_t layout;
@@ -132,6 +133,7 @@ inline void scene_read_stage( scene_reader_t& r, scene_stage_t& stage )
 
 inline void scene_read_program( scene_reader_t& r, scene_program_t& program )
 {
+    program.at = static_cast< std::uint32_t >( r.at );
     scene_read_stage( r, program.vertex );
     scene_read_stage( r, program.pixel );
     program.layout = scene_skip( r, scene_u32( r ) );

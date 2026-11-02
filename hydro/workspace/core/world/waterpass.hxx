@@ -58,7 +58,8 @@ struct water_pass_t final : water_shader_assets_t, water_reflection_source_t
     water_pass_source_t m_source;
     std::map< std::string, gfx_texture_object_t* > m_named;
     std::map< std::string, const gfx_program_t* > m_loaded;
-    std::vector< std::unique_ptr< water_shader_t > > m_shaders;    // per surface, in the frame's surface order
+    std::vector< std::unique_ptr< water_shader_t > > m_shaders;    // VuWater's shader list (+0x28), creation order
+    std::vector< water_shader_desc_t > m_descs;                    // m_shaders' descs, for shared_shader
     gfx_handle_t m_reflection_sampler = 0;
     gfx_texture_t m_reflection;
     int m_missing_programs = 0;
@@ -108,9 +109,9 @@ struct water_pass_t final : water_shader_assets_t, water_reflection_source_t
     // 0x5DBB80 on the entity's desc (+0xA4, its properties registered by the ctor 0x5DA4F0), then 0x5DB800's gates: VuWater +0x44 and +0x46 are 1, so reflect and complex stay as authored.
     // The names, their desc fields: OverrideGlobalSettings +0x18, AmbientColor +0x19, DiffuseColor +0x1D, FoamAmbientColor +0x21, FoamDiffuseColor +0x25, FogEnabled +0x29, FoamTextureSize +0x2C,
     // FoamTextureAsset +0x30, ProceduralReflection +0x48, NormalMapEnabled +0x49 (Complex against Simple), ReflectionCubeTextureAsset +0x4C. The decal fields have no property.
-    static water_shader_desc_t read_desc( const value_t& properties )
+    static water_shader_desc_t read_desc( const value_t& properties, const water_shader_desc_t& base = default_desc( 0u ) )
     {
-        water_shader_desc_t d = default_desc( 0u );
+        water_shader_desc_t d = base;
         const auto colour = [ & ]( const char* name, std::uint8_t* bytes )
         {
             std::uint32_t fallback, v;
@@ -132,7 +133,30 @@ struct water_pass_t final : water_shader_assets_t, water_reflection_source_t
         return d;
     }
 
-    // One shader; surfaces with equal descs share it (0x528610's search through 0x527D50) when the caller passes the same index.
+    // 0x527D50: the strings and bytes always; the colours, the foam size (ucomiss: a NaN is unequal) and the decal colours only with +0x18. The colour words overlap: +0x18's own byte is compared first.
+    static bool desc_equal( const water_shader_desc_t& a, const water_shader_desc_t& b )
+    {
+        if ( a.m_name != b.m_name || a.m_own_colours != b.m_own_colours || a.m_fog != b.m_fog || a.m_foam_texture != b.m_foam_texture || a.m_reflect != b.m_reflect || a.m_complex != b.m_complex
+             || a.m_cube != b.m_cube || a.m_decal_texture != b.m_decal_texture )
+            return false;
+        if ( a.m_own_colours == 0u )
+            return true;
+        return std::memcmp( a.m_ambient, b.m_ambient, 4 ) == 0 && std::memcmp( a.m_diffuse, b.m_diffuse, 4 ) == 0 && std::memcmp( a.m_foam_ambient, b.m_foam_ambient, 4 ) == 0
+            && std::memcmp( a.m_foam_diffuse, b.m_foam_diffuse, 4 ) == 0 && a.m_foam_size == b.m_foam_size && std::memcmp( a.m_decal_ambient, b.m_decal_ambient, 4 ) == 0
+            && std::memcmp( a.m_decal_diffuse, b.m_decal_diffuse, 4 ) == 0;
+    }
+
+    // 0x528610: an equal desc's shader, else a new one. The search walks the list from its head; retail's new shader goes on the list's end (list order is creation order).
+    int shared_shader( const water_shader_desc_t& d )
+    {
+        for ( std::size_t k = 0; k < m_descs.size( ); ++k )
+            if ( desc_equal( m_descs[ k ], d ) )
+                return static_cast< int >( k );
+        m_descs.push_back( d );
+        return add_shader( d );
+    }
+
+    // One shader, shared or not as the caller decides.
     int add_shader( const water_shader_desc_t& d )
     {
         auto s = std::make_unique< water_shader_t >( );
@@ -194,7 +218,7 @@ struct water_pass_t final : water_shader_assets_t, water_reflection_source_t
             m_device.set_declaration( m_declaration_of( s ) );
             frame_constants( *s.m_program, v );
             s.patch( m_device, v.m_statics, d.position, d.vertex_start, d.vertex_count, d.index_start, d.index_count, frame.vertices.data( ), frame.indices.data( ),
-                     m_wave_textures[ m_wave.current ], 64.0f, this );
+                     m_wave_textures[ m_wave.current ], m_wave.built[ 7 ], this );   // the texture object's +0x40: NormalTextureScale as last built
         }
     }
 
@@ -262,13 +286,23 @@ struct water_stage_t
 {
     gfx_direct_t m_api;
     std::unique_ptr< water_pass_t > m_pass;
-    int m_shader = -1;
+    std::vector< int > m_surface_shader;   // per surface index (the entity's +0x12C)
     gfx_handle_t m_mirror = 0;
     const water_grid_frame_t* m_frame = nullptr;
     water_pass_view_t m_view;
 
-    // `desc`: water_pass_t::read_desc of the surface entity's properties; each surface wants its own when they differ (see m_shader).
-    void attach( const water_pass_source_t& source, const water_shader_desc_t& desc )
+    // After attach: surface `index`'s shader, 0x5DB800 on the desc read from the surface entity's loads.
+    void surface( int index, const std::vector< value_t >& loads )
+    {
+        water_shader_desc_t d = water_pass_t::default_desc( 0u );
+        for ( const value_t& properties : loads )
+            d = water_pass_t::read_desc( properties, d );
+        if ( static_cast< int >( m_surface_shader.size( ) ) <= index )
+            m_surface_shader.resize( static_cast< std::size_t >( index ) + 1u, -1 );
+        m_surface_shader[ static_cast< std::size_t >( index ) ] = m_pass->shared_shader( d );
+    }
+
+    void attach( const water_pass_source_t& source )
     {
         void* device = nullptr;
         void* context = nullptr;
@@ -278,8 +312,13 @@ struct water_stage_t
         m_api.m_context = static_cast< ID3D11DeviceContext* >( context );
         m_pass = std::make_unique< water_pass_t >( m_api );
         m_pass->create( source );
-        m_shader = m_pass->add_shader( desc );
         c_engine::water_pass( &water_stage_t::engine_pass, this );
+    }
+
+    // VuWaterTextureSettingsEntity's Trigger 0x5D2B00 wrote the wave texture's +4 (world/watchers.hxx); a change rebuilds the spectrum at the next build (wavemap.hxx).
+    void wave_settings( const std::uint32_t* words )
+    {
+        std::memcpy( m_pass->m_wave.live, words, sizeof( m_pass->m_wave.live ) );
     }
 
     void frame( float dt, const water_grid_frame_t& grid, const water_pass_view_t& view )
@@ -310,8 +349,10 @@ struct water_stage_t
         void* context = nullptr;
         void* mirror = nullptr;
         c_engine::device( device, context, mirror );
-        const int shader = s.m_shader;
-        s.m_pass->draw( *s.m_frame, s.m_view, reinterpret_cast< gfx_handle_t >( mirror ), [ shader ]( int ) { return shader; } );
+        s.m_pass->draw( *s.m_frame, s.m_view, reinterpret_cast< gfx_handle_t >( mirror ), [ &s ]( int surface )
+        {
+            return surface >= 0 && surface < static_cast< int >( s.m_surface_shader.size( ) ) ? s.m_surface_shader[ static_cast< std::size_t >( surface ) ] : -1;
+        } );
     }
 };
 #endif

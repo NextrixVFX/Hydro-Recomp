@@ -1191,6 +1191,53 @@ inline bool verify_gfx_quads( )
 }
 
 // Case gfx_texture_load: 0x57C740 over the fourteen image codes and the pack's Water/WakeFroth.
+// gfx_cube_load against retail's 0x609460 on the fake device (case gfx_cube_load): the whole device log, the object's fields.
+inline bool verify_gfx_cube_load( )
+{
+    anim_cursor_t g;
+    g.w = g_golden_gcl_words;
+    g.size = g_golden_gcl_size;
+    g.where = "gfx_cube_load";
+    gfx_rig_api_t api;
+    api.m_next = 69;   // as gfx_texture_load's
+    c_archive archive;
+    const std::string pack = world_check_pack( );
+    if ( pack.empty( ) || !archive.open( pack.c_str( ) ) )
+    {
+        LOG_ERROR( "gfx_cube_load: Base.apf did not open" );
+        return false;
+    }
+    const unsigned rows = g.take( );
+    for ( unsigned r = 0; r < rows; ++r )
+    {
+        std::vector< std::uint8_t > bytes;
+        if ( g.take( ) )
+            archive.read( "VuCubeTextureAsset/Proxy_cube", bytes );
+        else
+            gfx_check_read_stream( g, bytes );
+        api.m_log.clear( );
+        gfx_texture_object_t* t = gfx_cube_load( api, bytes.data( ) );
+        const unsigned logged = g.take( );
+        g.eq( static_cast< std::uint32_t >( api.m_log.size( ) ), logged );
+        for ( unsigned i = 0; i < logged; ++i )
+            g.eq( i < api.m_log.size( ) ? api.m_log[ i ] : 0xDEADBEEFu, g.take( ) );
+        g.eq( static_cast< std::uint32_t >( t->m_width ), g.take( ) );
+        g.eq( t->m_levels, g.take( ) );
+        g.eq( gfx_check_api_t::id( t->m_texture ), g.take( ) );
+        g.eq( gfx_check_api_t::id( t->m_view ), g.take( ) );
+        g.eq( gfx_check_api_t::id( t->m_sampler ), g.take( ) );
+        delete t;
+    }
+    g.eq( static_cast< std::uint32_t >( g.at ), static_cast< std::uint32_t >( g.size ) );
+    if ( !g.failed )
+    {
+        LOG_SUCCESS( "gfx_cube_load matches retail's 0x609460 on %u cubes: %d words exact", rows, g.compared );
+        return true;
+    }
+    LOG_ERROR( "gfx_cube_load FAILED %d of %d words (cursor %zu of %zu)", g.failed, g.compared, g.at, g.size );
+    return false;
+}
+
 inline bool verify_gfx_texture_load( )
 {
     anim_cursor_t g;

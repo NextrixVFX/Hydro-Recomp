@@ -2606,6 +2606,7 @@ inline bool verify_render_all( )
     ok = verify_gfx_buffers( ) && ok;
     ok = verify_gfx_backend( ) && ok;
     ok = verify_gfx_quads( ) && ok;
+    ok = verify_gfx_cube_load( ) && ok;
     ok = verify_gfx_texture_load( ) && ok;
 #if HYDRO_HOST_WINDOWS
     ok = verify_gfx_direct( ) && ok;

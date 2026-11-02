@@ -115,9 +115,10 @@ struct gfx_direct_t final : gfx_api_t
     }
 
     void vs_constants( gfx_handle_t b ) override { ID3D11Buffer* p = as< ID3D11Buffer >( b ); m_context->VSSetConstantBuffers( 0, 1, &p ); }
-    void ps_views( std::uint32_t s, gfx_handle_t v ) override { ID3D11ShaderResourceView* p = as< ID3D11ShaderResourceView >( v ); m_context->PSSetShaderResources( s, 1, &p ); }
+    // A start slot past D3D11's 128 is 0x540B50's null branch (gfx.hxx, its TRAP): OURS, the call is dropped, the live runtime stomps state otherwise. Samplers below the same.
+    void ps_views( std::uint32_t s, gfx_handle_t v ) override { if ( s >= 128u ) return; ID3D11ShaderResourceView* p = as< ID3D11ShaderResourceView >( v ); m_context->PSSetShaderResources( s, 1, &p ); }
     void ps_shader( gfx_handle_t s ) override { m_context->PSSetShader( as< ID3D11PixelShader >( s ), nullptr, 0 ); }
-    void ps_samplers( std::uint32_t s, gfx_handle_t v ) override { ID3D11SamplerState* p = as< ID3D11SamplerState >( v ); m_context->PSSetSamplers( s, 1, &p ); }
+    void ps_samplers( std::uint32_t s, gfx_handle_t v ) override { if ( s >= 16u ) return; ID3D11SamplerState* p = as< ID3D11SamplerState >( v ); m_context->PSSetSamplers( s, 1, &p ); }
     void vs_shader( gfx_handle_t s ) override { m_context->VSSetShader( as< ID3D11VertexShader >( s ), nullptr, 0 ); }
     void draw_indexed( std::uint32_t c, std::uint32_t s, std::int32_t b ) override { m_context->DrawIndexed( c, s, b ); }
     void draw( std::uint32_t c, std::uint32_t s ) override { m_context->Draw( c, s ); }

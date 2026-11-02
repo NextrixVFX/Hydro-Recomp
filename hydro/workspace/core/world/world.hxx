@@ -46,6 +46,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <map>
+#include <deque>
 #include <set>
 #include <string>
 #include <utility>
@@ -61,11 +62,15 @@
 // Screens/Background. Static models keep the transforms from their
 // VuTransformComponent, and the front-end camera is the one stored on
 // VuSetFrontEndCameraEntity.
+#include <workspace/core/world/stage.hxx>
+#include <workspace/core/world/waterpass.hxx>
+
 class c_world
 {
 public:
     c_world( )
     {
+        gfx_record_default( m_gfx_record );
         m_eye[ 0 ] = 0.0f;
         m_eye[ 1 ] = -40.0f;
         m_eye[ 2 ] = 18.0f;
@@ -152,11 +157,8 @@ private:
     // model_for: models.hxx
     const std::vector< cached_part_t >& model_for( const std::string& asset );
 
-    // place_model: models.hxx
-    // `skin`: per shader, what a skin pass (world/livery.hxx) changed for the draw (livery_draw_of).
     void foliage_build( const entity_t& root );
     void foliage_frame( );
-    void place_model( const std::string& asset, const float* world, int bob = 0, int alpha_override = -1, const float* tint = nullptr, const std::vector< livery_draw_t >* skin = nullptr, int geometry_override = -1, std::vector< int >* out_placements = nullptr, std::vector< std::array< float, 16 > >* out_nodes = nullptr );
 
     const value_t* template_root( const std::string& name )
     {
@@ -660,8 +662,7 @@ private:
     // skin_props: animate.hxx
     void skin_props( float dt );
 
-    // update_static_draws / prop_draw: models.hxx
-    void update_static_draws( );
+    // prop_draw: models.hxx
     void prop_draw( const entity_t& owner );
 
     void wipe_scene( )
@@ -1003,6 +1004,8 @@ public:
             if ( item.path == path )
             {
                 transform_draw_matrix( *t, item.world );
+                const auto box = m_scene_aabbs.find( item.asset );
+                scene_component_aabb( item.aabb, box != m_scene_aabbs.end( ) ? box->second.data( ) : scene_zero_aabb( ), item.world, false );
                 if ( !item.playing && item.rigid )
                 {
                     const std::vector< cached_part_t >& parts = model_for( item.asset );
@@ -1267,6 +1270,10 @@ public:
             race_boat_draw_matrix( b.graph.objects[ 0 ].image.data( ), transform, m );
             const int at[ 3 ] = { 0xC4, 0xDC, 0xF4 };
             std::vector< livery_draw_t > draws[ 3 ];
+            std::vector< scene_table_t > skin_tables[ 3 ];
+            m_retail_boats.resize( m_race.boats.size( ) );
+            m_retail_boats[ k ] = std::make_unique< gfx_retail_boat_t >( );
+            gfx_retail_boat_t* retail_boat = m_retail_boats[ k ].get( );
             int skinned = 0;
             if ( b.sections )
             {
@@ -1282,6 +1289,8 @@ public:
                         {
                             draws[ i ].push_back( livery_draw_of( scenes[ i ][ s ], skins[ static_cast< std::size_t >( i ) ][ s ] ) );
                             skinned += draws[ i ].back( ).texture_set ? 1 : 0;
+                            skin_tables[ i ].emplace_back( );
+                            livery_table_of( skins[ static_cast< std::size_t >( i ) ][ s ], skin_tables[ i ].back( ) );
                         }
                 else
                     LOG_WARNING( "race: %s skin pass 0x421490 UNKNOWN (a texture name of 64 bytes or more: strcpy_s's invalid-parameter path)",
@@ -1292,16 +1301,26 @@ public:
                 const std::string& asset = b.io.boat_strings[ at[ i ] ];
                 if ( asset.empty( ) )
                     continue;
-                model_for( asset );
-                // The animated instance +0x2A4: its own vertices, posed each draw (race_draw). SUBSTITUTION, as the animated
-                // props: CPU skinning streamed to a clone, where retail uploads gMatrixArray to the vertex shader.
-                const auto skinned = m_skinned.find( asset );
-                if ( i == 0 && skinned != m_skinned.end( ) && skinned->second.skin.size( ) == skinned->second.bind.size( ) )
-                    b.hull_geometry = c_engine::geometry( skinned->second.bind.data( ), static_cast< int >( skinned->second.bind.size( ) ),
-                                                          skinned->second.indices.data( ), static_cast< int >( skinned->second.indices.size( ) ) );
-                place_model( asset, m, 0, -1, nullptr, draws[ i ].empty( ) ? nullptr : &draws[ i ], i == 0 ? b.hull_geometry : -1, &b.placements[ i ] );
-                for ( int handle : b.placements[ i ] )
-                    c_engine::show( handle, false );
+                // The three instances on retail's path (stage.hxx): gMatrixArray in the vertex shader for the two animated ones, each skin's materials through the instance's map.
+                if ( !m_retail )
+                    continue;
+                gfx_retail_boat_t& r = *retail_boat;
+                const gfx_retail_model_t* model = m_retail->record( asset );
+                if ( model == nullptr )
+                    continue;
+                for ( std::size_t s = 0; s < skin_tables[ i ].size( ) && s < model->m_program_ids.size( ); ++s )
+                    r.m_maps[ i ].m_ids[ static_cast< std::uint32_t >( model->m_scene.shaders[ s ].index ) ] = m_retail->skinned_material( *model, s, skin_tables[ i ][ s ] );
+                if ( i == 2 )
+                {
+                    gfx_scene_view_attach( r.m_low, model->m_view );
+                    r.m_low.m_map = r.m_maps[ 2 ].m_ids.empty( ) ? nullptr : &r.m_maps[ 2 ];
+                }
+                else
+                {
+                    gfx_animated_model_t& a = i == 0 ? r.m_high : r.m_middle;
+                    gfx_scene_view_attach( a, model->m_view );
+                    a.m_map = r.m_maps[ i ].m_ids.empty( ) ? nullptr : &r.m_maps[ i ];
+                }
             }
             b.shown = -1;
             LOG_INFO( "race: %s hull at %.1f %.1f %.1f - models '%s' / '%s' / '%s', skin '%s': %s", b.name.c_str( ), m[ 12 ], m[ 13 ], m[ 14 ],
@@ -1314,66 +1333,58 @@ public:
     // Per frame: the draw 0x41EAE0's instance choice against this frame's eye, and its matrix: the transform's world
     // (+0x50) . translation( boat +0x49C ), rebuilt each draw (0x41EB47 .. 0x41EB8E) - the placed instance follows the boat.
     // Our model path keeps a part's node matrix per placement (retail's instance applies it under 0x532AD0 / 0x520130).
-    void race_draw( )
+    // Each view (0x41EAE0, damage pieces 0x4121C0 apart): the instance by distance, reflection instance 2 unless +0x466; the colour 0x41B310 between +0x114 and +0x118 by +0x2B4; the alpha +0x2C8 x 255
+    // (0x80 with +0x466); 0x532AD0 / 0x520130 under 0x41EB7C's matrix. The middle instance's palette is the first's (0x532990, Build step 4).
+    void retail_boats( gfx_sort_t& sort, const gfx_draw_params_t& p )
     {
-        for ( std::size_t k = 0; k < m_race.boats.size( ) && m_race.active; ++k )
+        for ( std::size_t k = 0; k < m_race.boats.size( ) && k < m_retail_boats.size( ) && m_race.active; ++k )
         {
             race_session_boat_t& b = *m_race.boats[ k ];
             const std::uint8_t* transform = m_race.start_boats[ k ].transform;
-            if ( !transform )
+            if ( !transform || !m_retail_boats[ k ] || !b.rig.model )
                 continue;
             const std::uint8_t* boat = b.graph.objects[ 0 ].image.data( );
-            const int pick = race_boat_draw_instance( boat, transform, m_eye );
-            if ( pick != b.shown )
-            {
-                if ( b.shown >= 0 )
-                    for ( int handle : b.placements[ b.shown ] )
-                        c_engine::show( handle, false );
-                if ( pick >= 0 )
-                    for ( int handle : b.placements[ pick ] )
-                        c_engine::show( handle, true );
-                b.shown = pick;
-            }
+            gfx_retail_boat_t& r = *m_retail_boats[ k ];
+            int pick = race_boat_draw_instance( boat, transform, p.m_eye );
             if ( pick < 0 )
                 continue;
+            if ( p.m_reflecting )
+            {
+                if ( boat[ 0x466 ] )
+                    continue;
+                pick = 2;
+            }
             float m[ 16 ];
             race_boat_draw_matrix( boat, transform, m );
-            const int at[ 3 ] = { 0xC4, 0xDC, 0xF4 };
-            const std::vector< cached_part_t >& parts = model_for( b.io.boat_strings[ at[ pick ] ] );
-            // 0x532AD0's palette: instance +0x1C / +0x20 by +0x28, the one setPose 0x532720 wrote last (world/rig.hxx boat_rig_pose).
-            if ( pick == 0 && b.hull_geometry >= 0 && b.rig.model )
+            float t;
+            std::memcpy( &t, boat + 0x2B4, 4 );
+            std::uint8_t colour[ 4 ];
+            for ( int c = 0; c < 4; ++c )
+                colour[ c ] = static_cast< std::uint8_t >( _mm_cvtss_si32( _mm_set_ss( static_cast< float >( boat[ 0x114 + c ] ) * ( 1.0f - t ) + static_cast< float >( boat[ 0x118 + c ] ) * t ) ) & 0xFF );
+            float alpha;
+            std::memcpy( &alpha, boat + 0x2C8, 4 );
+            colour[ 3 ] = boat[ 0x466 ] ? 0x80u : static_cast< std::uint8_t >( _mm_cvtss_si32( _mm_set_ss( alpha * 255.0f ) ) & 0xFF );
+            std::uint32_t packed;
+            std::memcpy( &packed, colour, 4 );
+            if ( pick == 2 )
             {
-                const auto skinned = m_skinned.find( b.io.boat_strings[ at[ 0 ] ] );
-                const auto bones = m_skeletons.find( b.io.boat_strings[ at[ 0 ] ] );
-                const skel_instance_t& pose = b.rig.model->instance;
-                if ( skinned != m_skinned.end( ) && bones != m_skeletons.end( ) && pose.palette[ pose.word28 ].size( ) == bones->second.size( ) * 16 )
-                {
-                    const mesh_vertex_t* posed = skin_geometry( b.hull_geometry, skinned->second, bones->second, pose.palette[ pose.word28 ] );
-                    // Dev trace (--verbose, ours): how far the pose took the hull from its bind vertices.
-                    if ( g_verbose && posed && m_race.frames % 480 == 0 && k + 1 == m_race.boats.size( ) )
-                    {
-                        float most = 0.0f;
-                        for ( std::size_t v = 0; v < skinned->second.bind.size( ); ++v )
-                            for ( int c = 0; c < 3; ++c )
-                                most = ( std::max )( most, std::fabs( posed[ v ].position[ c ] - skinned->second.bind[ v ].position[ c ] ) );
-                        LOG_VERBOSE( "race: %s hull pose, frame %d: %d bones, a vertex moved %.3f from bind", b.name.c_str( ), m_race.frames,
-                                     static_cast< int >( bones->second.size( ) ), most );
-                    }
-                }
-                else if ( !b.hull_refused )
-                {
-                    b.hull_refused = true;
-                    LOG_WARNING( "race: %s hull: the palette (%d floats) and the model's bones (%d) differ - bind pose (UNKNOWN)", b.name.c_str( ),
-                                 static_cast< int >( pose.palette[ pose.word28 ].size( ) ), bones != m_skeletons.end( ) ? static_cast< int >( bones->second.size( ) ) : -1 );
-                }
+                r.m_low.m_colour = packed;
+                r.m_low.m_byte_1c = 1u;
+                r.m_low.draw( sort, m, p );
+                continue;
             }
-            for ( std::size_t i = 0; i < b.placements[ pick ].size( ) && i < parts.size( ); ++i )
-            {
-                float placed[ 16 ];
-                math_multiply( placed, m, parts[ i ].node );
-                c_engine::move( b.placements[ pick ][ i ], placed );
-            }
+            const skel_instance_t& pose = b.rig.model->instance;
+            const std::vector< float >& palette = pose.palette[ pose.word28 ];
+            gfx_animated_model_t& a = pick == 0 ? r.m_high : r.m_middle;
+            a.m_colour = packed;
+            a.m_byte = 1u;
+            a.m_model_word = static_cast< std::uint32_t >( palette.size( ) / 16 );
+            a.m_bones = m_retail->palette_id( palette.data( ) );
+            a.draw( sort, m, p );
         }
+    }
+    void race_draw( )
+    {
     }
 
     // SCAFFOLD - ours. The per-frame order below is NOT retail's frame; retail
@@ -1383,15 +1394,10 @@ public:
     // The water surfaces on screen: 0x5979C0's body for our one viewport (grid.hxx water_grid_frame), then our
     // draw. The frustum block is 0x50C550's, fed from OUR camera (the dev vantage: eye / target, the
     // viewport's fov_y 1.05, near 0.5, the 1280x720 aspect; retail's +384 is tanf of the horizontal half
-    // angle). SUBSTITUTED / NOT RECREATED in the draw (the platform draw of the 15-word records is unread):
-    // the retail Water shader's colour is lerp( gAmbientColor, gDiffuseColor, record +0x18 ) per vertex -
-    // computed here on the CPU from the gfx settings colours (whether the surface entity's own AmbientColor /
-    // DiffuseColor override them is unread); the foam term (gFoam* colours, gFoamTexture, record +0x14), the
-    // normal map, the planar reflection and the Fresnel LUT are absent; the pass is the engine's class 7
-    // (unlit, fogged, blended, alpha x 0.55 - divided out here).
-    void water_draw( )
+    // angle).
+    void water_draw( float dt )
     {
-        if ( m_grid_geometry < 0 )
+        if ( m_water.surfaces.empty( ) )
             return;
         float fw[ 3 ] = { m_target[ 0 ] - m_eye[ 0 ], m_target[ 1 ] - m_eye[ 1 ], m_target[ 2 ] - m_eye[ 2 ] };
         const float fl = std::sqrt( fw[ 0 ] * fw[ 0 ] + fw[ 1 ] * fw[ 1 ] + fw[ 2 ] * fw[ 2 ] );
@@ -1412,39 +1418,109 @@ public:
         const float aspect = 1280.0f / 720.0f;
         const water_frustum_t cam = water_frustum_build( m_eye, rt, fw, up, aspect, 0.5f, m_far, std::tan( 1.05f * 0.5f ) * aspect );
         water_grid_frame( m_grid, cam, m_water, &m_water_view, m_grid_frame );
-        int count = 0;
-        mesh_vertex_t* out = c_engine::edit( m_grid_geometry, count );
-        if ( !out )
-            return;
-        auto channel = []( std::uint32_t c, int k ) { return static_cast< float >( ( c >> ( 8 * k ) ) & 0xFF ) / 255.0f; };
-        int n = 0;
-        for ( const water_grid_draw_t& d : m_grid_frame.draws )
-            for ( int i = 0; i < d.index_count; ++i )
+        water_stage_frame( dt );
+    }
+    // The frame's water on retail's programs (world/waterpass.hxx). The record is 0x53ABA0's statics 0x7596E0: 0x52F690 at the camera's eye (0x5588B0 runs it each view), the blender when a race
+    // owns one; without a race the settings entity applied at load stands for it.
+    void water_stage_frame( float dt )
+    {
+        if ( !m_stage_attached )
+        {
+            water_pass_source_t source;
+            source.m_read = [ this ]( const std::string& entry, std::vector< std::uint8_t >& out ) { return m_archive.read( entry.c_str( ), out ); };
+            m_stage.attach( source );
+            m_stage_attached = true;
+        }
+        if ( !m_stage_bound )
+        {
+            for ( const water_built_t::entity_ref_t& ref : m_water.entities )
+                if ( ref.surface >= 0 )
+                    m_stage.surface( ref.surface, static_cast< const water_entity_state_t* >( static_cast< const entity_t* >( ref.entity )->m_state.get( ) )->shader_loads );
+            m_stage_bound = true;
+            LOG_INFO( "water: %d surfaces on %d retail shaders", static_cast< int >( m_stage.m_surface_shader.size( ) ), static_cast< int >( m_stage.m_pass->m_shaders.size( ) ) );
+        }
+        if ( m_water_texture_set )
+            m_stage.wave_settings( m_water_texture );
+        std::uint32_t record[ 22 ];
+        std::memcpy( record, m_gfx_record, sizeof( record ) );
+        if ( m_race.active )
+        {
+            const float eye[ 4 ] = { m_eye[ 0 ], m_eye[ 1 ], m_eye[ 2 ], 0.0f };
+            gfx_blend( m_race.blender, eye, record );
+        }
+        water_pass_view_t view{ };
+        std::memcpy( view.m_light, m_lights.direction, 12 );
+        std::memcpy( &view.m_fog_start, &record[ 2 ], 4 );
+        std::memcpy( &view.m_fog_end, &record[ 3 ], 4 );
+        std::memcpy( view.m_fog_colour, &record[ 4 ], 4 );
+        std::memcpy( view.m_statics.m_ambient, &record[ 10 ], 4 );
+        std::memcpy( view.m_statics.m_diffuse, &record[ 11 ], 4 );
+        std::memcpy( view.m_statics.m_foam_ambient, &record[ 12 ], 4 );
+        std::memcpy( view.m_statics.m_foam_diffuse, &record[ 13 ], 4 );
+        std::memcpy( &view.m_statics.m_foam_size, &record[ 14 ], 4 );
+        std::memcpy( view.m_statics.m_decal_ambient, &record[ 15 ], 4 );
+        std::memcpy( view.m_statics.m_decal_diffuse, &record[ 16 ], 4 );
+        m_stage.frame( dt, m_grid_frame, view );
+        if ( m_retail )
+            m_retail->frame( dt, record, m_far, m_lights );
+    }
+    // The static model components on retail's path: the frame's walk, each component's draw 0x5B0730. The list stands for the draw manager's tree.
+    void retail_attach( )
+    {
+        void* device = nullptr;
+        void* context = nullptr;
+        void* mirror = nullptr;
+        c_engine::device( device, context, mirror );
+        if ( device == nullptr )
+            return;   // the self-test's scenes have no window
+        m_retail = std::make_unique< gfx_retail_t >( device, context );
+        m_retail->m_read = [ this ]( const std::string& entry, std::vector< std::uint8_t >& out ) { return m_archive.read( entry.c_str( ), out ); };
+        m_retail->m_cube_name = [ this ]( const std::string& name ) { return m_rig.substitute( "VuCubeTextureAsset", name ); };
+        m_retail->m_draw = [ this ]( gfx_sort_t& sort, const gfx_draw_params_t& p ) {
+            for ( static_draw_item_t& item : m_static_draws )
+                if ( item.retail && !item.off && ( ( p.m_reflecting & item.draw.reflect ) == p.m_reflecting ) )
+                {
+                    item.retail->m_draw = &item.draw;
+                    item.retail->draw( sort, p );
+                }
+            retail_boats( sort, p );
+            for ( animated_t& item : m_animated )
             {
-                if ( n >= count )
-                {
-                    ++m_grid_overflow;
-                    break;
-                }
-                const water_grid_record_t& r = m_grid_frame.vertices[ static_cast< std::size_t >( d.vertex_start + m_grid_frame.indices[ static_cast< std::size_t >( d.index_start + i ) ] ) ];
-                mesh_vertex_t& v = out[ n++ ];
-                v = mesh_vertex_t{};
-                v.position[ 0 ] = r.x;
-                v.position[ 1 ] = r.y;
-                v.position[ 2 ] = r.height;
-                v.normal[ 2 ] = 1.0f;
-                for ( int k = 0; k < 4; ++k )
-                {
-                    const float a = channel( m_water_ambient, k );
-                    v.color[ k ] = a + ( channel( m_water_diffuse, k ) - a ) * r.shade;
-                }
-                v.color[ 3 ] = v.color[ 3 ] / 0.55f > 1.0f ? 1.0f : v.color[ 3 ] / 0.55f;
+                const animated_draw_t s = animated_model_select( item.draw, item.aabb, item.aabb + 4, p.m_eye, p.m_skip_models != 0u );
+                if ( !s.drawn || !item.retail || ( p.m_reflecting & item.draw.reflect ) != p.m_reflecting )
+                    continue;
+                item.retail->m_colour = s.color;
+                item.retail->m_byte = s.dynamic_lighting;
+                item.retail->m_model_word = static_cast< std::uint32_t >( item.palette.size( ) / 16 );
+                item.retail->m_bones = m_retail->palette_id( item.palette.data( ) );
+                item.retail->draw( sort, item.world, p );
             }
-        for ( int i = n; i < count; ++i )
-            out[ i ] = mesh_vertex_t{};
-        c_engine::stream( m_grid_geometry );
-        if ( m_grid_overflow == 1 )
-            LOG_WARNING( "water draw: more than %d expanded vertices in a frame - the tail is not drawn (our capacity)", count );
+            if ( !p.m_reflecting )
+                for ( retail_geom_t& g : m_retail_geoms )
+                {
+                    g.model->m_colour = g.colour;
+                    g.model->draw( sort, g.matrix, p );
+                }
+        };
+        m_pfx.m_geom_sink = [ this ]( const std::string& asset, const float* matrix, std::uint32_t colour ) {
+            gfx_static_model_t*& model = m_retail_geom_models[ asset ];
+            if ( model == nullptr )
+            {
+                const gfx_scene_view_t* v = m_retail->model( asset );
+                if ( v == nullptr )
+                    return false;
+                m_retail_geom_store.emplace_back( );
+                model = &m_retail_geom_store.back( );
+                gfx_scene_view_attach( *model, *v );
+            }
+            retail_geom_t g;
+            g.model = model;
+            std::memcpy( g.matrix, matrix, 64 );
+            g.colour = colour;
+            m_retail_geoms.push_back( g );
+            return true;
+        };
+        c_engine::stage_pass( &gfx_retail_t::engine_pass, m_retail.get( ) );
     }
     const track_manager_t* track( ) const
     {
@@ -1613,7 +1689,7 @@ public:
     {
         race_draw( );
         foliage_frame( );
-        water_draw( );
+        water_draw( dt );
         // The crossing test wants the position of whatever the plane's Trigger
         // Type accepts. With no boat in the scene the dev vantage stands in,
         // so flying the orbit through a plane still exercises the real test.
@@ -1626,7 +1702,6 @@ public:
         const double props_start = trace::now( );
         skin_props( dt );
         animated_attach_tick( );
-        update_static_draws( );
         trace::frame( ).props += trace::now( ) - props_start;
 
         const double pfx_start = trace::now( );
@@ -1634,6 +1709,7 @@ public:
         if ( c_engine::option( "no-pfx" ) == nullptr )
         {
             m_pfx.frame( dt, m_eye );
+            m_retail_geoms.clear( );
             race_session_pfx_draw( m_race, m_race_pfx_draw );
             m_pfx.draw( m_eye, m_target, [ this ]( const std::string& path ) { return texture_for( path ); },
                 [ this ]( const std::string& path ) -> const std::vector< pfx_part_t >& { return pfx_parts( path ); }, &m_race_pfx_draw );
@@ -1745,7 +1821,7 @@ private:
     // NormalTextureScale 0.5 (the defaults; Hydroelectric authors none).
     // The water renderer's texture settings (VuWater +0x1C -> [0] +4 .. +0x23): VuWaterTextureSettingsEntity's Trigger
     // 0x5D2B00 copies the entity's +0x60 .. +0x7F there (the eight floats above, in that order). The renderer (the
-    // platform's) is not recreated: nothing reads them yet. `m_water_texture_set` = a Trigger has written them.
+    // platform's): water_stage_frame hands them over. `m_water_texture_set` = a Trigger has written them.
     std::uint32_t m_water_texture[ 8 ]{};
     bool m_water_texture_set = false;
     std::map< std::string, value_t > m_templates;
@@ -1770,18 +1846,24 @@ private:
     race_session_t m_race{};
     bool m_defer_project_initialized = false, m_project_initialized = false;
     value_t m_boat_db, m_track_db, m_constant_db, m_skin_db;
-    // The water renderer (world/grid.hxx): its templates, this frame's records, and OUR draw of them - one
-    // geometry holding the records expanded per index (a triangle list, capacity k_water_draw_vertices,
-    // unused tail degenerate) drawn through the engine's class-7 blended pass. m_water_ambient / _diffuse:
-    // VuGlobalGfxSettingsEntity's Water Ambient / Diffuse Color (memory water.md: gAmbientColor / gDiffuseColor).
+    // The water renderer (world/grid.hxx): its templates and this frame's records; m_stage draws them (world/waterpass.hxx).
     water_grid_t m_grid{};
     water_grid_frame_t m_grid_frame{};
-    int m_grid_geometry = -1;
-    int m_grid_placement = -1;
-    int m_grid_overflow = 0;
-    std::uint32_t m_water_ambient = 0xC0423C2Du;
-    std::uint32_t m_water_diffuse = 0xC05A503Cu;
-    static constexpr int k_water_draw_vertices = 60000;
+    water_stage_t m_stage{};
+    bool m_stage_attached = false, m_stage_bound = false;
+    std::unique_ptr< gfx_retail_t > m_retail;
+    std::vector< std::unique_ptr< gfx_retail_boat_t > > m_retail_boats;
+    // VuPfxGeomPattern's particles this frame: 0x5903A0's tail, the model's draw 0x520130 at the particle's matrix and colour.
+    struct retail_geom_t
+    {
+        gfx_static_model_t* model = nullptr;
+        float matrix[ 16 ]{};
+        std::uint32_t colour = 0;
+    };
+    std::vector< retail_geom_t > m_retail_geoms;
+    std::map< std::string, gfx_static_model_t* > m_retail_geom_models;
+    std::deque< gfx_static_model_t > m_retail_geom_store;
+    std::uint32_t m_gfx_record[ 22 ] = { };   // the settings entity applied at load, its +0x70 record (0x41B400's order)
     // Loaded VuTimedEventAssets, keyed by asset name. A control points into
     // this, so entries are only ever added.
     std::map< std::string, std::vector< timed_event_t > > m_timed;
@@ -1795,13 +1877,10 @@ private:
     {
         model_draw_t draw{};
         float aabb[ 8 ]{};
-        std::vector< int > placements[ 3 ];
-        int shown = -2;   // the instance whose placements are visible (-1 none; -2 before the first frame)
-        // The owner (its Build tick re-hands the draw matrix: a dynamic prop's 0x546130) and each placement's part
-        // node matrix (placed = draw matrix x node, models.hxx place_model).
+        // The owner: its Build tick re-hands the draw matrix (a dynamic prop's 0x546130).
         const entity_t* owner = nullptr;
-        std::vector< std::array< float, 16 > > nodes[ 3 ];
         bool off = false;   // the component off the 3D draw manager (its +0x1E cleared: a hide 0x545F20)
+        std::unique_ptr< gfx_static_component_t > retail;   // its instances over stage.hxx's models
     };
 
     // One Vu3dDrawAnimatedModelComponent instance. The clip and phase are
@@ -1813,6 +1892,10 @@ private:
         std::string asset;
         std::string path;
         std::string clip;
+        model_draw_t draw{};                                // the component's properties, 0x61DB60's choice
+        float aabb[ 8 ]{};                                  // its world aabb
+        std::unique_ptr< gfx_animated_model_t > retail;     // the instance over stage.hxx's model
+        std::vector< float > palette;                       // the frame's pose, gMatrixArray; identity until it plays
         std::string trigger;
         // "VuTimedEventAsset/<name>", empty when the driver names none.
         std::string timed;

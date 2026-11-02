@@ -34,6 +34,7 @@ public:
     void reflecting( bool enabled );
     // The water surfaces' pass (hydro world/waterpass.hxx): runs inside draw( ), the scene bound, the transparent pass's blend and depth set up.
     void water_pass( void ( *pass )( void* ), void* user ) { m_water_pass = pass; m_water_user = user; }
+    void stage_pass( void ( *pass )( void*, bool ), void* user ) { m_stage_pass = pass; m_stage_user = user; }
     void* view_of( int texture ) const;
     void draw( );
     void release( );
@@ -146,6 +147,8 @@ private:
     bool m_reflecting = false;
     void ( *m_water_pass )( void* ) = nullptr;
     void* m_water_user = nullptr;
+    void ( *m_stage_pass )( void*, bool ) = nullptr;
+    void* m_stage_user = nullptr;
     bool m_ready = false;
     void ( *m_sorted )( void*, const sorted_pass_t& ) = nullptr;
     void* m_sorted_user = nullptr;
@@ -832,10 +835,7 @@ void c_geometry::draw( )
         constants.color[ 1 ] = item.color[ 1 ];
         constants.color[ 2 ] = item.color[ 2 ];
         constants.color[ 3 ] = item.alpha_test == 11 || item.alpha_test == 2 || item.alpha_test == 14 ? item.color[ 3 ] : item.alpha_test >= 8 ? static_cast< float >( item.alpha_test - 7 ) : 1.0f;
-        const bool retail_blend = item.layer >= 5 && item.alpha_test == 0;   // shader.hxx's branch 5: retail's mode 12 pixel shader
-        if ( retail_blend )
-            constants.color[ 3 ] = item.diffuse_alpha;
-        constants.flags[ 0 ] = retail_blend ? ( item.shading == 1 ? 5.0f : 5.5f ) : item.alpha_test == 12 ? 6.0f : item.alpha_test == 13 ? 6.5f : item.alpha_test == 11 ? 4.0f : item.alpha_test == 10 ? 3.0f : item.alpha_test == 6 || item.alpha_test == 7 ? -1.0f : item.alpha_test == 5 ? 2.0f : item.alpha_test == 3 ? 0.25f : item.alpha_test == 1 ? 1.0f : 0.0f;
+        constants.flags[ 0 ] = item.alpha_test == 12 ? 6.0f : item.alpha_test == 13 ? 6.5f : item.alpha_test == 11 ? 4.0f : item.alpha_test == 10 ? 3.0f : item.alpha_test == 6 || item.alpha_test == 7 ? -1.0f : item.alpha_test == 5 ? 2.0f : item.alpha_test == 3 ? 0.25f : item.alpha_test == 1 ? 1.0f : 0.0f;
         constants.flags[ 2 ] = item.alpha_test == 11 ? item.scroll : 0.0f;
         constants.flags[ 3 ] = item.alpha_test == 11 ? item.surface[ 3 ] : item.alpha_test == 3 ? 0.35f : 0.0f;
         if ( item.alpha_test == 2 || item.alpha_test == 11 )
@@ -881,6 +881,26 @@ void c_geometry::draw( )
     {
         if ( item.alpha_test != 2 && item.alpha_test != 5 && item.alpha_test != 6 && item.alpha_test != 11 && sorted_type( item ) < 0 )
             submit( item );
+    }
+
+    if ( m_stage_pass != nullptr )
+    {
+        ID3D11RasterizerState* previous_raster = nullptr;
+        context->RSGetState( &previous_raster );
+        m_stage_pass( m_stage_user, m_reflecting );
+        context->RSSetState( previous_raster );
+        if ( previous_raster ) previous_raster->Release( );
+        const FLOAT factor[ 4 ] = { 1, 1, 1, 1 };
+        context->OMSetBlendState( nullptr, factor, 0xFFFFFFFF );
+        if ( m_depth != nullptr )
+            context->OMSetDepthStencilState( m_depth, 0 );
+        g_shader( ).bind_textured( );
+        ID3D11ShaderResourceView* clear_stage[ 8 ] = { };
+        context->PSSetShaderResources( 0, 8, clear_stage );
+        bound_geometry = -1;
+        bound_texture = -2;
+        bound_cube = -2;
+        bound_cull = nullptr;
     }
 
     // The blend passes: the game's sort (hydro world/sorted.hxx) orders these and sets the layer's state through gfx_device_t.
@@ -1051,6 +1071,11 @@ void c_engine::sorted( void ( *pass )( void*, const sorted_pass_t& ), void* user
 bool c_engine::layer( int placement, int type, int shading, float diffuse_alpha, const float* box )
 {
     return g_geometry( ).layer( placement, type, shading, diffuse_alpha, box );
+}
+
+void c_engine::stage_pass( void ( *pass )( void*, bool ), void* user )
+{
+    g_geometry( ).stage_pass( pass, user );
 }
 
 void c_engine::water_pass( void ( *pass )( void* ), void* user )
