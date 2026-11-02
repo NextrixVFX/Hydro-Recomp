@@ -671,6 +671,9 @@ private:
         std::unique_ptr< entity_t > root;
         std::unique_ptr< c_ui_binding > binding;
         screen_state_t state;
+        gfx_static_model_t trophy{ };        // VuGameConfigEntity +0x304 (world/dock.hxx)
+        float trophy_matrix[ 16 ] = { };
+        const bool* trophy_shown = nullptr;  // its +0x324 while its draw object is added
     };
     // World/external.hxx.
     ui_profile_t menu_profile( );
@@ -1641,6 +1644,7 @@ public:
                 m_poster_model.m_colour = m_poster_colour;
                 m_poster_model.draw( sort, m_poster_matrix, p );
             }
+            menu_trophy_draw( sort, p );
             for ( foliage_entity_t& f : m_foliage_entities )
                 if ( ( p.m_reflecting & f.m_reflect ) == p.m_reflecting )
                     f.draw( p.m_eye, p.m_eye );
@@ -2125,6 +2129,12 @@ private:
     void dock_start( );
     bool menu_dock( std::uint32_t hash, const ui_params_t& p );
     void poster_reload( );
+    void menu_trophy_model( int id, const entity_t& e, const char* model );
+    void menu_trophy_draw( gfx_sort_t& sort, const gfx_draw_params_t& p );
+    void menu_board_frame( ui_frame_inputs_t& in, c_ui_binding& binding, const ui_screen_env_t& env );
+    ui_mini_board_hooks_t m_menu_board;       // the leaderboard manager's answers in the front end (world/menu.hxx)
+    std::int32_t m_menu_board_score = 0;
+    bool m_menu_board_row = false;
     // VuPfxGeomPattern's particles this frame: 0x5903A0's tail, the model's draw 0x520130 at the particle's matrix and colour.
     struct retail_geom_t
     {

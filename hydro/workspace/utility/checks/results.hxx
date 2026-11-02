@@ -2202,6 +2202,55 @@ inline bool verify_ui_progress_records( )
     return failed == 0;
 }
 
+// Case trophy_draw: the matrix of VuGameConfigEntity's draw 0x45F860 (the byte +0x324 gating the call) and the score the games post; then the local row (ours) over records written by the
+// recreated progress manager: the best of the boats, Slalom by its course, no record no row.
+inline bool verify_ui_trophy( )
+{
+    int failed = 0;
+    for ( std::size_t k = 0; k < g_golden_trd_count; ++k )
+    {
+        const golden_trd_t& g = g_golden_trd[ k ];
+        float position[ 3 ], rotation[ 3 ], m[ 16 ];
+        std::memcpy( position, g.m_pos, 12 );
+        std::memcpy( rotation, g.m_rot, 12 );
+        ui_game_config_trophy_matrix( position, rotation, m );
+        if ( g.m_calls != g.m_shown || ( g.m_shown && std::memcmp( m, g.m_m, 64 ) != 0 ) )
+            ++failed;
+    }
+    for ( std::size_t k = 0; k < g_golden_trd_scores_count; ++k )
+    {
+        float t;
+        std::memcpy( &t, &g_golden_trd_scores[ k ][ 0 ], 4 );
+        if ( static_cast< std::uint32_t >( ui_progress_board_score( t ) ) != g_golden_trd_scores[ k ][ 1 ] )
+            ++failed;
+    }
+    value_t save, root;
+    const auto row = [ & ]( const char* mode, const char* track, const char* course, std::int32_t want )
+    {
+        ui_json_set_string( ui_json_child( ui_json_child( root, "GameConfig" ), "Mode" ), mode );
+        ui_json_set_string( ui_json_child( ui_json_child( root, "GameConfig" ), "Track" ), track );
+        ui_json_set_string( ui_json_child( ui_json_child( root, "GameConfig" ), "Course" ), course );
+        std::int32_t score = 0;
+        const bool have = ui_progress_board_local( save, root, score );
+        if ( have != ( want != 0 ) || ( have && score != want ) )
+            ++failed;
+    };
+    row( "Race", "Asgard", "", 0 );
+    ui_progress_add( save, "Race", "Asgard", "None", "C", 0, 0, 101.83f, 30.0f );
+    ui_progress_add( save, "Race", "Asgard", "None", "B", 0, 2, 90.5f, 28.0f );
+    ui_progress_add( save, "Slalom", "Asgard", "CourseA", "C", 0, 1, 70.25f, 70.25f );
+    row( "Race", "Asgard", "", -90500 );
+    row( "TimeTrial", "Asgard", "", 0 );
+    row( "Slalom", "Asgard", "CourseA", -70250 );
+    row( "Slalom", "Asgard", "CourseB", 0 );
+    row( "Race", "City", "", 0 );
+    if ( failed == 0 )
+        LOG_SUCCESS( "ui trophy: %d draws, %d scores, the local row match", static_cast< int >( g_golden_trd_count ), static_cast< int >( g_golden_trd_scores_count ) );
+    else
+        LOG_ERROR( "ui trophy: %d differ from retail", failed );
+    return failed == 0;
+}
+
 inline bool verify_ui_results_all( )
 {
     bool ok = true;
@@ -2219,5 +2268,6 @@ inline bool verify_ui_results_all( )
     ok = verify_ui_save_file( ) && ok;
     ok = verify_ui_progress_champ( ) && ok;
     ok = verify_ui_progress_records( ) && ok;
+    ok = verify_ui_trophy( ) && ok;
     return ok;
 }
