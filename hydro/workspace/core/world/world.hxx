@@ -1395,6 +1395,8 @@ public:
             m_stage_bound = true;
             LOG_INFO( "water: %d surfaces on %d retail shaders", static_cast< int >( m_stage.m_surface_shader.size( ) ), static_cast< int >( m_stage.m_pass->m_shaders.size( ) ) );
         }
+        if ( m_water_texture_set )
+            m_stage.wave_settings( m_water_texture );
         std::uint32_t record[ 22 ];
         std::memcpy( record, m_gfx_record, sizeof( record ) );
         if ( m_race.active )
@@ -1710,7 +1712,7 @@ private:
     // NormalTextureScale 0.5 (the defaults; Hydroelectric authors none).
     // The water renderer's texture settings (VuWater +0x1C -> [0] +4 .. +0x23): VuWaterTextureSettingsEntity's Trigger
     // 0x5D2B00 copies the entity's +0x60 .. +0x7F there (the eight floats above, in that order). The renderer (the
-    // platform's) is not recreated: nothing reads them yet. `m_water_texture_set` = a Trigger has written them.
+    // platform's): water_stage_frame hands them over. `m_water_texture_set` = a Trigger has written them.
     std::uint32_t m_water_texture[ 8 ]{};
     bool m_water_texture_set = false;
     std::map< std::string, value_t > m_templates;

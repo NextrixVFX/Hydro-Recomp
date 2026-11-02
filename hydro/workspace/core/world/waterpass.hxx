@@ -218,7 +218,7 @@ struct water_pass_t final : water_shader_assets_t, water_reflection_source_t
             m_device.set_declaration( m_declaration_of( s ) );
             frame_constants( *s.m_program, v );
             s.patch( m_device, v.m_statics, d.position, d.vertex_start, d.vertex_count, d.index_start, d.index_count, frame.vertices.data( ), frame.indices.data( ),
-                     m_wave_textures[ m_wave.current ], 64.0f, this );
+                     m_wave_textures[ m_wave.current ], m_wave.built[ 7 ], this );   // the texture object's +0x40: NormalTextureScale as last built
         }
     }
 
@@ -313,6 +313,12 @@ struct water_stage_t
         m_pass = std::make_unique< water_pass_t >( m_api );
         m_pass->create( source );
         c_engine::water_pass( &water_stage_t::engine_pass, this );
+    }
+
+    // VuWaterTextureSettingsEntity's Trigger 0x5D2B00 wrote the wave texture's +4 (world/watchers.hxx); a change rebuilds the spectrum at the next build (wavemap.hxx).
+    void wave_settings( const std::uint32_t* words )
+    {
+        std::memcpy( m_pass->m_wave.live, words, sizeof( m_pass->m_wave.live ) );
     }
 
     void frame( float dt, const water_grid_frame_t& grid, const water_pass_view_t& view )
