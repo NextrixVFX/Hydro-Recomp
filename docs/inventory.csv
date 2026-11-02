@@ -5511,8 +5511,8 @@ address,size,ida_name,classes,vtable_slots,subsystem,status,cited_in,thunk,libra
 0x5407D0,132,sub_5407D0,VuMetroD3d11Gfx,VuMetroD3d11Gfx+3,rendering / gfx,absent,,False,False,game
 0x540860,17,sub_540860,VuMetroD3d11Gfx,VuMetroD3d11Gfx+12,rendering / gfx,cited,hydro/workspace/core/world/backend.hxx,False,False,game
 0x540880,11,sub_540880,VuMetroD3d11Gfx,VuMetroD3d11Gfx+13,rendering / gfx,cited,hydro/workspace/core/world/backend.hxx,False,False,game
-0x540890,307,sub_540890,VuMetroD3d11Gfx,VuMetroD3d11Gfx+15,rendering / gfx,verified,engine/workspace/core/render/gfx.hxx; hydro/workspace/core/ui/crop.hxx,False,False,game
-0x5409D0,29,sub_5409D0,VuMetroD3d11Gfx,VuMetroD3d11Gfx+16,rendering / gfx,verified,engine/workspace/core/render/gfx.hxx; hydro/workspace/core/ui/crop.hxx,False,False,game
+0x540890,307,sub_540890,VuMetroD3d11Gfx,VuMetroD3d11Gfx+15,rendering / gfx,verified,engine/workspace/core/render/gfx.hxx; engine/workspace/core/render/swap.hxx; hydro/workspace/core/ui/crop.hxx,False,False,game
+0x5409D0,29,sub_5409D0,VuMetroD3d11Gfx,VuMetroD3d11Gfx+16,rendering / gfx,verified,engine/workspace/core/render/gfx.hxx; engine/workspace/core/runtime.hxx; hydro/workspace/core/ui/crop.hxx,False,False,game
 0x5409F0,149,sub_5409F0,VuMetroD3d11Gfx,VuMetroD3d11Gfx+18,rendering / gfx,verified,engine/workspace/core/render/gfx.hxx; engine/workspace/core/render/mesh.hxx,False,False,game
 0x540A90,23,sub_540A90,VuD3d11Gfx; VuMetroD3d11Gfx,VuMetroD3d11Gfx+22; VuD3d11Gfx+22,rendering / gfx,verified,engine/workspace/core/render/gfx.hxx; hydro/workspace/core/world/backend.hxx,False,False,race
 0x540AB0,20,sub_540AB0,VuMetroD3d11Gfx,VuMetroD3d11Gfx+23,rendering / gfx,verified,engine/workspace/core/render/gfx.hxx,False,False,game
