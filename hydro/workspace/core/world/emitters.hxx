@@ -122,7 +122,7 @@ struct force_affector_state_t
     float d_acceleration = value.acceleration, d_speed = value.max_speed;
 };
 
-// VuDockedBoatEntity (ctor 0x4358E0): "Position X" +0x5C, "Position Y" +0x60, "Rotation Z" +0x64, each VuBasicProperty<float> 0x737484.
+// VuDockedBoatEntity (ctor 0x4358E0): "Position X" +0x5C, "Position Y" +0x60, "Rotation Z" +0x64 (VuBasicProperty<float> 0x737484; Rotation Z is 0x73A490, the degrees filter 0x3C8EFA35).
 struct docked_entity_state_t
 {
     float x = 0.0f, y = 0.0f, rotation = 0.0f, d_x = 0.0f, d_y = 0.0f, d_rotation = 0.0f;
@@ -200,7 +200,7 @@ inline void audio_emitter_load_properties( entity_t& e, const value_t& p )
         docked_entity_state_t& s = *static_cast< docked_entity_state_t* >( e.m_state.get( ) );
         property_float( p, "Position X", s.x, s.d_x, false );
         property_float( p, "Position Y", s.y, s.d_y, false );
-        property_float( p, "Rotation Z", s.rotation, s.d_rotation, false );
+        property_float( p, "Rotation Z", s.rotation, s.d_rotation, true );
         return;
     }
     if ( e.m_type == "VuForceAffectorEntity" && e.m_state )
