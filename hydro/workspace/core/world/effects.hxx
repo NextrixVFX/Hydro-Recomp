@@ -69,6 +69,7 @@ public:
         pfx_runtime_init( m_rt );
         m_lib = pfx_library_t{ };
         m_binding = pfx_manager_binding_t{ &m_rt, &m_lib };
+        m_binding.named = [ this ]( const char* path ) { load_named( path ); };
         m_ops = pfx_manager_runtime_ops( m_binding );
         m_manager = pfx_manager_t{ };
         pfx_manager_init( m_manager, m_ops );
@@ -100,14 +101,8 @@ public:
             return 0u;
         }
         shared_t shared( *this );
-        const std::size_t slash = effect.find( '/' );
-        const std::string asset = effect.substr( 0, slash );
-        if ( m_assets.insert( asset ).second )
-        {
-            std::vector< std::uint8_t > blob;
-            if ( !archive.read( ( "VuPfxAsset/" + asset ).c_str( ), blob ) || pfx_load_asset( m_rt, m_lib, asset, blob ) == 0u )
-                LOG_WARNING( "pfx: VuPfxAsset/%s did not load", asset.c_str( ) );
-        }
+        m_archive = &archive;
+        load_named( effect.c_str( ) );
         const std::uint32_t inst = pfx_runtime_create_path( m_rt, m_lib, effect );
         if ( inst == 0u )
         {
@@ -321,6 +316,18 @@ public:
     const pfx_manager_ops_t* manager_ops( ) const { return m_ready ? &m_ops : nullptr; }
 
 private:
+    // The asset of an effect's first path segment, once (the boats' effects name assets no static pfx does: Pack01). Ours, flagged: see the top.
+    void load_named( const char* path )
+    {
+        const std::string effect( path );
+        const std::string asset = effect.substr( 0, effect.find( '/' ) );
+        if ( m_archive == nullptr || !m_assets.insert( asset ).second )
+            return;
+        std::vector< std::uint8_t > blob;
+        if ( !m_archive->read( ( "VuPfxAsset/" + asset ).c_str( ), blob ) || pfx_load_asset( m_rt, m_lib, asset, blob ) == 0u )
+            LOG_WARNING( "pfx: VuPfxAsset/%s did not load", asset.c_str( ) );
+    }
+
     // The shared VuRandom in for one runtime call, back out after it (see the top).
     struct shared_t
     {
@@ -491,6 +498,7 @@ private:
     }
 
     bool m_ready = false;
+    const c_archive* m_archive = nullptr;
     fleet_random_t* m_random = nullptr;   // VuRandom 0x736810 (c_world's)
     int m_card = -1;
     bool m_trails_logged = false;
