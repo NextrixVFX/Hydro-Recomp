@@ -566,7 +566,12 @@ private:
     void bind_game_screens( );   // huds.hxx: Results' VuCommonScreen into s.rules.screen_hooks
     void hud( int project, race_hud_verb_t verb, float dt );
     void ui_frame( );
+public:
+    ~c_world( ) { saves_exit( ); }   // 0x4DAA28
+
+private:
     // The saves (world/saves.hxx).
+    void saves_exit( );
     void saves_start( );
     void saves_profile_listeners( );
     void saves_commit( );

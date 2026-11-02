@@ -62,6 +62,13 @@ inline void c_world::saves_commit( )
     LOG_INFO( "saves: committed" );
 }
 
+// App exit 0x4DAA28: the profile alone.
+inline void c_world::saves_exit( )
+{
+    if ( m_saves_on )
+        m_profile.save( [ this ] { saves_profile_listeners( ); } );
+}
+
 inline void c_world::saves_game( )
 {
     if ( m_saves_on )
