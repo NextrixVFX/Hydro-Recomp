@@ -648,7 +648,7 @@ address,size,ida_name,classes,vtable_slots,subsystem,status,cited_in,thunk,libra
 0x42AB60,2966,sub_42AB60,,,HUD / UI / fonts (by address),verified,hydro/workspace/core/ui/gauge.hxx; hydro/workspace/core/ui/hud.hxx; hydro/workspace/core/world/hudpass.hxx; hydro/workspace/core/world/huds.hxx,False,False,race
 0x42B700,34,sub_42B700,VuHUDSpeedometerEntity,VuHUDSpeedometerEntity+0,HUD / UI / fonts,absent,,False,False,race
 0x42B730,291,sub_42B730,,,HUD / UI / fonts (by address),absent,,False,False,race
-0x42B860,403,sub_42B860,VuHUDSpeedometerEntity,VuHUDSpeedometerEntity+12,HUD / UI / fonts,verified,hydro/workspace/core/ui/bind.hxx; hydro/workspace/core/ui/hud.hxx; hydro/workspace/core/ui/overlay.hxx; hydro/workspace/utility/checks/ui.hxx,False,False,race
+0x42B860,403,sub_42B860,VuHUDSpeedometerEntity,VuHUDSpeedometerEntity+12,HUD / UI / fonts,verified,hydro/workspace/core/ui/bind.hxx; hydro/workspace/core/ui/hud.hxx; hydro/workspace/core/ui/overlay.hxx; hydro/workspace/core/world/hudpass.hxx; hydro/workspace/utility/checks/ui.hxx,False,False,race
 0x42BA00,2003,sub_42BA00,,,HUD / UI / fonts (by address),verified,hydro/workspace/core/ui/gauge.hxx; hydro/workspace/core/ui/hud.hxx; hydro/workspace/core/ui/overlay.hxx; hydro/workspace/core/world/huds.hxx; hydro/workspace/utility/checks/ui.hxx; hydro/workspace/utility/checks/update.hxx,False,False,race
 0x42C1E0,174,sub_42C1E0,,,unattributed,verified,hydro/workspace/core/ui/gauge.hxx; hydro/workspace/core/ui/hud.hxx; hydro/workspace/utility/checks/ui.hxx,False,False,race
 0x42C290,16,sub_42C290,,,unattributed,verified,hydro/workspace/core/ui/gauge.hxx; hydro/workspace/core/world/hudpass.hxx; hydro/workspace/utility/checks/hudpass.hxx,False,False,race
@@ -6241,8 +6241,8 @@ address,size,ida_name,classes,vtable_slots,subsystem,status,cited_in,thunk,libra
 0x57C5E0,34,sub_57C5E0,VuMetroD3d11Texture,VuMetroD3d11Texture+0,HUD / UI / fonts,absent,,False,False,race
 0x57C610,168,sub_57C610,,,HUD / UI / fonts (by address),cited,engine/workspace/core/render/resource.hxx,False,False,race
 0x57C6C0,126,sub_57C6C0,VuMetroD3d11Texture,VuMetroD3d11Texture+2,HUD / UI / fonts,verified,engine/workspace/core/render/resource.hxx,False,False,race
-0x57C740,597,sub_57C740,,,HUD / UI / fonts (by address),verified,engine/workspace/core/render/resource.hxx; hydro/workspace/core/world/waterpass.hxx; hydro/workspace/utility/checks/device.hxx,False,False,race
-0x57C9B0,347,sub_57C9B0,,,HUD / UI / fonts (by address),verified,engine/workspace/core/render/resource.hxx; hydro/workspace/core/ui/typeset.hxx; hydro/workspace/core/world/hudpass.hxx; hydro/workspace/core/world/wavemap.hxx; hydro/workspace/utility/checks/device.hxx,False,False,race
+0x57C740,597,sub_57C740,,,HUD / UI / fonts (by address),verified,engine/workspace/core/render/resource.hxx; hydro/workspace/core/world/hudpass.hxx; hydro/workspace/core/world/waterpass.hxx; hydro/workspace/utility/checks/device.hxx,False,False,race
+0x57C9B0,347,sub_57C9B0,,,HUD / UI / fonts (by address),verified,engine/workspace/core/render/resource.hxx; hydro/workspace/core/ui/typeset.hxx; hydro/workspace/core/world/wavemap.hxx; hydro/workspace/utility/checks/device.hxx,False,False,race
 0x57CB10,135,sub_57CB10,,,HUD / UI / fonts (by address),verified,hydro/workspace/core/boat/parts.hxx,False,False,race
 0x57CBA0,1756,sub_57CBA0,,,HUD / UI / fonts (by address),verified,hydro/workspace/core/boat/camera.hxx; hydro/workspace/core/world/grid.hxx; hydro/workspace/core/world/stage.hxx; hydro/workspace/utility/checks/race.hxx,False,False,race
 0x57D280,5163,sub_57D280,,,unattributed,verified,hydro/workspace/core/world/grid.hxx; hydro/workspace/utility/checks/world.hxx,False,False,race
