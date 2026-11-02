@@ -22,6 +22,7 @@
 #include <workspace/core/world/gfxsort.hxx>
 #include <workspace/core/world/meshes.hxx>
 #include <workspace/core/world/livery.hxx>
+#include <workspace/core/world/pfxdraw.hxx>
 #include <workspace/core/world/settings.hxx>
 #include <workspace/core/world/skeleton.hxx>
 
@@ -90,6 +91,8 @@ struct gfx_retail_t
             m_device.draw_indexed( 3u, part.m_start, part.m_triangles );
         };
         m_backend.m_callbacks[ k_gfx_cb_foliage ] = [ this ]( std::uint8_t* r ) { foliage_record( r ); };
+        m_backend.m_callbacks[ k_gfx_cb_pfx_quad ] = [ this ]( std::uint8_t* r ) { pfx_quad_record( r ); };
+        m_backend.m_callbacks[ k_gfx_cb_pfx_trail ] = [ this ]( std::uint8_t* r ) { pfx_trail_record( r ); };
     }
 
     gfx_direct_t m_api;
@@ -125,6 +128,22 @@ struct gfx_retail_t
     std::vector< const float* > m_palettes;   // this pass's skinned draws
     std::vector< std::uint16_t > m_quad_indices;   // VuGfxUtil +0x48
     float m_plane = 0.0f;                          // the reflection plane, viewport +0x268
+    // The quad renderer's table (0x14 each: 0x58CCC0) and the trail renderer's.
+    struct pfx_quad_program_t
+    {
+        const gfx_program_t* m_program = nullptr;
+        std::uint32_t m_material = 0;
+        const gfx_constant_slot_t* m_clip = nullptr;
+        std::int32_t m_colour = -1, m_tile = -1;
+    };
+    pfx_quad_program_t m_pfx_quad[ 8 ];
+    std::uint32_t m_pfx_materials[ 8 ] = { }, m_pfx_trail_material = 0;
+    std::int32_t m_pfx_trail_sampler = -1;
+    std::vector< std::uint8_t > m_pfx_vertices;    // the static 0x799898
+    const gfx_texture_t* m_white = nullptr;
+    float m_right[ 3 ] = { }, m_up[ 3 ] = { };
+    std::function< const std::uint8_t*( std::uint32_t ) > m_pfx_node;
+    std::function< void( std::uint32_t, std::uint32_t&, std::uint32_t& ) > m_pfx_assets;
 
     // A VuCubeTextureAsset's object (0x5AE140). A substitution (VuSubstituteAssetEntity) changes the object in place: `m_cube_name` answers the resolved name, frame( ) follows it.
     gfx_texture_object_t* cube_object( const std::string& name )
@@ -350,6 +369,17 @@ struct gfx_retail_t
         }
     }
 
+    // 0x50B420: VuGfxUtil +0x48 holds at least `count` quads, 0 1 2 0 2 3 each.
+    void quad_indices( std::int32_t count )
+    {
+        for ( std::size_t q = m_quad_indices.size( ) / 6u; q < static_cast< std::size_t >( count ); ++q )
+        {
+            const std::uint16_t v = static_cast< std::uint16_t >( q * 4u );
+            for ( const std::uint16_t i : { std::uint16_t( v ), std::uint16_t( v + 1 ), std::uint16_t( v + 2 ), std::uint16_t( v ), std::uint16_t( v + 2 ), std::uint16_t( v + 3 ) } )
+                m_quad_indices.push_back( i );
+        }
+    }
+
     // 0x5BBDD0: { texture, count, count x 4 vertices }: the texture in slot 0, the shared quad indices (0x50B420: 0 1 2 0 2 3 per quad), the dynamic draw.
     void foliage_record( std::uint8_t* record )
     {
@@ -358,13 +388,106 @@ struct gfx_retail_t
         std::memcpy( &texture, record, 4 );
         std::memcpy( &count, record + 4, 4 );
         m_device.set_texture( 0u, texture ? m_backend.m_texture_table[ texture - 1u ] : nullptr );
-        for ( std::size_t q = m_quad_indices.size( ) / 6u; q < static_cast< std::size_t >( count ); ++q )
-        {
-            const std::uint16_t v = static_cast< std::uint16_t >( q * 4u );
-            for ( const std::uint16_t i : { std::uint16_t( v ), std::uint16_t( v + 1 ), std::uint16_t( v + 2 ), std::uint16_t( v ), std::uint16_t( v + 2 ), std::uint16_t( v + 3 ) } )
-                m_quad_indices.push_back( i );
-        }
+        quad_indices( count );
         m_device.draw_indexed_dynamic( 3u, static_cast< std::uint32_t >( count ) * 4u, static_cast< std::uint32_t >( count ) * 2u, m_quad_indices.data( ), record + 8, 0x18u );
+    }
+
+    // The quad renderer's 0x58BAC0 + 0x58CCC0 per program and the trail renderer's 0x58CE40, the device half: { position 0, colour 12, uv pair 16 } / { position 0, uv 12, colour 20 }, one material each with no desc.
+    bool pfx_programs( )
+    {
+        static const char* const names[ 8 ] = { "Pfx/Quad/Simple", "Pfx/Quad/Fog", "Pfx/Quad/Tile", "Pfx/Quad/TileFog", "Pfx/Quad/Clip", "Pfx/Quad/ClipFog", "Pfx/Quad/ClipTile", "Pfx/Quad/ClipTileFog" };
+        const auto material = [ this ]( gfx_program_t* program, gfx_declaration_t* declaration ) {
+            const gfx_handle_t layout = declaration->m_layout;
+            const std::uint32_t layout_id = id_of( declaration, [ & ] { return m_backend.add_layout( layout ); } );
+            const std::uint32_t program_id = id_of( program, [ & ] { return m_backend.add_program( program ); } );
+            const gfx_material_t* made = m_sort.material_create( program_id, layout_id, gfx_material_desc_t{ } );
+            return id_of( made, [ & ] { return m_backend.add_material( made ); } );
+        };
+        const auto element = []( std::uint32_t offset, std::uint32_t type, std::uint32_t usage ) {
+            gfx_vertex_element_t e;
+            e.m_stream = 0; e.m_offset = offset; e.m_type = type; e.m_usage = usage; e.m_index = 0;
+            return e;
+        };
+        std::vector< std::uint8_t > blob;
+        const std::vector< gfx_vertex_element_t > quad = { element( 0, 2, 0 ), element( 12, 7, 2 ), element( 16, 3, 6 ) };
+        for ( int i = 0; i < 8; ++i )
+        {
+            if ( !m_read( std::string( "VuCompiledShaderAsset/" ) + names[ i ], blob ) )
+                return false;
+            gfx_program_t* program = m_programs.load( blob.data( ) );
+            m_pfx_quad[ i ].m_program = program;
+            m_pfx_quad[ i ].m_material = material( program, m_declarations.create( quad, *program ) );
+            m_pfx_quad[ i ].m_clip = program->constant( "gClipThreshold" );
+            m_pfx_quad[ i ].m_tile = program->sampler( "gTileTexture" );
+            m_pfx_quad[ i ].m_colour = program->sampler( "gColorTexture" );
+            m_pfx_materials[ i ] = m_pfx_quad[ i ].m_material;
+        }
+        if ( !m_read( "VuCompiledShaderAsset/Pfx/Trail", blob ) )
+            return false;
+        gfx_program_t* trail = m_programs.load( blob.data( ) );
+        m_pfx_trail_material = material( trail, m_declarations.create( { element( 0, 2, 0 ), element( 12, 1, 6 ), element( 20, 7, 2 ) }, *trail ) );
+        m_pfx_trail_sampler = trail->sampler( "gColorTexture" );
+        return true;
+    }
+
+    const gfx_texture_t* pfx_texture( std::uint32_t id ) const { return id ? m_backend.m_texture_table[ id - 1u ] : nullptr; }
+
+    // 0x58C340: the clip threshold when the program has one, the colour texture, the tile when the program has a sampler, the fill, the quads.
+    void pfx_quad_record( std::uint8_t* record )
+    {
+        std::uint32_t shader, node;
+        std::memcpy( &shader, record + 4, 4 );
+        std::memcpy( &node, record + 8, 4 );
+        std::int32_t count;
+        std::memcpy( &count, record + 0x6C, 4 );
+        const pfx_quad_program_t& q = m_pfx_quad[ shader ];
+        const std::uint8_t* bytes = m_pfx_node( node );
+        if ( q.m_clip != nullptr )
+        {
+            std::uint32_t bits;
+            std::memcpy( &bits, bytes + 0x74, 4 );
+            gfx_programs_t::set_word( m_api, *q.m_program, *q.m_clip, bits );
+        }
+        std::uint32_t colour = 0u, tile = 0u;
+        m_pfx_assets( node, colour, tile );
+        m_device.set_texture( static_cast< std::uint32_t >( q.m_colour ), pfx_texture( colour ) );
+        if ( q.m_tile >= 0 )
+            m_device.set_texture( static_cast< std::uint32_t >( q.m_tile ), pfx_texture( tile ) );
+        const float camera[ 12 ] = { m_right[ 0 ], m_right[ 1 ], m_right[ 2 ], 0.0f, m_camera.m_direction[ 0 ], m_camera.m_direction[ 1 ], m_camera.m_direction[ 2 ], 0.0f, m_up[ 0 ], m_up[ 1 ], m_up[ 2 ], 0.0f };
+        m_pfx_vertices.resize( static_cast< std::size_t >( count ) * 4u * sizeof( pfx_quad_vertex_t ) );
+        pfx_quad_fill( record, bytes, camera, reinterpret_cast< pfx_quad_vertex_t* >( m_pfx_vertices.data( ) ) );
+        quad_indices( count );
+        m_device.draw_indexed_dynamic( 3u, static_cast< std::uint32_t >( count ) * 4u, static_cast< std::uint32_t >( count ) * 2u, m_quad_indices.data( ), m_pfx_vertices.data( ), 0x20u );
+    }
+
+    // 0x58D3F0: the texture, the ribbon as one strip; a 3D Ribbon (+0x3C not 0) with culling off around it.
+    void pfx_trail_record( std::uint8_t* record )
+    {
+        std::uint32_t node;
+        std::memcpy( &node, record + 4, 4 );
+        std::int32_t count, type;
+        std::memcpy( &count, record + 0x68, 4 );
+        const std::uint8_t* bytes = m_pfx_node( node );
+        std::memcpy( &type, bytes + 0x3C, 4 );
+        std::uint32_t colour = 0u, tile = 0u;
+        m_pfx_assets( node, colour, tile );
+        // No asset: VuGfxUtil's white texture, g 0x75902C +0x1C (a 1 x 1 here).
+        if ( colour == 0u && m_white == nullptr )
+        {
+            const std::uint32_t texel = 0xFFFFFFFFu;
+            gfx_texture_object_t* white = gfx_texture_create( m_api, 1, 1, 4u, gfx_texture_options_t{ } );
+            gfx_texture_update( m_api, *white, 0, &texel );
+            m_white = white;
+        }
+        m_device.set_texture( static_cast< std::uint32_t >( m_pfx_trail_sampler ), colour != 0u ? pfx_texture( colour ) : m_white );
+        m_pfx_vertices.resize( static_cast< std::size_t >( count ) * 2u * sizeof( pfx_trail_vertex_t ) );
+        if ( pfx_trail_fill( record, bytes, m_eye, reinterpret_cast< pfx_trail_vertex_t* >( m_pfx_vertices.data( ) ) ) <= 0 )
+            return;
+        if ( type != 0 )
+            m_device.cull( 0u );
+        m_device.draw_dynamic( 4u, static_cast< std::uint32_t >( count ) * 2u - 2u, m_pfx_vertices.data( ), 0x18u );
+        if ( type != 0 )
+            m_device.cull( 1u );
     }
 
     void model_record( std::uint8_t* record, gfx_model_pass_t pass )
@@ -454,6 +577,13 @@ struct gfx_retail_t
                 m_camera.m_planes[ i * 4 + k ] = rows[ i ][ k ] / n;
         }
         std::memcpy( m_camera.m_eye, m_eye, 12 );
+        // The statics 0x7595D0 (right, direction, up): the view's rows in the engine's math_look.
+        for ( int i = 0; i < 3; ++i )
+        {
+            m_right[ i ] = m_view[ i * 4 ];
+            m_up[ i ] = m_view[ i * 4 + 1 ];
+            m_camera.m_direction[ i ] = m_view[ i * 4 + 2 ];
+        }
         m_camera.m_far = m_backend.m_far_plane;
         gfx_draw_params_t p;
         std::memcpy( p.m_eye, m_eye, 12 );

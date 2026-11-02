@@ -1521,7 +1521,22 @@ public:
             // 0x558AC0 / 0x558C00 after the walk: 0x5BBAA0. Ours, flagged: the level's "Foliage Tint" as loaded for the composer's +0xA8: whether it follows the blended settings is unread.
             const std::uint8_t tint[ 3 ] = { static_cast< std::uint8_t >( m_foliage_tint ), static_cast< std::uint8_t >( m_foliage_tint >> 8 ), static_cast< std::uint8_t >( m_foliage_tint >> 16 ) };
             m_foliage.flush( sort, tint );
+            if ( !p.m_reflecting && c_engine::option( "no-pfx" ) == nullptr )   // VuPfxEntity's Reflect 0, the boats' 0x419CE0 draws nothing there
+                m_pfx.submit( sort, *p.m_camera, m_retail->m_pfx_materials, m_retail->m_pfx_trail_material );
         };
+        if ( m_retail->pfx_programs( ) )
+        {
+            m_pfx.m_retail = [ this ]( const std::string& name ) { return m_retail->texture( 0u, name ); };
+            m_retail->m_pfx_node = [ this ]( std::uint32_t node ) { return m_pfx.node_bytes( node ); };
+            m_retail->m_pfx_assets = [ this ]( std::uint32_t node, std::uint32_t& colour, std::uint32_t& tile ) {
+                const bool trail = *reinterpret_cast< const std::uint32_t* >( m_pfx.node_bytes( node ) ) == 0x00750294u;
+                const c_effects::node_assets_t& a = trail ? m_pfx.node_assets( node, 0x68u, 0u ) : m_pfx.node_assets( node, 0x3Cu, 0x54u );
+                colour = a.colour;
+                tile = a.tile;
+            };
+        }
+        else
+            LOG_WARNING( "pfx: the renderers' programs did not load: quads and trails stay on the hand path" );
         m_pfx.m_geom_sink = [ this ]( const std::string& asset, const float* matrix, std::uint32_t colour ) {
             gfx_static_model_t*& model = m_retail_geom_models[ asset ];
             if ( model == nullptr )
