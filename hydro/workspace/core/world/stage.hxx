@@ -506,27 +506,42 @@ struct gfx_retail_t final : gfx_composer_hooks_t
         return true;
     }
 
+    // The program and declaration every corona material shares. Also called by world/prewarm.hxx.
+    bool corona_ready( )
+    {
+        if ( m_corona_program != nullptr )
+            return true;
+        std::vector< std::uint8_t > blob;
+        if ( !m_read( "VuCompiledShaderAsset/Basic/3dXyzUv", blob ) )
+            return false;
+        m_corona_program = m_programs.load( blob.data( ) );
+        gfx_vertex_element_t xyz, uv;
+        xyz.m_type = 2u;
+        uv.m_offset = 12u;
+        uv.m_type = 1u;
+        uv.m_usage = 6u;
+        gfx_declaration_t* declaration = m_declarations.create( { xyz, uv }, *m_corona_program );
+        const gfx_handle_t layout = declaration->m_layout;
+        m_corona_layout = id_of( declaration, [ & ] { return m_backend.add_layout( layout ); } );
+        return true;
+    }
+
+    // Ours (world/prewarm.hxx): a program's device objects before its first use. No table id is taken here.
+    void program_prewarm( const std::string& entry )
+    {
+        std::vector< std::uint8_t > blob;
+        if ( m_read( entry, blob ) )
+            m_programs.load( blob.data( ) );
+    }
+
     // A corona's material (0x5E7ED0): VuGfxUtil's shader set entry 5 (+0x3C, +0x44: 0x5421C0's Basic/3dXyzUv), tex0 = the texture.
     std::uint32_t corona_material( const std::string& name )
     {
         const auto found = m_corona_materials.find( name );
         if ( found != m_corona_materials.end( ) )
             return found->second;
-        if ( m_corona_program == nullptr )
-        {
-            std::vector< std::uint8_t > blob;
-            if ( !m_read( "VuCompiledShaderAsset/Basic/3dXyzUv", blob ) )
-                return 0u;
-            m_corona_program = m_programs.load( blob.data( ) );
-            gfx_vertex_element_t xyz, uv;
-            xyz.m_type = 2u;
-            uv.m_offset = 12u;
-            uv.m_type = 1u;
-            uv.m_usage = 6u;
-            gfx_declaration_t* declaration = m_declarations.create( { xyz, uv }, *m_corona_program );
-            const gfx_handle_t layout = declaration->m_layout;
-            m_corona_layout = id_of( declaration, [ & ] { return m_backend.add_layout( layout ); } );
-        }
+        if ( !corona_ready( ) )
+            return 0u;
         gfx_program_t* program = m_corona_program;
         const std::uint32_t program_id = id_of( program, [ & ] { return m_backend.add_program( program ); } );
         gfx_material_desc_t desc;
