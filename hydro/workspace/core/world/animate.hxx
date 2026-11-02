@@ -40,9 +40,10 @@ inline void c_world::skin_props( float dt )
                 on_animation_event( owner, name, params );
             } );
 
-        // @0x516cf0 picks ONE frame, no interpolation between frames:
-        //   ( (int)( frames * time / loop - 0.5 ) + 1 ) % frames
-        // so time 0 shows frame 1, not frame 0.
+        // The pose: 0x516CF0 (skel_animated_build) over the control's time, 0x532720 the palette, the prop's own instance (world/motion.hxx
+        // prop_instance, the same path the attach records read). The old walk over one clip frame (build_palette, frame below for the
+        // size checks only) had no blend between frames: a rotor stepped by its 30 Hz keys (user item 3).
+        const bool retail_pose = prop_pose( item, palette );
         int frame = 0;
         if ( frames > 0 )
             frame = ( static_cast< int >( static_cast< float >( frames ) * item.control.time
@@ -55,7 +56,8 @@ inline void c_world::skin_props( float dt )
         // regrouped, so the picture is identical and the mesh is untouched.
         if ( item.rigid )
         {
-            build_palette( palette, bones->second, clip->second, frame, nullptr, 0, 0.0f );
+            if ( !retail_pose )
+                build_palette( palette, bones->second, clip->second, frame, nullptr, 0, 0.0f );
             const std::vector< cached_part_t >& parts = model_for( item.asset );
             for ( std::size_t index = 0;
                 index < item.placements.size( ) && index < parts.size( ); ++index )
@@ -119,7 +121,8 @@ inline void c_world::skin_props( float dt )
             }
             continue;
         }
-        build_palette( palette, bones->second, clip->second, frame, nullptr, 0, 0.0f );
+        if ( !retail_pose )
+            build_palette( palette, bones->second, clip->second, frame, nullptr, 0, 0.0f );
         const mesh_vertex_t* target = skin_geometry(
             item.geometry, mesh->second, bones->second, palette );
 

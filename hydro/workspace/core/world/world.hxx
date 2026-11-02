@@ -1804,6 +1804,7 @@ private:
     // component, which names only the model.
     struct animated_t
     {
+        entity_t* entity = nullptr;
         std::string asset;
         std::string path;
         std::string clip;
@@ -1946,6 +1947,7 @@ private:
         bool has_clip = false, added = false;
     };
     std::map< entity_t*, std::unique_ptr< prop_skel_t > > m_prop_skels;
+    bool prop_pose( const animated_t& item, std::vector< float >& palette );
     int m_motion_unknown = 0;   // a motion child's IF slot 0 not read
     // (entity, refName) -> the full path the ref points at.
     std::map< std::pair< std::string, std::string >, std::string > m_refs;
