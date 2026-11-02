@@ -3,6 +3,7 @@
 #include <workspace/core/world/dbrt.hxx>
 #include <workspace/core/world/gfxsort.hxx>
 #include <workspace/core/world/lights.hxx>
+#include <workspace/core/world/primitive.hxx>
 #include <workspace/core/world/drawer.hxx>
 #include <workspace/core/world/skeleton.hxx>
 
@@ -1202,6 +1203,143 @@ inline bool verify_gfx_draw_manager( )
     return false;
 }
 
+// Case gfx_primitives: world/primitive.hxx against retail's builders 0x507BE0 .. 0x50B250, the keyed submit 0x50B7B0, the sphere test 0x50C250 and the segment / triangle test 0x50C6B0.
+inline bool verify_gfx_primitives( )
+{
+    anim_cursor_t g;
+    g.w = g_golden_gpr_words;
+    g.size = g_golden_gpr_size;
+    g.where = "gfx_primitives";
+    const auto real = []( std::uint32_t u ) { float f; std::memcpy( &f, &u, 4 ); return f; };
+    const auto bits = []( float f ) { std::uint32_t u; std::memcpy( &u, &f, 4 ); return u; };
+    gfx_check_hooks_t hooks;
+    static const std::uint32_t k_material_keys[ 4 ] = { 0x3FF, 0x001, 0x155, 0x2AA }, k_chunk_keys[ 3 ] = { 0x7FF, 0x401, 0x0AB };
+    hooks.m_materials.resize( 4 );
+    hooks.m_chunks.resize( 3 );
+    for ( int i = 0; i < 4; ++i )
+        hooks.m_materials[ i ].m_key = k_material_keys[ i ];
+    for ( int i = 0; i < 3; ++i )
+        hooks.m_chunks[ i ].m_key = k_chunk_keys[ i ];
+    gfx_sort_t sort( hooks );
+    sort.m_buffers[ 0 ].m_memory.resize( 0xF0000 );
+    sort.m_buffers[ 0 ].m_capacity = 0xF0000;
+    sort.m_buffers[ 1 ].m_memory.resize( 0xF0000 );
+    sort.m_buffers[ 1 ].m_capacity = 0xF0000;
+    sort.m_buffers[ 1 ].m_used = 0x35;
+    gfx_util_t util{ sort };
+    util.m_flat = 1;
+    util.m_lines = 2;
+    util.m_lines2 = 3;
+    util.m_lit = 4;
+    const unsigned rows = g.take( );
+    for ( unsigned row = 0; row < rows; ++row )
+    {
+        const unsigned fn = g.take( );
+        sort.m_index = static_cast< std::int32_t >( g.take( ) );
+        sort.m_key_lo = g.take( );
+        sort.m_key_hi = g.take( );
+        const std::uint32_t colour = g.take( ), colour2 = g.take( ), a = g.take( ), b = g.take( );
+        const std::uint32_t fw[ 3 ] = { g.take( ), g.take( ), g.take( ) };
+        const float f0 = real( fw[ 0 ] ), f1 = real( fw[ 1 ] ), f2 = real( fw[ 2 ] );
+        float va[ 16 ], vb[ 16 ], m0[ 16 ], m1[ 16 ], v[ 4 ], top[ 16 ];
+        for ( float& x : va )
+            x = real( g.take( ) );
+        for ( float& x : vb )
+            x = real( g.take( ) );
+        for ( float& x : m0 )
+            x = real( g.take( ) );
+        for ( float& x : m1 )
+            x = real( g.take( ) );
+        for ( float& x : v )
+            x = real( g.take( ) );
+        for ( float& x : top )
+            x = real( g.take( ) );
+        util.m_top = top;
+        switch ( fn )
+        {
+        case 0: util.ellipse( colour, va, a ); break;
+        case 1: util.line_2d( colour, va, vb ); break;
+        case 2: util.line_3d( colour, va, vb, m0 ); break;
+        case 3: util.line_3d_two( va, colour, vb, colour2, m0 ); break;
+        case 4:
+        {
+            float points[ 20 ];
+            std::memcpy( points, va, sizeof( va ) );
+            std::memcpy( points + 16, vb, 16 );
+            util.strip_lines( colour, points, m0 );
+            break;
+        }
+        case 5: util.aabb_lines( colour, va, m0 ); break;
+        case 6: util.shape_508780( colour, a, m0, f0, f1 ); break;
+        case 7: util.shape_508A40( colour, a, b, m0, f0 ); break;
+        case 8: util.shape_508E30( colour, f2, m0, f0, f1 ); break;
+        case 9: util.shape_509050( colour, va, vb, v, f2, m0 ); break;
+        case 10: util.quad_fill( colour, va, m0 ); break;
+        case 11: util.lit_509810( colour, va, m0, m1, v ); break;
+        case 12: util.lit_shape( k_gfx_cb_509A40, colour, a, m0, m1, v, f0, f1 ); break;
+        case 13: util.lit_509E80( colour, a, b, m0, m1, v, f0 ); break;
+        case 14: util.lit_shape( k_gfx_cb_50A420, colour, a, m0, m1, v, f0, f1 ); break;
+        case 15: util.lit_shape( k_gfx_cb_50A890, colour, a, m0, m1, v, f0, f1 ); break;
+        case 16: util.key_command( a, colour2 ); break;
+        default:
+            sort.allocate( 0x20 );
+            sort.submit_keyed( a, ( b >> 8 ) + 1, b & 0xFF, fw[ 1 ], f0 );
+            break;
+        }
+        const unsigned at = g.take( ), used = g.take( ), count = g.take( );
+        g.eq( static_cast< unsigned >( sort.m_offset ), at );
+        g.eq( static_cast< unsigned >( sort.m_buffers[ sort.m_index ].m_used ), used );
+        const std::uint8_t* record = sort.m_buffers[ sort.m_index ].m_memory.data( ) + at;
+        for ( unsigned i = 0; i < count; ++i )
+        {
+            std::uint32_t w;
+            std::memcpy( &w, record + 4 * i, 4 );
+            g.eq( w, g.take( ) );
+        }
+        const ui_gfx_command_t& c = sort.m_commands[ sort.m_index ].back( );
+        for ( int i = 0; i < 7; ++i )
+            g.eq( i == 6 ? c.m_words[ i ] & 0xFFFFu : c.m_words[ i ], g.take( ) );
+    }
+    const unsigned spheres = g.take( );
+    int visible = 0;
+    for ( unsigned s = 0; s < spheres; ++s )
+    {
+        float planes[ 24 ], centre[ 3 ];
+        for ( float& x : planes )
+            x = real( g.take( ) );
+        for ( float& x : centre )
+            x = real( g.take( ) );
+        const float radius = real( g.take( ) );
+        const bool in = gfx_sphere_visible( planes, centre, radius );
+        visible += in;
+        g.eq( static_cast< unsigned >( in ), g.take( ) );
+    }
+    const unsigned triangles = g.take( );
+    int hits = 0;
+    for ( unsigned t = 0; t < triangles; ++t )
+    {
+        float p[ 15 ], hit[ 3 ] = { };
+        for ( float& x : p )
+            x = real( g.take( ) );
+        const bool in = gfx_segment_triangle( p, p + 3, p + 6, p + 9, p + 12, hit );
+        hits += in;
+        g.eq( static_cast< unsigned >( in ), g.take( ) );
+        for ( const float x : hit )
+        {
+            const std::uint32_t w = g.take( );
+            g.eq( in ? bits( x ) : w, w );
+        }
+    }
+    if ( g.failed == 0 && g.at == g.size )
+    {
+        LOG_SUCCESS( "gfx_primitives matches retail's VuGfxUtil builders (0x507BE0 .. 0x50B250), 0x50B7B0, 0x50C250 (%d of %u visible) and 0x50C6B0 (%d of %u hit) on %u rows: %d words exact",
+                     visible, spheres, hits, triangles, rows, g.compared );
+        return true;
+    }
+    LOG_ERROR( "gfx_primitives FAILED %d of %d words (cursor %zu of %zu)", g.failed, g.compared, g.at, g.size );
+    return false;
+}
+
 inline bool verify_render_all( )
 {
     bool ok = true;
@@ -1211,5 +1349,6 @@ inline bool verify_render_all( )
     ok = verify_gfx_dbrt( ) && ok;
     ok = verify_gfx_lights( ) && ok;
     ok = verify_gfx_draw_manager( ) && ok;
+    ok = verify_gfx_primitives( ) && ok;
     return ok;
 }
