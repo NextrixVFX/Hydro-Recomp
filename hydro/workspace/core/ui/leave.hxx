@@ -45,13 +45,7 @@ struct ui_front_end_screen_t
 // A loaded entity's property value by name (the rows' list order).
 inline const ui_slot_t* ui_property_value( const entity_t& entity, const char* name )
 {
-    if ( !ui_is_state( entity ) )
-        return nullptr;
-    const ui_state_t* s = static_cast< const ui_state_t* >( entity.m_state.get( ) );
-    for ( int k = 0; k < s->m_count; ++k )
-        if ( std::strcmp( s->m_rows[ k ]->m_name, name ) == 0 )
-            return &s->m_value[ k ];
-    return nullptr;
+    return ui_state_slot( entity, name );
 }
 
 inline ui_front_end_screen_t ui_front_end_screen( const entity_t& entity, std::uint32_t flags = 2 )

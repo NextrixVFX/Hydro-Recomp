@@ -6,6 +6,8 @@
 #include <cstring>
 #include <memory>
 #include <string>
+#include <string_view>
+#include <unordered_map>
 #include <vector>
 
 // The front end's entities as VuEntity::load leaves them: each type's property
@@ -42,18 +44,42 @@ struct ui_state_t
     std::vector< ui_slot_t > m_defaults;
 };
 
+// OURS, no retail counterpart: the schema table indexed once, by type. A type's
+// first row and row count, and its node names to list positions (a repeated name
+// keeps its first position, as a walk of the list would find).
+struct ui_type_index_t
+{
+    const ui_property_row_t* m_first = nullptr;
+    int m_count = 0;
+    std::unordered_map< std::string_view, int > m_slots;
+};
+
+inline const ui_type_index_t* ui_type_index( const std::string& cls )
+{
+    static const std::unordered_map< std::string_view, ui_type_index_t > index = [ ]
+    {
+        std::unordered_map< std::string_view, ui_type_index_t > out;
+        for ( const ui_property_row_t& row : g_ui_property_rows )
+        {
+            ui_type_index_t& type = out[ row.m_class ];
+            if ( !type.m_first )
+                type.m_first = &row;
+            ++type.m_count;
+        }
+        for ( auto& entry : out )
+            for ( int k = 0; k < entry.second.m_count; ++k )
+                entry.second.m_slots.try_emplace( entry.second.m_first[ k ].m_name, k );
+        return out;
+    }( );
+    const auto found = index.find( std::string_view( cls ) );
+    return found == index.end( ) ? nullptr : &found->second;
+}
+
 inline const ui_property_row_t* ui_rows_for( const std::string& cls, int& count )
 {
-    count = 0;
-    const ui_property_row_t* first = nullptr;
-    for ( const ui_property_row_t& row : g_ui_property_rows )
-        if ( cls == row.m_class )
-        {
-            if ( !first )
-                first = &row;
-            ++count;
-        }
-    return first;
+    const ui_type_index_t* type = ui_type_index( cls );
+    count = type ? type->m_count : 0;
+    return type ? type->m_first : nullptr;
 }
 
 // The state a ctor leaves for these nodes: every target at its node's default.
@@ -175,8 +201,19 @@ inline std::shared_ptr< void > ui_entity_state_for( const std::string& cls )
 
 inline bool ui_is_state( const entity_t& entity )
 {
-    int count = 0;
-    return entity.m_state && ui_rows_for( entity.m_type, count ) != nullptr;
+    return entity.m_state && ui_type_index( entity.m_type ) != nullptr;
+}
+
+// A loaded entity's property value by name, or null.
+inline const ui_slot_t* ui_state_slot( const entity_t& entity, const char* name )
+{
+    const ui_type_index_t* type = entity.m_state ? ui_type_index( entity.m_type ) : nullptr;
+    if ( !type )
+        return nullptr;
+    const auto found = type->m_slots.find( name );
+    if ( found == type->m_slots.end( ) )
+        return nullptr;
+    return &static_cast< const ui_state_t* >( entity.m_state.get( ) )->m_value[ static_cast< std::size_t >( found->second ) ];
 }
 
 // VuEntity::load's "Properties" step: each node in +0x44 order.
