@@ -2,15 +2,18 @@
 
 #include <workspace/core/boat/meshes.hxx>
 #include <workspace/core/boat/parts.hxx>
+#include <workspace/core/collision/box.hxx>
 #include <workspace/core/collision/compound.hxx>
 #include <workspace/core/collision/concave.hxx>
 #include <workspace/core/collision/cylinder.hxx>
 #include <workspace/core/collision/rebuild.hxx>
+#include <workspace/core/collision/sphere.hxx>
 #include <workspace/core/collision/support.hxx>
 #include <workspace/core/dynamics/body.hxx>
 #include <workspace/core/collision/world.hxx>
 #include <workspace/core/entity/rigid.hxx>
 
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <functional>
@@ -101,6 +104,26 @@ inline void bodies_cylinder( convex_shape_t& s, const float* half, int up )
     s.up_axis = up;
 }
 
+// btBoxShape's ctor 0x547D80: the same margin rule as the cylinders' 0x5AE160 (the least half extent x 0.1 when the margin
+// passes it), type 0. createRigidBody passes Collision Size (+0x30) x 0.5 (0x54421C), unscaled: the scale follows through
+// setLocalScaling 0x548A00.
+inline void bodies_box( convex_shape_t& s, const float* half )
+{
+    bodies_cylinder( s, half, 0 );
+    s.type = 0;
+}
+
+// btSphereShape's ctor 0x43D700 (createRigidBody 0x5441BD): type 8, Collision Radius (+0x2C) at +0x20 and +0x30. Scale
+// (1, 1, 1); the other implicit lanes are not written, and nothing reads them (0x43D650 / 0x43D630 read +0x20).
+inline void bodies_sphere( convex_shape_t& s, float radius )
+{
+    s = convex_shape_t{ };
+    s.local_scaling[ 0 ] = s.local_scaling[ 1 ] = s.local_scaling[ 2 ] = 1.0f;
+    s.implicit[ 0 ] = radius;
+    s.margin = radius;
+    s.type = 8;
+}
+
 // The cylinder as cylinder.hxx's byte views read it (box.hxx's layout + the up
 // axis at +0x40).
 inline void bodies_cylinder_bytes( const convex_shape_t& s, std::uint8_t* out )
@@ -183,6 +206,23 @@ struct bodies_hooks_t
     void ( *gravity )( void* user, float* out ) = nullptr;
 };
 
+// setLocalScaling vt+0x14 on the box 0x548A00 / the sphere 0x552F30 (btConvexInternalShape's: |s|, w 0).
+inline void bodies_scale_primitive( convex_shape_t& shape, const float* s )
+{
+    if ( shape.type == 0 )
+    {
+        std::uint8_t bytes[ 0x50 ];
+        bodies_cylinder_bytes( shape, bytes );
+        box_set_local_scaling( bytes, s );
+        std::memcpy( shape.local_scaling, bytes + 0x10, 16 );
+        std::memcpy( shape.implicit, bytes + 0x20, 16 );
+        return;
+    }
+    for ( int k = 0; k < 3; ++k )
+        shape.local_scaling[ k ] = std::fabs( s[ k ] );
+    shape.local_scaling[ 3 ] = 0.0f;
+}
+
 // createRigidBody 0x544100 on a component whose group / mask are set. False:
 // a path not recreated (b.name says nothing; `why` says which) - nothing built.
 // True with no body (type 0 / no asset): retail builds none either.
@@ -260,13 +300,21 @@ inline bool bodies_create( level_body_t& b, rigid_component_t& c, const collisio
         bodies_cylinder( b.cylinder, half, up );
         scale[ 0 ] = scale[ 1 ] = scale[ 2 ] = 1.0f;
     }
+    else if ( c.collision_type == 1 )
+        bodies_sphere( b.cylinder, c.radius );
+    else if ( c.collision_type == 2 )
+    {
+        const float half[ 3 ] = { c.size[ 0 ] * 0.5f, c.size[ 1 ] * 0.5f, c.size[ 2 ] * 0.5f };   // 0x6F765C
+        bodies_box( b.cylinder, half );
+    }
     else
     {
-        why = "createRigidBody 0x544100: collision type " + std::to_string( c.collision_type ) + " (sphere / box) is not recreated";
+        why = "createRigidBody 0x544100: collision type " + std::to_string( c.collision_type ) + " is no branch of retail's";
         return false;
     }
     const bool cylinder = c.collision_type >= 3 && c.collision_type <= 5;
-    const convex_shape_t* single = cylinder ? &b.cylinder : convex ? &b.convex : nullptr;
+    const bool primitive = c.collision_type == 1 || c.collision_type == 2;   // held in b.cylinder too
+    const convex_shape_t* single = cylinder || primitive ? &b.cylinder : convex ? &b.convex : nullptr;
     // The offset (+0x5C) against the centre of mass (+0xDC): (dx^2 + dy^2) + dz^2 > 0 (0x6F7570, comiss) -> +0xFC =
     // the shape, +0xF8 = a new btCompoundShape (0x5269C0) holding it under the identity (0x413280) with origin
     // (dx, dy, dz, 0) (addChildShape 0x526BF0).
@@ -291,13 +339,29 @@ inline bool bodies_create( level_body_t& b, rigid_component_t& c, const collisio
     // The transform's scale: each lane `ucomiss` against 1.0 - not equal or unordered -> setLocalScaling (vt+0x14).
     if ( !( scale[ 0 ] == 1.0f && scale[ 1 ] == 1.0f && scale[ 2 ] == 1.0f ) )
     {
+        const float s[ 4 ] = { scale[ 0 ], scale[ 1 ], scale[ 2 ], 0.0f };
         if ( b.has_compound )
         {
-            why = "createRigidBody 0x544100: setLocalScaling on a compound is not recreated";
-            return false;
+            // btCompoundShape::setLocalScaling 0x5276D0 over the one child; getLocalScaling vt+0x18 answers the hull's
+            // mesh scaling, the primitive's own (the cylinders never come here: their scale is (1, 1, 1) by now).
+            const bool ok = compound_set_local_scaling( b.compound, s, [ & ]( compound_child_t&, const float* v ) -> const float* {
+                if ( !v )
+                    return convex ? b.mesh.scaling : b.cylinder.local_scaling;
+                if ( convex )
+                    shape_set_triangle_mesh_scaling( b.convex, b.mesh, v );
+                else
+                    bodies_scale_primitive( b.cylinder, v );
+                return nullptr;
+            } );
+            if ( !ok )
+            {
+                why = "createRigidBody 0x544100: the compound's setLocalScaling 0x5276D0 refused";
+                return false;
+            }
         }
-        const float s[ 4 ] = { scale[ 0 ], scale[ 1 ], scale[ 2 ], 0.0f };
-        if ( convex )
+        else if ( primitive )
+            bodies_scale_primitive( b.cylinder, s );
+        else if ( convex )
             shape_set_triangle_mesh_scaling( b.convex, b.mesh, s );
         // btBvhTriangleMeshShape::setLocalScaling 0x5AF300 with its rebuild branch (engine collision/rebuild.hxx, the
         // boat agent's verified overload - case bvh_build): a new btOptimizedBvh over the rescaled mesh, one per body.
@@ -313,11 +377,16 @@ inline bool bodies_create( level_body_t& b, rigid_component_t& c, const collisio
     {
         if ( b.has_compound )
             compound_local_inertia( b.compound, c.mass, inertia );
-        else if ( cylinder )
+        else if ( cylinder || primitive )
         {
             std::uint8_t bytes[ 0x50 ];
             bodies_cylinder_bytes( b.cylinder, bytes );
-            cylinder_local_inertia( bytes, c.mass, inertia );
+            if ( c.collision_type == 1 )
+                sphere_local_inertia( bytes, c.mass, inertia );   // slot 7 0x5535A0
+            else if ( c.collision_type == 2 )
+                box_local_inertia( bytes, c.mass, inertia );      // slot 7 0x5480C0
+            else
+                cylinder_local_inertia( bytes, c.mass, inertia );
         }
         else if ( convex )
         {

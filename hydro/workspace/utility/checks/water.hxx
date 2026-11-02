@@ -2773,6 +2773,12 @@ inline bool verify_water_all( )
     ok = verify_message_box( ) && ok;
     ok = verify_ui_odds( ) && ok;
     ok = verify_ramp_contact( ) && ok;
+    ok = verify_prop_box_bodies( ) && ok;
+    ok = verify_system_language( ) && ok;
+    ok = verify_gamepad_box( ) && ok;
+    ok = verify_dock_tick( ) && ok;
+    ok = verify_oneshot_watch( ) && ok;
+    ok = verify_force_watch( ) && ok;
     ok = verify_logic_game( ) && ok;
     ok = verify_logic_types( ) && ok;
     ok = verify_control_entity( ) && ok;

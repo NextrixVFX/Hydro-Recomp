@@ -386,6 +386,7 @@ struct compound_shape_t
     float root_max[ 4 ] = {};
     int root_data = 0;
     float margin = 0.0f;   // +0x48 (ctor 0; getMargin 0x527B40 `fld [ecx+48h]`)
+    float local_scaling[ 4 ] = { 1.0f, 1.0f, 1.0f, 0.0f };   // +0x50
 };
 
 // btCompoundShape::getAabb @0x527280 (slot 1; thiscall transform, min, max;
@@ -480,6 +481,37 @@ inline bool compound_recalculate_local_aabb( compound_shape_t& c )
         }
     }
     return true;
+}
+
+// btCompoundShape::setLocalScaling @0x5276D0 (slot 5) on the typed model - arena.hxx bt_compound_set_local_scaling is the
+// same function on retail memory: per child the child scale ((s.x * c.x) / ls.x, ..., 0) goes to the child's own
+// setLocalScaling (`child_scaling` gets its current scale and the new one: the shape is the caller's), the origin
+// (s.x * o.x, o.y * s.y, o.z * s.z, 0) into updateChildTransform 0x526F40 (with the tree, the child's aabb under it into
+// btDbvt::update 0x594960: the one-leaf model's root). Then +0x50 and recalculateLocalAabb.
+template < typename child_scaling_fn >
+inline bool compound_set_local_scaling( compound_shape_t& c, const float* s, child_scaling_fn child_scaling )
+{
+    for ( compound_child_t& r : c.children )
+    {
+        const float* now = child_scaling( r, nullptr );
+        const float v[ 4 ] = { ( s[ 0 ] * now[ 0 ] ) / c.local_scaling[ 0 ], ( s[ 1 ] * now[ 1 ] ) / c.local_scaling[ 1 ],
+                               ( s[ 2 ] * now[ 2 ] ) / c.local_scaling[ 2 ], 0.0f };
+        child_scaling( r, v );
+        const float ox = s[ 0 ] * r.transform[ 12 ], oy = r.transform[ 13 ] * s[ 1 ], oz = r.transform[ 14 ] * s[ 2 ];
+        r.transform[ 12 ] = ox;
+        r.transform[ 13 ] = oy;
+        r.transform[ 14 ] = oz;
+        r.transform[ 15 ] = 0.0f;
+        if ( c.has_root )
+        {
+            if ( c.children.size( ) != 1 )
+                return false;   // btDbvt::update past a one-leaf tree: not recreated
+            if ( !shape_get_aabb( *r.shape, r.transform, c.root_min, c.root_max ) )
+                return false;
+        }
+    }
+    std::memcpy( c.local_scaling, s, 16 );
+    return compound_recalculate_local_aabb( c );
 }
 
 // btCompoundShape::removeChildShape 0x527110 (slot 14; thiscall shape; retn
