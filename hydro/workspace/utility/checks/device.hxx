@@ -2,6 +2,7 @@
 
 #include <workspace/core/render/gfx.hxx>
 #include <workspace/core/render/program.hxx>
+#include <workspace/core/world/drawing.hxx>
 
 #include <cstdint>
 #include <cstring>
@@ -392,5 +393,118 @@ inline bool verify_gfx_program( )
         return true;
     }
     LOG_ERROR( "gfx_program FAILED %d of %d words (cursor %zu of %zu)", g.failed, g.compared, g.at, g.size );
+    return false;
+}
+
+// GfxRig's memcpy_s: logged with the source's FNV, and stored.
+struct gfx_rig_api_t : gfx_check_api_t
+{
+    gfx_rig_api_t( ) { m_mapped.resize( 0x4000 ); }
+    void copy( void* to, std::uint32_t room, const void* from, std::uint32_t count ) override
+    {
+        rec( { 40, room, count, code_hash( from, count ) } );
+        std::memcpy( to, from, count );
+    }
+};
+
+inline void gfx_check_read_stream( anim_cursor_t& g, std::vector< std::uint8_t >& s )
+{
+    s.resize( g.take( ) );
+    for ( std::size_t i = 0; i < s.size( ); i += 4 )
+    {
+        const std::uint32_t w = g.take( );
+        std::memcpy( s.data( ) + i, &w, std::min< std::size_t >( 4, s.size( ) - i ) );
+    }
+}
+
+// Case gfx_model_draws: the ten callbacks + 0x593E70 on the real device and program, the whole call log with every constant's bytes hashed.
+inline bool verify_gfx_model_draws( )
+{
+    anim_cursor_t g;
+    g.w = g_golden_gmx_words;
+    g.size = g_golden_gmx_size;
+    g.where = "gfx_model_draws";
+    gfx_rig_api_t api;
+    gfx_device_t d( api );
+    d.m_width = d.m_chain_width = 1280;
+    d.m_height = d.m_chain_height = 720;
+    d.m_chain_view = 1;
+    d.m_chain_depth = 2;
+    d.create_dynamic( );
+    gfx_programs_t set( api );
+    std::vector< std::uint8_t > stream;
+    gfx_check_read_stream( g, stream );
+    const gfx_program_t* prog = set.load( stream.data( ) );
+    const auto slot = [ & ]( int i ) { return &prog->m_constants[ i ]; };
+    gfx_flat_shader_t tables[ 2 ][ 4 ];
+    for ( int t = 0; t < 2; ++t )
+        for ( int e = 0; e < 4; ++e )
+            tables[ t ][ e ] = gfx_flat_shader_t{ prog, slot( ( e + t ) % 2 ? 6 : 8 ), slot( e % 2 ? 7 : 9 ) };
+    d.set_program( prog );
+    const unsigned rows = g.take( );
+    unsigned logged_total = 0;
+    for ( unsigned r = 0; r < rows; ++r )
+    {
+        const unsigned cb = g.take( ), flags = g.take( ), material = g.take( ), lit = g.take( ), pal = g.take( );
+        gfx_model_shader_t s;
+        s.m_material = static_cast< std::uint8_t >( material );
+        s.m_program = prog;
+        s.m_matrix = slot( 0 );
+        s.m_palette = flags & 4u ? slot( 1 ) : nullptr;
+        s.m_colour = flags & 1u ? slot( 2 ) : nullptr;
+        s.m_float = flags & 2u ? slot( 3 ) : nullptr;
+        s.m_light_dirs = flags & 8u ? slot( 4 ) : nullptr;
+        s.m_light_cols = flags & 8u ? slot( 5 ) : nullptr;
+        gfx_model_part_t part;
+        part.m_shader = &s;
+        part.m_start = g.take( );
+        part.m_triangles = g.take( );
+        gfx_model_record_t rec;
+        const std::uint32_t colour = g.take( );
+        std::memcpy( rec.m_colour, &colour, 4 );
+        rec.m_word = g.take( );
+        const auto words = [ & ]( void* to, unsigned n )
+        {
+            for ( unsigned i = 0; i < n; ++i )
+            {
+                const std::uint32_t w = g.take( );
+                std::memcpy( static_cast< std::uint32_t* >( to ) + i, &w, 4 );
+            }
+        };
+        words( rec.m_matrix, 16 );
+        words( part.m_aabb, 8 );
+        std::uint32_t block[ 81 ];
+        words( block, 81 );
+        std::vector< std::uint32_t > palette( 16u * pal + 1u );
+        words( palette.data( ), 16u * pal );
+        rec.m_part = &part;
+        rec.m_lit = static_cast< std::uint8_t >( lit );
+        rec.m_palette = reinterpret_cast< const float* >( palette.data( ) );
+        rec.m_palette_count = pal;
+        const std::function< void( float* ) > gather = [ & ]( float* out ) { std::memcpy( out, block, sizeof( block ) ); };
+        api.m_log.clear( );
+        if ( cb < 6u )
+            gfx_model_draw( d, rec, static_cast< gfx_model_pass_t >( cb % 3u ), cb >= 3u, gather );
+        else if ( cb < 8u )
+            gfx_flat_draw( d, tables[ cb - 6u ], rec.m_matrix, part );
+        else
+            gfx_flat_skinned_draw( d, tables[ cb - 8u ], rec.m_matrix, rec.m_palette, pal, part );
+        const unsigned logged = g.take( );
+        logged_total += logged;
+        g.eq( static_cast< std::uint32_t >( api.m_log.size( ) ), logged );
+        for ( unsigned i = 0; i < logged; ++i )
+            g.eq( i < api.m_log.size( ) ? api.m_log[ i ] : 0xDEADBEEFu, g.take( ) );
+        g.eq( prog->m_vertex->m_dirty ? 1u : 0u, g.take( ) );
+        g.eq( prog->m_pixel->m_dirty ? 1u : 0u, g.take( ) );
+        g.eq( d.m_primitives, g.take( ) );
+        g.eq( d.m_draws, g.take( ) );
+    }
+    g.eq( static_cast< std::uint32_t >( g.at ), static_cast< std::uint32_t >( g.size ) );
+    if ( !g.failed )
+    {
+        LOG_SUCCESS( "gfx_model_draws matches retail's ten model callbacks + 0x593E70 on %u draws, %u log words: %d words exact", rows, logged_total, g.compared );
+        return true;
+    }
+    LOG_ERROR( "gfx_model_draws FAILED %d of %d words (cursor %zu of %zu)", g.failed, g.compared, g.at, g.size );
     return false;
 }
