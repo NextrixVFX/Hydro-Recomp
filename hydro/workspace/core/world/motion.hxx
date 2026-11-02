@@ -87,7 +87,13 @@ inline void c_world::motions_game_initialize( )
         motion_child( child, matrix, linear, angular );
     } );
     m_joints.on_instance( [ this ]( entity_t& parent ) { return prop_instance( parent ); } );
-    m_joints.on_claim( [ this ]( entity_t& child, bool on ) { race_session_motion_claim( m_race, child, on ); } );
+    m_joints.on_claim( [ this ]( entity_t& child, bool on ) {
+        // VuWakeWaveEntity's IF slot 2 0x5D5870 (slot 1 the nullsub).
+        const auto wake = m_wake_of.find( &child );
+        if ( !on && wake != m_wake_of.end( ) )
+            water_wake_entity_detach( m_water, wake->second );
+        race_session_motion_claim( m_race, child, on );
+    } );
     m_joints.game_initialize( );
     for ( rotator_t& motion : m_rotators )
     {
@@ -185,9 +191,20 @@ inline void c_world::animated_attach_tick( )
     }
 }
 
+// One child's update not run: counted, and named once per child (the gate counts these lines; 0 is the only pass).
+inline void c_world::motion_unread( const entity_t& child )
+{
+    ++m_motion_unknown;
+    if ( m_motion_unread.insert( &child ).second )
+        LOG_WARNING( "motion child not read: %s %s", child.m_type.c_str( ), entity_path( child ).c_str( ) );
+}
+
 // A child's motion IF slot 0 by class: VuCoronaEntity 0x5DC3B0 setWorldTransform( the matrix, notify 1 ), the corona's draw reads the
 // world; VuStaticPfxEntity 0x5EB4C0 the world (0x534C00( 0 )) then its +0x94 system's setMatrix; VuAudioEmitterEntity 0x5F3D80; the
-// props 0x546BD0. Any other class's is not read: UNKNOWN, not run, counted.
+// props 0x546BD0; VuDynamicLightEntity 0x43FE40 setWorldTransform( the matrix, notify 1 ), its watcher 0x5EE870 (position, direction,
+// 0x5C30D0); the power-ups 0x43BD90 (no watcher: the ctor 0x43B180 sets none) and VuPointWaveEntity 0x5D4C30 the same (none: 0x5D4C50
+// reads the transform at the emit); VuWaterSurfaceEntity 0x5DC3B0 (the watcher its slot 12; the draw / layout boxes are the renderer's
+// hook, nothing reads them here); VuWakeWaveEntity 0x5D5660. Any other class's is not read: UNKNOWN, not run, counted.
 inline void c_world::motion_child( entity_t& child, const float* matrix, const float* linear, const float* angular )
 {
     ( void ) angular;
@@ -197,14 +214,14 @@ inline void c_world::motion_child( entity_t& child, const float* matrix, const f
         if ( entity_set_world( child, matrix, true, { } ) )
             m_coronas.place( path, matrix );
         else
-            ++m_motion_unknown;
+            motion_unread( child );
         return;
     }
     if ( child.m_type == "VuStaticPfxEntity" )
     {
         if ( !entity_set_world( child, matrix, false, { } ) )
         {
-            ++m_motion_unknown;
+            motion_unread( child );
             return;
         }
         const auto it = m_static_pfx.find( path );
@@ -216,7 +233,7 @@ inline void c_world::motion_child( entity_t& child, const float* matrix, const f
     {
         if ( !entity_set_world( child, matrix, true, { } ) )
         {
-            ++m_motion_unknown;
+            motion_unread( child );
             return;
         }
         sound_hooks_t h = m_sound;
@@ -227,6 +244,61 @@ inline void c_world::motion_child( entity_t& child, const float* matrix, const f
         audio_emitter_motion( static_cast< audio_emitter_state_t* >( child.m_state.get( ) )->value, record, h );
         return;
     }
+    if ( child.m_type == "VuDynamicLightEntity" )
+    {
+        const bool ran = entity_set_world( child, matrix, true, [ & ]( ) {
+            const auto light = m_light_of.find( path );
+            const transform_component_t* t = entity_transform( child );
+            if ( light == m_light_of.end( ) || !t || !m_retail )
+                return;
+            std::memcpy( light->second->m_position, t->world + 12, 12 );
+            std::memcpy( light->second->m_direction, t->world + 4, 12 );
+            m_retail->m_dynamic.update( *light->second );
+        } );
+        if ( !ran )
+            motion_unread( child );
+        return;
+    }
+    if ( child.m_type == "VuPowerUpBoostEntity" || child.m_type == "VuPowerUpHiddenPackageEntity" )
+    {
+        if ( !entity_set_world( child, matrix, true, { } ) )
+            motion_unread( child );
+        return;
+    }
+    if ( child.m_type == "VuPointWaveEntity" )
+    {
+        if ( !water_point_entity_motion( child, matrix ) )
+        {
+            motion_unread( child );
+            return;
+        }
+        const auto wave = m_point_waves.find( path );
+        if ( wave != m_point_waves.end( ) )
+            std::memcpy( wave->second.position, matrix + 12, 16 );   // the tick's copy of the transform's +0x80, kept current for the emit
+        return;
+    }
+    if ( child.m_type == "VuWaterSurfaceEntity" )
+    {
+        water_surface_boxes_t boxes;
+        if ( !water_surface_motion( m_water, child, matrix, false, boxes ) )
+            motion_unread( child );
+        return;
+    }
+    if ( child.m_type == "VuWakeWaveEntity" )
+    {
+        const wake_wave_properties_t* p = entity_action< wake_wave_properties_t >( child );
+        if ( !p || !entity_set_world( child, matrix, true, { } ) )
+        {
+            motion_unread( child );
+            return;
+        }
+        std::uint32_t entity[ 14 ], motion[ 20 ];
+        std::memcpy( entity, p->word, sizeof( entity ) );
+        std::memcpy( motion, matrix, 64 );
+        std::memcpy( motion + 16, linear, 16 );
+        water_wake_entity_motion_water( m_water, entity, motion, m_wake_of.try_emplace( &child, -1 ).first->second );
+        return;
+    }
     // The props' IF 0x73A13C / VuRampEntity's 0x73B04C / VuAnimatedPropEntity's 0x756228: slot 0 is the same 0x546BD0 / 0x5ED4F0 a keyframe
     // target runs (ecx + 0xC's +0x18 = the attach's matrix): the world, the draw, the kinematic step of the body, its own attach children.
     if ( child.m_type == "VuPropEntity" || child.m_type == "VuRampEntity" || child.m_type == "VuBreakablePropEntity" || child.m_type == "VuAnimatedPropEntity" )
@@ -235,5 +307,5 @@ inline void c_world::motion_child( entity_t& child, const float* matrix, const f
         race_session_motion_update( m_race, child, stepped, matrix, linear, angular );
         return;
     }
-    ++m_motion_unknown;
+    motion_unread( child );
 }

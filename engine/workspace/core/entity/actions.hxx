@@ -1,6 +1,7 @@
 #pragma once
 
 #include <workspace/core/entity/property.hxx>
+#include <workspace/core/entity/values.hxx>
 
 #include <cstdint>
 #include <cstring>
@@ -309,6 +310,31 @@ inline void front_end_camera_load( front_end_camera_properties_t& p, const value
     property_vector3( v, "Eye Position", p.eye, d.eye );
     property_vector3( v, "Target Position", p.target, d.target );
     property_float( v, "Far Plane", p.far_plane, d.far_plane, false );
+}
+
+// VuWakeWaveEntity (ctor 0x5D5000; hydro's water_game_entity_construct holds the same table): the words +0x60 .. +0x94 the motion IF
+// 0x5D5660 reads - Emission Rate +0x68, Min / Max Emission Speed +0x6C / +0x70, Magnitude +0x74, Falloff Time +0x78, DecayTime +0x7C,
+// Range +0x80, Speed +0x84, Frequency +0x88, the two percentages +0x8C / +0x90; +0x60 / +0x64 / +0x94 the ctor's own.
+struct wake_wave_properties_t
+{
+    float word[ 14 ];   // +0x60 .. +0x94
+};
+
+inline void wake_wave_construct( wake_wave_properties_t& p )
+{
+    const std::uint32_t d[ 14 ] = { 1u, 1u, 0x3F800000u, 0u, 0x3F800000u, 0x3E800000u, 0x40000000u, 0x3F800000u, 0x41200000u, 0x41200000u,
+                                    0x41000000u, 0x3E4CCCCDu, 0x3F4CCCCDu, 0x3F800000u };
+    for ( int k = 0; k < 14; ++k )
+        p.word[ k ] = actions_bits( d[ k ] );
+}
+
+inline void wake_wave_load( wake_wave_properties_t& p, const value_t& v, const wake_wave_properties_t& d )
+{
+    static const char* const names[ 9 ] = { "Emission Rate", "Min Emission Speed", "Max Emission Speed", "Magnitude", "Falloff Time", "DecayTime", "Range", "Speed", "Frequency" };
+    for ( int k = 0; k < 9; ++k )
+        property_float( v, names[ k ], p.word[ 2 + k ], d.word[ 2 + k ], false );
+    property_percentage( v, "Range Start Ratio %", p.word[ 11 ], d.word[ 11 ] );
+    property_percentage( v, "Range End Ratio %", p.word[ 12 ], d.word[ 12 ] );
 }
 
 // VuPointWaveEntity (create 0x5D42B0, ctor 0x5D43B0; schema.hxx g_schema_VuPointWaveEntity): seven floats +0x80 ..
