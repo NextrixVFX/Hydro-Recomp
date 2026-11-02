@@ -25,7 +25,7 @@
 // agent's side), the draw-component registrations ([0x7590B8] vt+0x28 / +0x2C / +0x30), the layout draw 0x5BB870 + entity
 // 0x5E70C0 (the Vu3dLayoutComponent path: READ; layout = the tool's preview, no race caller was traced, NOT recreated).
 // A record's float operands stay in retail's order; no NaN reaches a case here (the transform and the camera are finite).
-// Not wired: no caller in the running game yet (world agent; the entity's properties are in the ctor comment below).
+// Wired: world/stage.hxx makes the materials and draws the command, c_world's frame walk calls draw and flush.
 
 constexpr std::uint32_t k_gfx_cb_foliage = 0x5BBDD0u;
 
@@ -194,6 +194,7 @@ struct foliage_entity_t
     std::uint32_t m_texture = 0;        // 0: the property holds no asset, no bucket, nothing is drawn
     foliage_bucket_t* m_bucket = nullptr;
     bool m_registered = false;          // the draw component's +0x1E
+    std::uint8_t m_reflect = 0;         // the draw component's +0x1C, the draw manager's mask
     std::uint32_t m_aabb[ 8 ] = { };    // the draw component's +0x24 words, +0x30 / +0x40 are stack words in retail: left 0 here
     std::uint32_t m_layout[ 8 ] = { };  // the layout component's +0x18 words, +0x24 / +0x34 likewise
 

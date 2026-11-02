@@ -1181,12 +1181,18 @@ struct rigid_component_state_t
 };
 
 inline void sky_box_component_load( entity_t& owner, const value_t& properties );
+inline void foliage_component_load( entity_t& owner, const value_t& properties );
 
 inline void entity_load_component( entity_t& owner, entity_component_t& component, const value_t& properties, bool )
 {
     if ( component.m_vtable == 0x74D244u && owner.m_type == "VuSkyBoxEntity" )
     {
         sky_box_component_load( owner, properties );
+        return;
+    }
+    if ( component.m_vtable == 0x74D244u && owner.m_type == "VuFoliageEntity" && owner.m_state )
+    {
+        foliage_component_load( owner, properties );
         return;
     }
     if ( component.m_vtable == k_rigid_body_component_vtable )
@@ -1255,7 +1261,14 @@ struct foliage_state_t
     std::uint32_t color = 0x00FFFFFFu;                          // "Color"
     float uv[ 4 ] = { 0.0f, 0.0f, 1.0f, 1.0f };                 // "U0" "V0" "U1" "V1"
     float draw_distance = 3.4028235e38f;                        // "Draw Distance"
+    std::uint8_t reflect = 0;                                   // the draw component's "Reflect" +0x1C (0x5E6AF6 passes 0 to 0x531A40)
 };
+
+inline void foliage_component_load( entity_t& owner, const value_t& properties )
+{
+    foliage_state_t* s = static_cast< foliage_state_t* >( owner.m_state.get( ) );
+    property_bool( properties, "Reflect", s->reflect, s->reflect );
+}
 
 // VuAmbientLightEntity / VuDirectionalLightEntity (engine entity/rig.hxx).
 struct ambient_light_state_t

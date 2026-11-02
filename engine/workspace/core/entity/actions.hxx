@@ -233,12 +233,13 @@ inline void play_animation_load( play_animation_properties_t& p, const value_t& 
 struct sky_box_properties_t
 {
     std::string model_asset;
-    std::uint8_t reflect = 0;   // its Vu3dDrawComponent's "Reflect" +0x1C (ctor 0x531A40: 0), the draw manager's mask
+    std::uint8_t reflect = 1;   // its Vu3dDrawComponent's "Reflect" +0x1C: 0x5EB8F0 passes 1 to the ctor 0x531A40, the draw manager's mask
 };
 
 inline void sky_box_construct( sky_box_properties_t& p )
 {
     p.model_asset.clear( );
+    p.reflect = 1;
 }
 
 inline void sky_box_load( sky_box_properties_t& p, const value_t& v, const sky_box_properties_t& d )

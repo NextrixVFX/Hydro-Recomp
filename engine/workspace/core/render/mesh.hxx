@@ -835,7 +835,7 @@ void c_geometry::draw( )
         constants.color[ 1 ] = item.color[ 1 ];
         constants.color[ 2 ] = item.color[ 2 ];
         constants.color[ 3 ] = item.alpha_test == 11 || item.alpha_test == 2 || item.alpha_test == 14 ? item.color[ 3 ] : item.alpha_test >= 8 ? static_cast< float >( item.alpha_test - 7 ) : 1.0f;
-        constants.flags[ 0 ] = item.alpha_test == 12 ? 6.0f : item.alpha_test == 13 ? 6.5f : item.alpha_test == 11 ? 4.0f : item.alpha_test == 10 ? 3.0f : item.alpha_test == 6 || item.alpha_test == 7 ? -1.0f : item.alpha_test == 5 ? 2.0f : item.alpha_test == 3 ? 0.25f : item.alpha_test == 1 ? 1.0f : 0.0f;
+        constants.flags[ 0 ] = item.alpha_test == 11 ? 4.0f : item.alpha_test == 10 ? 3.0f : item.alpha_test == 6 || item.alpha_test == 7 ? -1.0f : item.alpha_test == 5 ? 2.0f : item.alpha_test == 3 ? 0.25f : item.alpha_test == 1 ? 1.0f : 0.0f;
         constants.flags[ 2 ] = item.alpha_test == 11 ? item.scroll : 0.0f;
         constants.flags[ 3 ] = item.alpha_test == 11 ? item.surface[ 3 ] : item.alpha_test == 3 ? 0.35f : 0.0f;
         if ( item.alpha_test == 2 || item.alpha_test == 11 )
@@ -1095,6 +1095,13 @@ void c_engine::device( void*& device, void*& context, void*& mirror )
     context = g_device( ).context( );
     mirror = g_target( ).mirror_view( );
 #endif
+}
+
+// 0x5BC330's colour: the bytes of 0x7596E4 over 255 (0x6F75BC), r g b a.
+void c_engine::clear_colour( const void* rgba )
+{
+    for ( int i = 0; i < 4; ++i )
+        g_target( ).clear_colour[ i ] = static_cast< float >( static_cast< const unsigned char* >( rgba )[ i ] ) * 0.0039215689f;
 }
 
 void c_engine::matrices( float* view, float* projection, float* eye )

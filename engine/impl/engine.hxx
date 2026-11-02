@@ -87,6 +87,7 @@ public:
     static void stage_pass( void ( *pass )( void*, bool ), void* user );
     static void* texture_view( int texture );
     static void device( void*& device, void*& context, void*& mirror );
+    static void clear_colour( const void* rgba );
     static void matrices( float* view, float* projection, float* eye );
     // Six square RGBA faces in asset order; returns a cube handle for place().
     static int cube( const unsigned char* const* faces, int face );

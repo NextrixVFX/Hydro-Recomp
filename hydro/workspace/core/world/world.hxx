@@ -158,7 +158,6 @@ private:
     const std::vector< cached_part_t >& model_for( const std::string& asset );
 
     void foliage_build( const entity_t& root );
-    void foliage_frame( );
 
     const value_t* template_root( const std::string& name )
     {
@@ -671,7 +670,6 @@ private:
             c_engine::drop( alpha );
         m_foliage = foliage_manager_t{ };
         m_foliage_entities.clear( );
-        m_foliage_draws.clear( );
         m_pfx.clear( );
         m_draws = 0;
         m_stack.clear( );
@@ -1449,6 +1447,7 @@ public:
         std::memcpy( view.m_statics.m_decal_ambient, &record[ 15 ], 4 );
         std::memcpy( view.m_statics.m_decal_diffuse, &record[ 16 ], 4 );
         m_stage.frame( dt, m_grid_frame, view );
+        c_engine::clear_colour( &record[ 1 ] );
         if ( m_retail )
             m_retail->frame( dt, record, m_far, m_lights );
     }
@@ -1472,6 +1471,9 @@ public:
                     item.retail->draw( sort, p );
                 }
             retail_boats( sort, p );
+            for ( foliage_entity_t& f : m_foliage_entities )
+                if ( ( p.m_reflecting & f.m_reflect ) == p.m_reflecting )
+                    f.draw( p.m_eye, p.m_eye );
             for ( animated_t& item : m_animated )
             {
                 const animated_draw_t s = animated_model_select( item.draw, item.aabb, item.aabb + 4, p.m_eye, p.m_skip_models != 0u );
@@ -1492,6 +1494,9 @@ public:
                     g.model->m_colour = g.colour;
                     g.model->draw( sort, g.matrix, p );
                 }
+            // 0x558AC0 / 0x558C00 after the walk: 0x5BBAA0. Ours, flagged: the level's "Foliage Tint" as loaded for the composer's +0xA8: whether it follows the blended settings is unread.
+            const std::uint8_t tint[ 3 ] = { static_cast< std::uint8_t >( m_foliage_tint ), static_cast< std::uint8_t >( m_foliage_tint >> 8 ), static_cast< std::uint8_t >( m_foliage_tint >> 16 ) };
+            m_foliage.flush( sort, tint );
         };
         m_pfx.m_geom_sink = [ this ]( const std::string& asset, const float* matrix, std::uint32_t colour ) {
             gfx_static_model_t*& model = m_retail_geom_models[ asset ];
@@ -1679,7 +1684,6 @@ public:
     void scene_frame_rest( float dt )
     {
         race_draw( );
-        foliage_frame( );
         water_draw( dt );
         // The crossing test wants the position of whatever the plane's Trigger
         // Type accepts. With no boat in the scene the dev vantage stands in,
@@ -1793,17 +1797,9 @@ private:
     float m_target[ 3 ]{};
     float m_far = 800.0f;
     std::unique_ptr< gfx_sorted_t > m_sorted;   // the render seam (world/sorted.hxx)
-    // VuFoliageManager and the level's VuFoliageEntity (models.hxx foliage_build / foliage_frame).
-    struct foliage_draw_t
-    {
-        foliage_bucket_t* bucket = nullptr;
-        int geometry = -1;
-        int capacity = 0;
-        std::vector< mesh_vertex_t > scratch;
-    };
+    // VuFoliageManager and the level's VuFoliageEntity (models.hxx foliage_build, drawn by stage.hxx).
     foliage_manager_t m_foliage;
     std::vector< foliage_entity_t > m_foliage_entities;
-    std::vector< foliage_draw_t > m_foliage_draws;
     std::uint32_t m_foliage_tint = 0xFFFFFFFFu;
 
     // VuWaterTextureSettingsEntity_ctor @0x5d2bd0, read in property order:

@@ -94,7 +94,8 @@ void c_composer::size_targets( )
 
 void c_composer::sky( )
 {
-    g_target( ).clear( 0.55f, 0.74f, 0.90f, 1.0f );
+    const float* c = g_target( ).clear_colour;
+    g_target( ).clear( c[ 0 ], c[ 1 ], c[ 2 ], c[ 3 ] );
 }
 
 void c_composer::main_pass( )
@@ -120,7 +121,8 @@ void c_composer::reflect( )
     g_viewport( ).aim( mirror_eye, mirror_at, far_plane );
     g_viewport( ).build( g_swap( ).width( ), g_swap( ).height( ) );
     g_target( ).bind_mirror( );
-    g_target( ).clear_mirror( 0.55f, 0.74f, 0.90f, 1.0f );
+    const float* c = g_target( ).clear_colour;
+    g_target( ).clear_mirror( c[ 0 ], c[ 1 ], c[ 2 ], c[ 3 ] );   // 0x5BC330: the sky box only enters the target when its Reflect is on
     g_scene( ).draw( );
     g_geometry( ).reflecting( true );
     g_geometry( ).draw( );
