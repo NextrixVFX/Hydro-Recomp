@@ -452,6 +452,14 @@ inline ui_screen_env_t c_world::ui_screen_environment( )
     env.m_string6 = [ this ]( const std::string& id ) { return string_db_get( m_string_db, id ); };
     env.m_string7 = env.m_string6;
     env.m_credits = [ this ] { return m_unlock.total; };   // 0x445F00's g 0x758FE8 vt+0x38
+    static value_t achievement_db;
+    if ( achievement_db.tag == 0 )
+    {
+        std::vector< std::uint8_t > bytes;
+        if ( m_archive.read( "VuDBAsset/AchievementDB", bytes ) )
+            achievement_db = c_reader( bytes ).parse( );
+    }
+    env.m_achievement_db = &achievement_db;
     env.m_font = in.m_font;
     // A text leaf's slot 12: VuUITextEntity's 0x446DE0 is VuStringDB slot 7 on its String ID; the screen's bound text has no runtime
     // String ID object here, so the loaded one (SUBSTITUTION until a screen's SetText path needs it).

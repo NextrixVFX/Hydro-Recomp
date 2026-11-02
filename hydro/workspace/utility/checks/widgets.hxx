@@ -3124,6 +3124,48 @@ inline bool verify_ui_completion_text( )
     return true;
 }
 
+// achievement_text: 0x4458F0 / 0x445C50 by retail over a synthetic AchievementDB: one row per key, the DB built from the row.
+inline bool verify_ui_achievement_text( )
+{
+    int failed = 0;
+    value_t db;
+    value_t& rows = ui_json_child( db, "VuDBAsset" );
+    for ( std::size_t k = 0; k < g_golden_ach_rows_count; ++k )
+    {
+        const golden_ach_row_t& g = g_golden_ach_rows[ k ];
+        if ( g.m_absent )
+            continue;
+        value_t& row = ui_json_child( rows, g.m_key );
+        if ( g.m_id )
+            ui_json_set_string( ui_json_child( row, "StringID" ), g.m_id );
+        value_t& value = ui_json_child( row, "Value" );
+        value.tag = g.m_tag;
+        value.kind = g.m_tag == 2u ? value_t::kind_t::real : g.m_tag == 7u ? value_t::kind_t::int64 : g.m_tag == 4u ? value_t::kind_t::text : value_t::kind_t::integer;
+        value.integer = static_cast< int >( g.m_low );
+        std::memcpy( &value.real, &g.m_low, 4 );
+        value.int64 = static_cast< std::int64_t >( static_cast< std::uint64_t >( g.m_high ) << 32 | g.m_low );
+    }
+    const auto string7 = [ ]( const std::string& id ) { return id + "|t"; };
+    for ( std::size_t k = 0; k < g_golden_ach_rows_count; ++k )
+    {
+        const golden_ach_row_t& g = g_golden_ach_rows[ k ];
+        const std::string name = ui_achievement_name( &db, g.m_key, string7 ), value = ui_achievement_value( &db, g.m_key );
+        if ( name != g.m_name || value != g.m_value )
+        {
+            ++failed;
+            if ( failed <= 3 )
+                LOG_ERROR( "achievement row %d: '%s' '%s', retail '%s' '%s'", static_cast< int >( k ), name.c_str( ), value.c_str( ), g.m_name, g.m_value );
+        }
+    }
+    if ( failed )
+    {
+        LOG_ERROR( "achievement texts: %d rows differ", failed );
+        return false;
+    }
+    LOG_SUCCESS( "achievement texts 0x4458F0 / 0x445C50 equal retail on %d keys", static_cast< int >( g_golden_ach_rows_count ) );
+    return true;
+}
+
 inline bool verify_ui_screen_fade( )
 {
     int failed = 0, drawn = 0, ones = 0, zeros = 0, ramps = 0;
@@ -3230,6 +3272,7 @@ inline bool verify_ui_widgets_all( )
     ok = verify_ui_screen_fade( ) && ok;
     ok = verify_ui_footer_text( ) && ok;
     ok = verify_ui_completion_text( ) && ok;
+    ok = verify_ui_achievement_text( ) && ok;
     ok = verify_ui_screen_inputs( ) && ok;
     ok = verify_ui_slider_frame( ) && ok;
     ok = verify_ui_common_screen( ) && ok;

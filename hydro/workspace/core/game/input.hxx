@@ -23,7 +23,8 @@ struct input_t
 // The input retail reads (boat batch 31): c_input_manager on InputDB's document, c_input_device on this platform. Not moved
 // after init: the hooks point at the object. PLATFORM (ours, not 1:1): XInput 1.4's two calls are the static XInput library's,
 // the CoreWindow key events 0x4DAEF0 / 0x4DAF70 are a poll of GetAsyncKeyState over retail's key table, edge-detected as
-// WasKeyDown filters repeats; no focus test (0x4DAEF0's app byte +0x3C).
+// WasKeyDown filters repeats. A CoreWindow delivers key events to the focused window only, so the poll reads the keys as up unless this process owns the foreground
+// window: a second hydro, or any other program, typing does not reach this one. (0x4DAEF0's app byte +0x3C is not this: not read.)
 struct platform_input_t
 {
     c_input_manager manager;
@@ -75,12 +76,16 @@ inline void platform_input_tick( platform_input_t& in, float dt, float real_dt )
 {
     in.real_dt = real_dt;
 #if defined( _WIN32 )
+    DWORD owner = 0;
+    if ( const HWND foreground = GetForegroundWindow( ) )
+        GetWindowThreadProcessId( foreground, &owner );
+    const bool focused = owner == GetCurrentProcessId( );
     for ( int vk = 0; vk < 256; ++vk )
     {
         const int key = g_input_key_table[ vk ];
         if ( key == 0 )
             continue;
-        const bool down = ( GetAsyncKeyState( vk ) & 0x8000 ) != 0;
+        const bool down = focused && ( GetAsyncKeyState( vk ) & 0x8000 ) != 0;
         if ( down && !in.was_down[ vk ] )
             in.device.key_down( key );
         else if ( !down && in.was_down[ vk ] )

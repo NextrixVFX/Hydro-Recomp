@@ -36,6 +36,7 @@ struct ui_screen_env_t
     std::function< std::string( const entity_t& ) > m_text;                        // a text leaf's slot 12 (per type)
     ui_signin_t m_signin;                                                          // the gamer tag's 0x445DE0 (footer.hxx)
     std::function< std::int32_t( ) > m_credits;                                    // g 0x758FE8 vt+0x38; null: no manager (0x445F00's 1234567)
+    const value_t* m_achievement_db = nullptr;                                     // gameutil +0x24
     std::function< ui_text_font_t( const entity_t& ) > m_font;                     // 0x626B80
     std::function< const ui_texture_t*( const entity_t&, int which ) > m_texture;  // an image's slot 14, a button's three
     std::function< std::uint32_t( const std::string& asset ) > m_font_asset;       // FontDB's "FontAsset" -> the asset's +88, 0 none
@@ -184,6 +185,14 @@ inline ui_frame_inputs_t ui_screen_inputs( c_ui_binding& binding, ui_screen_env_
         if ( id )
             return env.m_string7( *id );
         const std::uint32_t vt = e.m_ctor ? e.m_ctor->m_vtable : 0u;
+        if ( vt == k_ui_achievement_name_vtable || vt == k_ui_achievement_value_vtable )
+        {
+            const ui_slot_t* key = ui_property_value( e, "Achievement" );
+            const std::string name = key ? key->m_text : std::string( );
+            if ( vt == k_ui_achievement_value_vtable )
+                return ui_achievement_value( env.m_achievement_db, name );
+            return env.m_string7 ? ui_achievement_name( env.m_achievement_db, name, env.m_string7 ) : std::string( );
+        }
         if ( vt == k_ui_gamertag_vtable )
             return ui_gamertag_text( env.m_signin, [ & ]( const char* s ) { return env.m_string6 ? env.m_string6( s ) : std::string( ); } );
         if ( vt == k_ui_credits_vtable )

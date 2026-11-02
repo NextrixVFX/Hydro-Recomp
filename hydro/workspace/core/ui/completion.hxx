@@ -2,6 +2,8 @@
 
 #include <workspace/core/ui/expand.hxx>
 
+#include <emmintrin.h>
+
 #include <array>
 #include <cstdint>
 #include <cstdio>
@@ -84,4 +86,37 @@ inline void ui_completion_initialize( ui_completion_t& c, const ui_completion_en
     char buffer[ 0x40 ];
     std::snprintf( buffer, sizeof( buffer ), "%d/%d ", done, total );
     c.m_text = std::string( buffer ) + env.m_string6( "SinglePlayer_020" );
+}
+
+// The Achievements screen's two text leaves over AchievementDB (gameutil +0x24), slot 12 of each, case achievement_text. +0x10C "Achievement" the key.
+//   VuAchievementNameUITextEntity  (vtable 0x73BD5C) 0x4458F0: VuStringDB slot 7 on the entry's "StringID" (not a string: "").
+//   VuAchievementValueUITextEntity (vtable 0x73BD1C) 0x445C50: "%d" of "Value": an int; a float truncated (cvttss2si, 0x80000000 when out of range); an int64's low word; else 0.
+inline constexpr std::uint32_t k_ui_achievement_name_vtable = 0x73BD5Cu;
+inline constexpr std::uint32_t k_ui_achievement_value_vtable = 0x73BD1Cu;
+
+inline const value_t& ui_achievement_entry( const value_t* db, const std::string& key )
+{
+    static const value_t none{ };
+    return db ? ui_json_find( member( *db, "VuDBAsset" ), key ) : none;
+}
+
+inline std::string ui_achievement_name( const value_t* db, const std::string& key, const std::function< std::string( const std::string& ) >& string7 )
+{
+    const value_t& id = member( ui_achievement_entry( db, key ), "StringID" );
+    return string7( id.tag == 4 ? id.text : std::string( ) );
+}
+
+inline std::string ui_achievement_value( const value_t* db, const std::string& key )
+{
+    const value_t& v = member( ui_achievement_entry( db, key ), "Value" );
+    std::int32_t n = 0;
+    if ( v.tag == 1 )
+        n = v.integer;
+    else if ( v.tag == 2 )
+        n = _mm_cvttss_si32( _mm_set_ss( v.real ) );
+    else if ( v.tag == 7 )
+        n = static_cast< std::int32_t >( static_cast< std::uint32_t >( static_cast< std::uint64_t >( v.int64 ) ) );
+    char buffer[ 0x40 ];
+    std::snprintf( buffer, sizeof( buffer ), "%d", n );
+    return buffer;
 }
