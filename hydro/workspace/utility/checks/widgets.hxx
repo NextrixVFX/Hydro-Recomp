@@ -3124,6 +3124,30 @@ inline bool verify_ui_completion_text( )
     return true;
 }
 
+// crop_update: 0x4CC110 by retail: 300 (size, aspect) pairs: the crop, its inverse, +0x8C.
+inline bool verify_ui_crop_update( )
+{
+    int failed = 0;
+    for ( std::size_t k = 0; k < g_golden_crop_rows_count; ++k )
+    {
+        const golden_crop_row_t& g = g_golden_crop_rows[ k ];
+        ui_impl_t impl;
+        std::memcpy( &impl.m_aspect, &g.m_aspect, 4 );
+        ui_crop_update( impl, g.m_w, g.m_h );
+        bool same = std::memcmp( impl.m_crop.m_matrix, g.m_words, 64 ) == 0 && std::memcmp( impl.m_inverse, g.m_words + 16, 64 ) == 0;
+        same = same && std::memcmp( &impl.m_float, g.m_words + 32, 4 ) == 0;
+        if ( !same && ++failed <= 3 )
+            LOG_ERROR( "crop %dx%d aspect %08X differs", g.m_w, g.m_h, g.m_aspect );
+    }
+    if ( failed || g_golden_crop_rows_count == 0 )
+    {
+        LOG_ERROR( "verify_ui_crop_update: %d of %d rows differ from retail's 0x4CC110", failed, static_cast< int >( g_golden_crop_rows_count ) );
+        return false;
+    }
+    LOG_SUCCESS( "verify_ui_crop_update: 0x4CC110 matches retail on %d sizes x aspects (crop, inverse, +0x8C)", static_cast< int >( g_golden_crop_rows_count ) );
+    return true;
+}
+
 // achievement_text: 0x4458F0 / 0x445C50 by retail over a synthetic AchievementDB: one row per key, the DB built from the row.
 inline bool verify_ui_achievement_text( )
 {
@@ -3273,6 +3297,7 @@ inline bool verify_ui_widgets_all( )
     ok = verify_ui_footer_text( ) && ok;
     ok = verify_ui_completion_text( ) && ok;
     ok = verify_ui_achievement_text( ) && ok;
+    ok = verify_ui_crop_update( ) && ok;
     ok = verify_ui_screen_inputs( ) && ok;
     ok = verify_ui_slider_frame( ) && ok;
     ok = verify_ui_common_screen( ) && ok;

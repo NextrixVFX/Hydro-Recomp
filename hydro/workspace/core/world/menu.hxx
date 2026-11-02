@@ -135,6 +135,13 @@ inline ui_bind_hooks_t c_world::menu_hooks( int id )
         hooks.m_page_env.m_default = hooks.m_page_env.m_default_font != 0u;
     }
 #endif
+#if HYDRO_UI_PASS
+    if ( m_ui_pass )
+    {
+        hooks.m_crop = &m_ui_pass->m_impl.m_crop;
+        hooks.m_inverse = m_ui_pass->m_impl.m_inverse;
+    }
+#endif
     hooks.m_skin_db = db( "VuDBAsset/SkinDB", m_skin_db );
     hooks.m_boat_db = &m_boat_db;
     hooks.m_track_db = &m_track_db;
@@ -179,7 +186,7 @@ inline void c_world::menu_bind( )
     const race_session_dbs_t dbs = race_dbs( );
     m_menu_engine = front_end_engine_t{ };
     m_menu_engine.m_fade = action_fade_t::created( );
-    m_menu_engine.m_display = [ ]( int& w, int& h ) { w = 1280; h = 720; };
+    m_menu_engine.m_display = [ this ]( int& w, int& h ) { w = m_race.world.display_w; h = m_race.world.display_h; };
     m_menu_engine.m_load_project = [ this ]( const std::string& name ) -> int {
         const std::string asset = "VuProjectAsset/" + name;
         std::vector< std::uint8_t > bytes;
