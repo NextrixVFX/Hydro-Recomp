@@ -3,6 +3,7 @@
 #include <workspace/core/render/gfx.hxx>
 #include <workspace/core/render/post.hxx>
 #include <workspace/core/render/program.hxx>
+#include <workspace/core/world/backend.hxx>
 #include <workspace/core/world/composer.hxx>
 #include <workspace/core/world/drawing.hxx>
 #include <workspace/core/world/shading.hxx>
@@ -1020,6 +1021,94 @@ inline bool verify_gfx_buffers( )
     return false;
 }
 
+// Case gfx_slots: gfx_backend_t against retail's vtables, slot by slot.
+inline bool verify_gfx_backend( )
+{
+    anim_cursor_t g;
+    g.w = g_golden_gbk_words;
+    g.size = g_golden_gbk_size;
+    g.where = "gfx_slots";
+    gfx_rig_api_t api;
+    gfx_device_t d( api );
+    d.m_width = d.m_chain_width = 1280;
+    d.m_height = d.m_chain_height = 720;
+    d.m_chain_view = 1;
+    d.m_chain_depth = 2;
+    d.create_dynamic( );
+    gfx_programs_t programs( api );
+    std::vector< std::uint8_t > stream;
+    gfx_check_read_stream( g, stream );
+    const gfx_program_t* prog = programs.load( stream.data( ) );
+    gfx_backend_t b( d );
+    const std::uint32_t program_id = b.add_program( prog );
+    std::uint32_t handles[ 4 ];
+    const char* const names[ 4 ] = { "gA", "gB", "gC", "gD" };
+    for ( int i = 0; i < 4; ++i )
+        handles[ i ] = b.program_constant( program_id, names[ i ] );
+    gfx_buffer_t buffers[ 3 ];
+    std::uint32_t buffer_ids[ 3 ];
+    for ( int i = 0; i < 3; ++i )
+    {
+        buffers[ i ].m_buffer = 20 + i;
+        buffer_ids[ i ] = b.add_buffer( &buffers[ i ] );
+    }
+    const std::uint32_t layout = b.add_layout( 30 );
+    const gfx_texture_t texture{ 0, 12, 11 };
+    const std::uint32_t texture_id = b.add_texture( &texture );
+    std::uint32_t data[ 16 ];
+    b.m_source = [ & ]( std::uint32_t ) { return static_cast< const void* >( data ); };
+    for ( float& f : d.m_clip )
+    {
+        const std::uint32_t w = g.take( );
+        std::memcpy( &f, &w, 4 );
+    }
+    std::vector< std::uint8_t > vertices;
+    gfx_check_fill( vertices, 1, 96 );
+    const unsigned rows = g.take( );
+    for ( unsigned r = 0; r < rows; ++r )
+    {
+        const unsigned kind = g.take( ), slot = g.take( ), a0 = g.take( ), a1 = g.take( ), a2 = g.take( );
+        api.m_log.clear( );
+        if ( kind == 0u )
+        {
+            switch ( slot )
+            {
+            case 0x84u: b.device( k_gfx_program, program_id ); break;
+            case 0x88u: b.device( k_gfx_declaration, layout ); break;
+            case 0x8Cu: b.device( k_gfx_stream, buffer_ids[ a0 ], a1, a2 ); break;
+            case 0x90u: b.device( k_gfx_indices, buffer_ids[ a0 ] ); break;
+            case 0xB4u: b.device( k_gfx_texture, a0, a1 ? texture_id : 0u ); break;
+            case 0xB8u:
+                d.set_program( prog );
+                api.m_log.clear( );
+                d.draw_dynamic( 3u, 1u, vertices.data( ), 32u );
+                break;
+            default: b.device( static_cast< int >( slot ), a0, a1, a2 ); break;
+            }
+        }
+        else
+        {
+            for ( std::uint32_t& w : data )
+                w = g.take( );
+            b.program( program_id, static_cast< int >( slot ), handles[ a0 ], data[ 0 ], data );
+        }
+        const unsigned logged = g.take( );
+        g.eq( static_cast< std::uint32_t >( api.m_log.size( ) ), logged );
+        for ( unsigned i = 0; i < logged; ++i )
+            g.eq( i < api.m_log.size( ) ? api.m_log[ i ] : 0xDEADBEEFu, g.take( ) );
+        g.eq( gfx_check_api_t::code_hash( prog->m_vertex->m_memory.data( ), 0x100u ), g.take( ) );
+        g.eq( gfx_check_api_t::code_hash( prog->m_pixel->m_memory.data( ), 0x100u ), g.take( ) );
+    }
+    g.eq( static_cast< std::uint32_t >( g.at ), static_cast< std::uint32_t >( g.size ) );
+    if ( !g.failed )
+    {
+        LOG_SUCCESS( "gfx_backend matches retail's device and program vtables slot by slot on %u calls: %d words exact", rows, g.compared );
+        return true;
+    }
+    LOG_ERROR( "gfx_backend FAILED %d of %d words (cursor %zu of %zu)", g.failed, g.compared, g.at, g.size );
+    return false;
+}
+
 // Item 6 of batch 35: render/direct.hxx on a REAL device, no window: the hardware adapter, WARP when there is none. Retail's own Water/Complex/FogReflect from the pack, a flat 33 x 33
 // grid at z = 0 with a camera above it, the real wave texture, a checker for the foam and a gradient for the reflection. Passes when every object was created, the debug layer's state is not
 // "device removed", the surface covers the screen's lower half, and two wave frames differ (the normals reach the pixels).
@@ -1161,8 +1250,8 @@ inline bool verify_gfx_direct( )
     std::memcpy( v.m_light, light, 12 );
     v.m_fog_start = 50.0f;
     v.m_fog_end = 300.0f;
-    const float fog[ 4 ] = { 0.55f, 0.74f, 0.9f, 1.0f };
-    std::memcpy( v.m_fog_colour, fog, 16 );
+    const std::uint8_t fog[ 4 ] = { 140, 189, 230, 255 };
+    std::memcpy( v.m_fog_colour, fog, 4 );
     const std::uint8_t ambient[ 4 ] = { 0x2D, 0x3C, 0x42, 0xC0 }, diffuse[ 4 ] = { 0x50, 0x5A, 0xC0, 0x80 };
     std::memcpy( v.m_statics.m_ambient, ambient, 4 );
     std::memcpy( v.m_statics.m_diffuse, diffuse, 4 );

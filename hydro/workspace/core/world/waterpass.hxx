@@ -34,7 +34,7 @@ struct water_pass_view_t
     float m_eye[ 3 ] = { };
     float m_light[ 3 ] = { };
     float m_fog_start = 0.0f, m_fog_end = 1.0f;
-    float m_fog_colour[ 4 ] = { };
+    std::uint8_t m_fog_colour[ 4 ] = { };   // a VuColor: 0x53B0F0 sets it through slot 11, r g b over 255
     water_shader_statics_t m_statics;
 };
 
@@ -147,7 +147,7 @@ struct water_pass_t final : water_shader_assets_t, water_reflection_source_t
         if ( const gfx_constant_slot_t* c = p.constant( "gFogInvRange" ) )
             gfx_programs_t::set_word( m_api, p, *c, bits( 1.0f / ( v.m_fog_end - v.m_fog_start ) ) );
         if ( const gfx_constant_slot_t* c = p.constant( "gFogColor" ) )
-            gfx_programs_t::set_vec4( m_api, p, *c, v.m_fog_colour );
+            gfx_programs_t::set_colour3( m_api, p, *c, v.m_fog_colour );
     }
 
     // The surfaces of one frame. `shader_of( surface )` answers the index add_shader gave; `reflection` is the planar target's view.
