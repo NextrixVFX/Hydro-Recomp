@@ -193,8 +193,23 @@ inline bool gfx_ray_mesh( const gfx_scene_mesh_t& mesh, const float a[ 3 ], floa
     return hit;
 }
 
+// One piece of a broken model, what 0x51F540 reads of the debris' 0xD8-byte record (boat/effects.hxx).
+struct gfx_scene_piece_t
+{
+    const gfx_scene_node_t* m_node = nullptr;   // +0
+    float m_matrix[ 16 ] = { };                 // +0x94
+};
+
 struct gfx_static_model_t
 {
+    // 0x51F540 (VuBreakableModelInstance's draw, its scene walk read as 0x521960's: params only; instance +0x6C the count, +0x70 the 0xD8-byte pieces): each piece's node (+0) under the
+    // piece's matrix (+0x94), never the opaque walk. Retail unrolls the node's own level and its depth pre-pass there is dead (type 1 never reaches it): the same records as draw_node.
+    void draw_pieces( gfx_sort_t& sort, const gfx_scene_piece_t* pieces, int count, const gfx_draw_params_t& p ) const
+    {
+        for ( int i = 0; i < count; ++i )
+            draw_node( sort, *pieces[ i ].m_node, pieces[ i ].m_matrix, p, false );
+    }
+
     // 0x520620 (matrix, a, b): the segment against the scene; b ends at the nearest hit. Nothing without a scene.
     bool ray( const float matrix[ 16 ], const float a[ 3 ], float b[ 3 ] ) const
     {
