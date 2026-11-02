@@ -85,9 +85,10 @@ public:
     static void water_pass( void ( *pass )( void* ), void* user );
     static void water_now( );
     // The game's retail scene (hydro world/stage.hxx): called once per view after the opaque placements, `reflecting` on the mirror pass.
-    static void stage_pass( void ( *pass )( void*, bool ), void* user );
+    static void stage_pass( void ( *pass )( void* user, int width, int height, bool reflection ), void* user );
+    static void chain( void*& view, void*& depth, int& width, int& height );
+    static void look_target( float* target );
     // The game's post step (hydro world/stage.hxx): with the chain bound, the scene's colour view and size. False: the plain copy.
-    static void post_pass( bool ( *pass )( void*, void*, int, int ), void* user );
     static void* texture_view( int texture );
     static void device( void*& device, void*& context, void*& mirror );
     static void clear_colour( const void* rgba );
