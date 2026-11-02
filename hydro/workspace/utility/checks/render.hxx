@@ -6,6 +6,7 @@
 #include <workspace/core/world/instance.hxx>
 #include <workspace/core/world/meshes.hxx>
 #include <workspace/core/world/corona.hxx>
+#include <workspace/core/world/wrap.hxx>
 #include <workspace/core/world/primitive.hxx>
 #include <workspace/core/world/drawer.hxx>
 #include <workspace/core/world/skeleton.hxx>
@@ -2045,6 +2046,68 @@ struct gfx_corona_check_ray_t : gfx_corona_ray_t
     std::vector< float > m_seen;
 };
 
+// Case text_word_wrap: world/wrap.hxx against retail's 0x5A8600 0x5A8660 0x5A86C0 0x5A8760 0x5A8870 0x5A88B0 0x5A88F0. The wrap helpers' positions are relative to the text; a line's call starts at its own position.
+inline bool verify_text_word_wrap( )
+{
+    anim_cursor_t g;
+    g.w = g_golden_gww_words;
+    g.size = g_golden_gww_size;
+    g.where = "text_word_wrap";
+    const unsigned rows = g.take( );
+    int chars = 0, texts = 0, lines = 0;
+    for ( unsigned r = 0; r < rows; ++r )
+    {
+        const std::size_t words = g.take( );
+        const std::size_t stop = g.at + words;
+        const unsigned kind = g.take( );
+        const std::uint32_t flags = g.take( );
+        if ( kind == 0 )
+        {
+            const std::uint16_t c = static_cast< std::uint16_t >( g.take( ) );
+            g.eq( wrap_lookup( c, flags, false ), g.take( ) );
+            g.eq( wrap_lookup( c, flags, true ), g.take( ) );
+            g.eq( wrap_breakable( c, flags ) ? 1u : 0u, g.take( ) );
+            ++chars;
+        }
+        else
+        {
+            const std::uint32_t width = g.take( );
+            const unsigned length = g.take( );
+            std::vector< std::uint16_t > text( length + 512, 0 );
+            for ( unsigned i = 0; i < length; ++i )
+                text[ i ] = static_cast< std::uint16_t >( g.take( ) );
+            for ( unsigned p = g.take( ); p != 0xFFFFFFFFu; p = g.take( ) )
+            {
+                g.eq( wrap_can_break( text.data( ), static_cast< int >( p ), flags ) ? 1u : 0u, g.take( ) & 1u ? 1u : 0u );
+                g.eq( static_cast< std::uint32_t >( wrap_next_line( text.data( ), static_cast< int >( p ) ) + 1 ), g.take( ) );
+                g.eq( static_cast< std::uint32_t >( wrap_trim( text.data( ), static_cast< int >( p ) ) + 1 ), g.take( ) );
+            }
+            for ( unsigned at = g.take( ); at != 0xFFFFFFFFu; at = g.take( ) )
+            {
+                int last = 0;
+                const auto measure = []( std::uint16_t c ) { return ( static_cast< std::uint32_t >( c ) * 7u + 3u ) & 0x1Fu; };
+                const int next = wrap_line( text.data( ) + at, width, flags, last, measure );
+                g.eq( next < 0 ? 0u : next + at + 1u, g.take( ) );
+                g.eq( last < 0 ? 0u : last + at + 1u, g.take( ) );
+                ++lines;
+            }
+            ++texts;
+        }
+        if ( g.at != stop )
+        {
+            LOG_ERROR( "text_word_wrap: row %u off by %zd words", r, static_cast< std::ptrdiff_t >( g.at ) - static_cast< std::ptrdiff_t >( stop ) );
+            return false;
+        }
+    }
+    if ( g.failed == 0 && g.at == g.size && chars > 0 && lines > texts )
+    {
+        LOG_SUCCESS( "text_word_wrap matches retail's 0x5A88F0 and its helpers: %d words, %d characters, %d texts, %d lines", g.compared, chars, texts, lines );
+        return true;
+    }
+    LOG_ERROR( "text_word_wrap FAILED %d of %d words (cursor %zu of %zu)", g.failed, g.compared, g.at, g.size );
+    return false;
+}
+
 // Case gfx_corona_entity: world/corona.hxx against retail's 0x5E9B60, 0x61D000, 0x5E9BD0, 0x61CE30, 0x50CDF0, 0x50CE20.
 struct gfx_corona_entity_check_ray_t : gfx_corona_entity_ray_t
 {
@@ -2527,6 +2590,7 @@ inline bool verify_render_all( )
     ok = verify_gfx_components( ) && ok;
     ok = verify_gfx_corona( ) && ok;
     ok = verify_gfx_corona_entity( ) && ok;
+    ok = verify_text_word_wrap( ) && ok;
     ok = verify_gfx_sort_life( ) && ok;
     return ok;
 }
