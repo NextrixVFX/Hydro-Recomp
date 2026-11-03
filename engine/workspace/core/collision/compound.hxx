@@ -184,8 +184,16 @@ struct child_algorithm_t
     sphere_sphere_t sphere{};
     box_box_t box{};
     std::unique_ptr< compound_algorithm_t > compound;
-    child_algorithm_t( ) = default;
+    child_algorithm_t( );
     ~child_algorithm_t( );
+};
+
+struct compound_algorithm_t
+{
+    bool swapped = false;
+    solver_manifold_t* shared_manifold = nullptr;
+    int revision = 0;
+    std::vector< std::unique_ptr< child_algorithm_t > > children;
 };
 
 inline void compound_create( compound_algorithm_t& alg, const compound_shape_t& shape, bool swapped, solver_manifold_t* shared );
@@ -528,20 +536,6 @@ inline int compound_remove_child_shape( compound_shape_t& c, const convex_shape_
     return compound_recalculate_local_aabb( c ) ? 1 : -1;
 }
 
-// btCompoundCollisionAlgorithm (CreateFunc 0x56C430 / swapped 0x56C4F0):
-// +28 isSwapped, +32 sharedManifold (ci.m_manifold), +40 the shape's revision
-// at creation - preallocateChildAlgorithms 0x5F7A60 does NOT update it, so a
-// later revision change removes and re-preallocates EVERY call (retail's
-// arithmetic, kept); the child algorithm array (+12 / +20), all NULL with the
-// tree (lazy).
-struct compound_algorithm_t
-{
-    bool swapped = false;
-    solver_manifold_t* shared_manifold = nullptr;
-    int revision = 0;
-    std::vector< std::unique_ptr< child_algorithm_t > > children;
-};
-
 inline void compound_create( compound_algorithm_t& alg, const compound_shape_t& shape, bool swapped, solver_manifold_t* shared )
 {
     alg.swapped = swapped;
@@ -551,6 +545,7 @@ inline void compound_create( compound_algorithm_t& alg, const compound_shape_t& 
     alg.children.resize( shape.children.size( ) );
 }
 
+inline child_algorithm_t::child_algorithm_t( ) = default;
 inline child_algorithm_t::~child_algorithm_t( ) = default;
 
 // removeChildAlgorithms 0x5F7BD0: each child in index order (its dtor +

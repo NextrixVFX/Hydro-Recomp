@@ -188,6 +188,28 @@ namespace logger
     inline void log( level lvl, const char* caller, const char* format, Args... args ) noexcept
     {
         ++g_lines;
+#if HYDRO_HOST_WASM
+        // The page shows stdout as text. The console color codes would be printed as themselves.
+        const char* tag = "[~] ";
+        switch ( lvl )
+        {
+        case level::verbose: tag = "[*] "; break;
+        case level::info: tag = "[~] "; break;
+        case level::success: tag = "[+] "; break;
+        case level::warning: tag = "[!] "; break;
+        case level::error: tag = "[-] "; break;
+        }
+        const std::time_t stamp = std::chrono::system_clock::to_time_t( std::chrono::system_clock::now( ) );
+        tm local_tm{};
+        ::localtime_r( &stamp, &local_tm );
+        std::printf( "[%02d/%02d/%04d %02d:%02d:%02d] %s%s: ",
+            local_tm.tm_mon + 1, local_tm.tm_mday, local_tm.tm_year + 1900,
+            local_tm.tm_hour, local_tm.tm_min, local_tm.tm_sec, tag, caller );
+        std::printf( format, args... );
+        std::printf( "\n" );
+        std::fflush( stdout );
+        return;
+#endif
         detail::initialize_console( );
         detail::print_timestamp( );
         detail::print_level( lvl );

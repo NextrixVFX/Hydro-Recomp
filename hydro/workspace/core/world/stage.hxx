@@ -15,6 +15,7 @@
 // NOT RECREATED: retain / release never free: the models live as long as the stage.
 
 #include <impl/engine/engine.hxx>
+#include <cstdio>
 #include <workspace/core/assets/scene.hxx>
 #include <workspace/core/render/direct.hxx>
 #include <workspace/core/render/gfx.hxx>
@@ -44,7 +45,7 @@
 #include <string>
 #include <vector>
 
-#if HYDRO_HOST_WINDOWS
+#if HYDRO_HOST_WINDOWS || HYDRO_HOST_WASM
 constexpr std::uint32_t k_gfx_cb_water = 0x594D70u;
 constexpr std::uint32_t k_gfx_cb_camera = 0x53AA90u;      // 0x53A9C0's record: 0x240 bytes into the statics 0x7594A0
 constexpr std::uint32_t k_gfx_cb_settings = 0x53ABA0u;    // 0x53AAB0's record: 0x58 bytes into the statics 0x7596E0
@@ -82,8 +83,13 @@ struct gfx_retail_t final : gfx_composer_hooks_t
         m_composer.m_radial = 1u;       // the ctor 0x5585F0
         m_composer.m_lod = 0.02f;       // +0x18, 0x3CA3D70A in the ctor
         m_composer.m_extra = reinterpret_cast< const std::uint8_t* >( m_record );
+#if HYDRO_HOST_WINDOWS
         m_api.m_device = static_cast< ID3D11Device* >( device );
         m_api.m_context = static_cast< ID3D11DeviceContext* >( context );
+#else
+        ( void )device;
+        ( void )context;
+#endif
         m_device.create_dynamic( );
         m_sort.reserve( );
         m_sort.m_single_thread = false;
@@ -151,7 +157,7 @@ struct gfx_retail_t final : gfx_composer_hooks_t
         m_backend.m_callbacks[ k_gfx_cb_pfx_trail ] = [ this ]( std::uint8_t* r ) { pfx_trail_record( r ); };
     }
 
-    gfx_direct_t m_api;
+    gfx_platform_api_t m_api;
     gfx_device_t m_device;
     gfx_programs_t m_programs;
     gfx_declarations_t m_declarations;

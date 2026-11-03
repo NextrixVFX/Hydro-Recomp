@@ -1,5 +1,7 @@
 #pragma once
 
+#include <impl/host.hxx>
+
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -45,6 +47,8 @@ namespace save_seam
             return override_root( );
 #if defined( HYDRO_GOLDEN_PRESENT )
         return { };
+#elif HYDRO_HOST_WASM
+        return std::filesystem::path( "/saves" );
 #else
         std::size_t needed = 0;
         wchar_t value[ 1024 ];
@@ -78,8 +82,15 @@ namespace save_seam
             std::filesystem::create_directories( path.parent_path( ), ignored );
         }
         std::FILE* stream = nullptr;
+#if HYDRO_HOST_WASM
+        const char* narrow = mode == 0 ? "rb" : mode == 1 ? "wb" : "rb+";
+        stream = std::fopen( path.string( ).c_str( ), narrow );
+        if ( stream == nullptr )
+            return nullptr;
+#else
         if ( _wfopen_s( &stream, path.c_str( ), flags ) != 0 || stream == nullptr )
             return nullptr;
+#endif
         return new file_t{ stream };
     }
 
@@ -94,10 +105,18 @@ namespace save_seam
     // Slot 11: 0 on a failed stat.
     inline std::uint32_t size( file_t* file )
     {
+#if HYDRO_HOST_WASM
+        if ( std::fseek( file->stream, 0, SEEK_END ) != 0 )
+            return 0;
+        const long bytes = std::ftell( file->stream );
+        std::fseek( file->stream, 0, SEEK_SET );
+        return bytes < 0 ? 0u : static_cast< std::uint32_t >( bytes );
+#else
         struct _stat64i32 info;
         if ( _fstat64i32( _fileno( file->stream ), &info ) == -1 )
             return 0;
         return static_cast< std::uint32_t >( info.st_size );
+#endif
     }
 
     // Slot 16.

@@ -1,5 +1,6 @@
 #pragma once
 #include <array>
+#include <cstdio>
 
 #include <workspace/core/assets/archive.hxx>
 #include <workspace/core/assets/model.hxx>
@@ -714,6 +715,8 @@ private:
         if ( m_sound.get_event && m_sound.get_event( m_sound.user, name, 1u, &event, nullptr ) == 0 && m_sound.start )
             m_sound.start( m_sound.user, event );
     }
+    // 0x4D2DE0. Left unwired: the mixer crashes and the music streams still sound wrong.
+    void music_cue( ) {}
     logic_services_t m_logic_services;
     value_t m_profile_temp;                             // g 0x759084 +0x18
     value_t m_option_db;                                // gameutil +0x34
@@ -2418,20 +2421,18 @@ private:
     std::map< std::string, std::uint32_t > m_static_pfx;   // VuStaticPfxEntity path -> its +0x94 instance (0: none)
     std::map< std::string, entity_t* > m_entities;   // every tree entity by its graph path
     light_manager_t m_lights;                        // g_vulightmanager 0x759094's +0xCC .. +0xF8 (world/settings.hxx)
-    // THE AUDIO PLATFORM (FMOD's imports, world/sound.hxx sound_hooks_t): there is none on this platform yet - every call
-    // retail would make is counted (and logged once per kind); getEvent answers a failure (1, not FMOD_OK) as FMOD does
-    // when an event cannot be made, so nothing is started or held.
+    // Audio is left out. The mixer crashes, and the music streams still sound wrong. The hooks stay so callers
+    // have somewhere to go; none of them start a device.
     sound_hooks_t m_sound = make_sound_hooks( this );
     int m_sound_calls[ 6 ] = { };   // getEvent, setCallback, stop, start, set3DAttributes, setWorldTransform
     static sound_hooks_t make_sound_hooks( c_world* self )
     {
         sound_hooks_t h;
         h.user = self;
-        h.get_event = []( void* u, const char* name, std::uint32_t, std::uint32_t* ev, const void* ) {
-            c_world& w = *static_cast< c_world* >( u );
-            if ( w.m_sound_calls[ 0 ]++ == 0 )
-                LOG_WARNING( "audio: FMOD getEvent('%s') - no audio platform: answered failure (further calls counted)", name );
-            *ev = 0u;
+        h.get_event = []( void* u, const char*, std::uint32_t, std::uint32_t* ev, const void* ) {
+            ++static_cast< c_world* >( u )->m_sound_calls[ 0 ];
+            if ( ev )
+                *ev = 0;
             return 1;
         };
         h.set_callback = []( void* u, std::uint32_t, std::uint32_t, const void* ) { ++static_cast< c_world* >( u )->m_sound_calls[ 1 ]; };

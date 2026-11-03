@@ -72,7 +72,13 @@ inline void c_world::settings_start( )
     void* device = nullptr;
     void* context = nullptr;
     c_engine::api( device, context );
+#if HYDRO_HOST_WINDOWS
     const int level = device ? static_cast< int >( static_cast< ID3D11Device* >( device )->GetFeatureLevel( ) ) : 0xB000;
+#else
+    ( void )device;
+    ( void )context;
+    const int level = 0xB000;
+#endif
     const int tier = level <= 0x9100 ? 0 : level > 0x9300 ? 2 : 1;
     if ( tier <= 0 )
     {
@@ -89,7 +95,7 @@ inline void c_world::settings_start( )
         c_engine::flip_interval( v );
     };
     m_settings_platform.m_broadcast = [ this ]( std::uint32_t, const ui_params_t& ) { water_fidelity( ); };   // "OnWaterSettingsChanged": 0x5DB3F0's rebuild is the renderer's
-    m_settings_hooks.category = [ ]( const char*, float ) { };
+    m_settings_hooks.category = []( const char*, float ) {};
     m_settings_hooks.flip_interval = m_settings_platform.m_flip;
     m_settings_hooks.has_accelerometer = m_settings_platform.m_sys_54;
     m_settings_hooks.has_tilt = m_settings_platform.m_sys_58;

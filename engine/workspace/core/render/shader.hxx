@@ -468,6 +468,9 @@ bool c_shader::create( )
 
     LOG_SUCCESS( "shaders mesh, textured, water, blit" );
     return m_mesh_vs && m_mesh_ps && m_textured_vs && m_textured_ps && m_textured_layout && m_blit_vs && m_blit_ps && m_layout && m_constants && m_sampler && m_wrap;
+#elif HYDRO_HOST_WASM
+    // The retail programs are DXBC and go through gfx_webgl_t. This engine shader set is the Windows mesh path.
+    return true;
 #else
     return false;
 #endif

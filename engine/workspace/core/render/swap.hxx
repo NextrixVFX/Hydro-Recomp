@@ -6,6 +6,9 @@
 
 #if HYDRO_HOST_WINDOWS
 #  include <dxgi1_5.h>
+#elif HYDRO_HOST_WASM
+#  include <GLES3/gl3.h>
+#  include <emscripten/html5.h>
 #endif
 
 class c_swap
@@ -54,12 +57,16 @@ namespace
 {
     c_swap* g_swap_instance = nullptr;
 }
+#elif HYDRO_HOST_WASM
+inline c_swap* g_swap_live = nullptr;
 #endif
 
 c_swap& g_swap( )
 {
 #if HYDRO_HOST_WINDOWS
     return *g_swap_instance;
+#elif HYDRO_HOST_WASM
+    return *g_swap_live;
 #else
     static c_swap missing{};
     return missing;
@@ -172,6 +179,13 @@ bool c_swap::create( c_device& device, c_window& window )
     g_swap_instance = this;
     LOG_SUCCESS( "swap %dx%d", window.width( ), window.height( ) );
     return true;
+#elif HYDRO_HOST_WASM
+    ( void )device;
+    m_width = window.width( );
+    m_height = window.height( );
+    g_swap_live = this;
+    LOG_SUCCESS( "swap %dx%d", m_width, m_height );
+    return true;
 #else
     ( void )device;
     ( void )window;
@@ -219,6 +233,15 @@ bool c_swap::resize( c_device& device, int width, int height )
     }
     LOG_SUCCESS( "swap %dx%d", m_width, m_height );
     return SUCCEEDED( result );
+#elif HYDRO_HOST_WASM
+    ( void )device;
+    if ( width > 0 && height > 0 )
+    {
+        m_width = width;
+        m_height = height;
+        emscripten_set_canvas_element_size( "#canvas", width, height );
+    }
+    return true;
 #else
     ( void )device;
     ( void )width;
@@ -265,6 +288,9 @@ void c_swap::present( )
         m_swap->Present( g_swap_vsync ? 1u : 0u, m_tearing && !g_swap_vsync ? DXGI_PRESENT_ALLOW_TEARING : 0u );
         trace::frame( ).present += trace::now( ) - present_start;
     }
+    trace::report( );
+#elif HYDRO_HOST_WASM
+    glFlush( );
     trace::report( );
 #endif
 }

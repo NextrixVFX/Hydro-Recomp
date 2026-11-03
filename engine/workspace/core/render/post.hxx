@@ -5,6 +5,7 @@
 // GaussBlur5x5 and Effect are created and their handles resolved as retail does; their draws sit under 0x514D70, not read past its calls.
 // Verified against retail: hydro checks/device.hxx verify_gfx_post (case gfx_post).
 
+#include <impl/host.hxx>
 #include <workspace/core/render/gfx.hxx>
 #include <workspace/core/render/program.hxx>
 #include <workspace/core/render/resource.hxx>
@@ -93,7 +94,15 @@ struct gfx_post_t
     // 0x57C370: no culling, no depth; the strip's four corners of { x, y, u, v }; everything put back. vt+0x60 / +0x64 are retail's empty 0x401560.
     void quad( gfx_device_t& d ) const
     {
+        // D3D's V=0 is the top of the image. A GL texture's V=0 is the bottom, and the scene was rendered
+        // upright into it, so the present quad has to sample the other way. This quad is the radial blur
+        // and the copy: once the boat is moving, +0x3F8 rises and the frame goes through that present,
+        // which was turning the view upside down as the camera pulled back.
+#if HYDRO_HOST_WASM
+        static const float corners[ 16 ] = { -1.0f, -1.0f, 0.0f, 0.0f, 1.0f, -1.0f, 1.0f, 0.0f, -1.0f, 1.0f, 0.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f };
+#else
         static const float corners[ 16 ] = { -1.0f, -1.0f, 0.0f, 1.0f, 1.0f, -1.0f, 1.0f, 1.0f, -1.0f, 1.0f, 0.0f, 0.0f, 1.0f, 1.0f, 1.0f, 0.0f };
+#endif
         d.set_declaration( m_declaration->m_layout );
         d.cull( 0u );
         d.depth_enable( 0u );

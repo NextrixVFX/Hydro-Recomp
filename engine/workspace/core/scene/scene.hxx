@@ -89,6 +89,8 @@ c_scene::~c_scene( )
     if ( g_plane ) g_plane->Release( );
     if ( g_box ) g_box->Release( );
 }
+#else
+c_scene::~c_scene( ) {}
 #endif
 
 namespace

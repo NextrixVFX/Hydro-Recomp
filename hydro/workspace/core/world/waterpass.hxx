@@ -284,10 +284,10 @@ private:
 };
 
 // THE RUNNING GAME'S SIDE: one object the world owns. attach( ) at the level's load, frame( ) where water_draw built the grid, the engine calls engine_pass inside its transparent stage.
-#if HYDRO_HOST_WINDOWS
+#if HYDRO_HOST_WINDOWS || HYDRO_HOST_WASM
 struct water_stage_t
 {
-    gfx_direct_t m_api;
+    gfx_platform_api_t m_api;
     std::unique_ptr< water_pass_t > m_pass;
     std::vector< int > m_surface_shader;   // per surface index (the entity's +0x12C)
     gfx_handle_t m_mirror = 0;             // the composer's reflection target's texture (0x558870 -> vt+0xC)
@@ -315,8 +315,14 @@ struct water_stage_t
         void* context = nullptr;
         void* mirror = nullptr;
         c_engine::device( device, context, mirror );
+#if HYDRO_HOST_WINDOWS
         m_api.m_device = static_cast< ID3D11Device* >( device );
         m_api.m_context = static_cast< ID3D11DeviceContext* >( context );
+#else
+        ( void )device;
+        ( void )context;
+        ( void )mirror;
+#endif
         m_pass = std::make_unique< water_pass_t >( m_api );
         m_pass->create( source );
         c_engine::water_pass( &water_stage_t::engine_pass, this );

@@ -16,10 +16,12 @@ public:
     void bind_scene( );
     void bind_mirror( );
     void clear_mirror( float red, float green, float blue, float alpha );
+#if HYDRO_HOST_WINDOWS
     ID3D11ShaderResourceView* mirror_view( ) const { return m_mirror_srv; }
     ID3D11ShaderResourceView* colour_view( ) const { return m_srv; }
     ID3D11RenderTargetView* colour_target( ) const { return m_rtv; }
     ID3D11DepthStencilView* depth_target( ) const { return m_dsv; }
+#endif
     int width( ) const { return m_width; }
     int height( ) const { return m_height; }
     float reflection_plane = 0.0f;   // viewport +0x268

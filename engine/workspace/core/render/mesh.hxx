@@ -6,6 +6,7 @@
 
 #include <impl/engine.hxx>
 #include <workspace/core/render/device.hxx>
+#include <workspace/core/render/swap.hxx>
 #include <workspace/core/render/target.hxx>
 
 class c_geometry
@@ -685,8 +686,14 @@ void* c_geometry::view_of( int texture ) const
 void c_geometry::draw( int width, int height, bool reflection )
 {
     const double ensure_start = trace::now( );
-    if ( ( m_placements.empty( ) && m_stage_pass == nullptr ) || !ensure( ) )   // the retail stage draws with no engine placement at all
+    // The retail stage draws with no engine placement at all. The D3D buffer upload is the Windows device's; the stage itself is the scene.
+#if HYDRO_HOST_WINDOWS
+    if ( ( m_placements.empty( ) && m_stage_pass == nullptr ) || !ensure( ) )
         return;
+#else
+    if ( m_stage_pass == nullptr )
+        return;
+#endif
     trace::frame( ).ensure += trace::now( ) - ensure_start;
 
 #if HYDRO_HOST_WINDOWS
@@ -718,10 +725,13 @@ void c_geometry::draw( int width, int height, bool reflection )
         context->Begin( m_gpu_disjoint );
     if ( m_gpu_begin != nullptr )
         context->End( m_gpu_begin );
+#endif
     // The retail stage (world/stage.hxx) draws everything: nothing is hand-placed any more (water batch 43).
     if ( m_stage_pass != nullptr )
-    {
         m_stage_pass( m_stage_user, width, height, reflection );
+#if HYDRO_HOST_WINDOWS
+    if ( m_stage_pass != nullptr )
+    {
         const FLOAT factor[ 4 ] = { 1, 1, 1, 1 };
         context->OMSetBlendState( nullptr, factor, 0xFFFFFFFF );
         context->RSSetState( nullptr );
@@ -808,6 +818,8 @@ void c_engine::api( void*& device, void*& context )
 #if HYDRO_HOST_WINDOWS
     device = g_device( ).device( );
     context = g_device( ).context( );
+#elif HYDRO_HOST_WASM
+    device = context = reinterpret_cast< void* >( static_cast< std::uintptr_t >( 1 ) );
 #else
     device = context = nullptr;
 #endif
@@ -836,6 +848,17 @@ void c_engine::chain( void*& view, void*& depth, int& width, int& height )
     depth = g_target( ).depth_target( );
     width = g_target( ).width( );
     height = g_target( ).height( );
+#elif HYDRO_HOST_WASM
+    // The canvas is the default framebuffer. A null view binds it; the size is what the viewport is built from.
+    view = nullptr;
+    depth = nullptr;
+    width = g_swap( ).width( );
+    height = g_swap( ).height( );
+#else
+    ( void )view;
+    ( void )depth;
+    ( void )width;
+    ( void )height;
 #endif
 }
 
@@ -865,6 +888,9 @@ void c_engine::device( void*& device, void*& context, void*& mirror )
     device = g_device( ).device( );
     context = g_device( ).context( );
     mirror = g_target( ).mirror_view( );
+#elif HYDRO_HOST_WASM
+    device = context = reinterpret_cast< void* >( static_cast< std::uintptr_t >( 1 ) );
+    mirror = nullptr;
 #endif
 }
 

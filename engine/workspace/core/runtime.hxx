@@ -18,6 +18,7 @@
 #include <workspace/utility/drawstats.hxx>
 #include <workspace/utility/spikes.hxx>
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 
@@ -145,6 +146,9 @@ void c_engine::display( int& width, int& height )
 {
 #if HYDRO_HOST_WINDOWS
     if ( g_swap_instance == nullptr )
+        return;
+#elif HYDRO_HOST_WASM
+    if ( g_swap_live == nullptr )
         return;
 #endif
     width = g_swap( ).width( );
@@ -361,3 +365,14 @@ int c_engine::run( const char* title )
     g_geometry( ).release( );
     return code;
 }
+
+#if HYDRO_HOST_WASM
+extern "C" void x87_sincos( float x, float* c, float* s )
+{
+    const double angle = static_cast< double >( x );
+    if ( c )
+        *c = static_cast< float >( std::cos( angle ) );
+    if ( s )
+        *s = static_cast< float >( std::sin( angle ) );
+}
+#endif

@@ -265,7 +265,7 @@ inline void ui_record_icons( ui_record_device_t& d, const ui_minimap_t& m, const
 //
 // What is OURS, flagged:
 // - Its own sort, flipped once a frame after the composer: retail's UI commands share the frame's one sort, type 17 sorting them last.
-#if __has_include( <workspace/core/render/program.hxx> ) && __has_include( <workspace/core/render/resource.hxx> ) && HYDRO_HOST_WINDOWS
+#if __has_include( <workspace/core/render/program.hxx> ) && __has_include( <workspace/core/render/resource.hxx> ) && ( HYDRO_HOST_WINDOWS || HYDRO_HOST_WASM )
 #  define HYDRO_UI_PASS 1
 #  include <workspace/core/render/program.hxx>
 #  include <workspace/core/render/resource.hxx>
@@ -297,8 +297,13 @@ struct gfx_ui_pass_t final : gfx_sort_hooks_t, ui_record_device_t, ui_boost_devi
     gfx_ui_pass_t( void* device, void* context, read_t read )
         : m_gfx( m_direct ), m_sort( *this ), m_programs( m_direct ), m_declarations( m_direct, m_programs ), m_read( std::move( read ) )
     {
+#if HYDRO_HOST_WINDOWS
         m_direct.m_device = static_cast< ID3D11Device* >( device );
         m_direct.m_context = static_cast< ID3D11DeviceContext* >( context );
+#else
+        ( void )device;
+        ( void )context;
+#endif
         m_sort.reserve( );
         m_gfx.create_dynamic( );
         // The declarations: 0x541F00 xyz, 0x541F90 + uv at 0xC, 0x536A?? + colour at 0x14.
@@ -678,9 +683,7 @@ struct gfx_ui_pass_t final : gfx_sort_hooks_t, ui_record_device_t, ui_boost_devi
         m_maps.clear( );
     }
 
-#  if HYDRO_HOST_WINDOWS
-    gfx_direct_t m_direct;
-#  endif
+    gfx_platform_api_t m_direct;
     gfx_device_t m_gfx;
     gfx_sort_t m_sort;
     gfx_programs_t m_programs;

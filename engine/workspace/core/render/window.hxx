@@ -7,6 +7,9 @@
 #    define WIN32_LEAN_AND_MEAN
 #  endif
 #  include <Windows.h>
+#elif HYDRO_HOST_WASM
+#  include <emscripten/emscripten.h>
+#  include <emscripten/html5.h>
 #endif
 
 class c_window
@@ -173,6 +176,15 @@ bool c_window::create( int width, int height, const char* title, bool background
     UpdateWindow( m_hwnd );
     LOG_SUCCESS( "window %dx%d%s", m_width, m_height, background ? " (background)" : "" );
     return true;
+#elif HYDRO_HOST_WASM
+    ( void )title;
+    ( void )background;
+    m_width = width;
+    m_height = height;
+    m_open = true;
+    emscripten_set_canvas_element_size( "#canvas", width, height );
+    LOG_SUCCESS( "canvas %dx%d", m_width, m_height );
+    return true;
 #else
     ( void )width;
     ( void )height;
@@ -195,6 +207,9 @@ bool c_window::pump( )
         TranslateMessage( &message );
         DispatchMessageW( &message );
     }
+#elif HYDRO_HOST_WASM
+    // One turn of the browser event loop. The frame loop is a plain while, and the page cannot paint until this returns.
+    emscripten_sleep( 0 );
 #endif
     return m_open;
 }

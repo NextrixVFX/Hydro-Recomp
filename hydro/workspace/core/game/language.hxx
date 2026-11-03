@@ -6,7 +6,11 @@
 // The tag is cut at its LAST '-' (0x4ECA50), then compared whole, so "zh-Hant-TW" matches and "zh-Hant" alone does not, and a
 // tag with nothing matching leaves the default.
 
-#include <windows.h>
+#include <impl/host.hxx>
+
+#if HYDRO_HOST_WINDOWS
+#  include <windows.h>
+#endif
 
 #include <string>
 
@@ -16,6 +20,9 @@ inline constexpr const char* k_language_default = "en-us";
 // A Chinese system answers "zh-TW" here, not WinRT's "zh-Hant-TW", so it keeps the default.
 inline std::string platform_language_tag( )
 {
+#if !HYDRO_HOST_WINDOWS
+    return k_language_default;
+#else
     wchar_t name[ LOCALE_NAME_MAX_LENGTH ] = { };
     if ( GetUserDefaultLocaleName( name, LOCALE_NAME_MAX_LENGTH ) == 0 )
         return { };
@@ -23,6 +30,7 @@ inline std::string platform_language_tag( )
     for ( const wchar_t* c = name; *c != L'\0'; ++c )
         tag += static_cast< char >( *c );
     return tag;
+#endif
 }
 
 inline void system_language( const std::string& tag, std::string& language )

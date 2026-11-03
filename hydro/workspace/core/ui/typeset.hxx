@@ -4,7 +4,6 @@
 
 #include <cmath>
 #include <cstdint>
-#include <cstdio>
 #include <cstring>
 #include <functional>
 #include <string>
@@ -600,6 +599,8 @@ inline void ui_font_submit( ui_font_renderer_t& R, const ui_font_t& f, const std
         if ( ops.m_scissor_on )
             ops.m_scissor_on( true );
     }
+    else if ( ops.m_scissor_on )
+        ops.m_scissor_on( false );
     std::int32_t a = 0, b = 0;
     if ( ops.m_size )
         ops.m_size( a, b );

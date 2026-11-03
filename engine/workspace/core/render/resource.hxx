@@ -158,12 +158,14 @@ struct gfx_texture_object_t : gfx_texture_t
 // 0x57C4B0 (the part after the fields): the sampler. `cube`: 0x609240's differs: MaxLOD 0 when the mip option is 0 (found by case gfx_cube_load).
 inline void gfx_texture_sampler( gfx_api_t& api, gfx_texture_object_t& t, const gfx_texture_options_t& o, bool cube = false )
 {
+    ( void )cube;
     std::uint32_t filter = o.m_min >= 2 ? 4u : 0u;
     if ( o.m_mag >= 2 )
         filter |= 0x10u;
     if ( o.m_mip >= 2 )
         filter |= 1u;
-    t.m_sampler = api.create_sampler( gfx_sampler_desc_t{ filter, k_gfx_address_map[ o.m_address_u ], k_gfx_address_map[ o.m_address_v ], 1u, 0.0f, 1u, 8u, { 0.0f, 0.0f, 0.0f, 0.0f }, 0.0f, cube && o.m_mip == 0 ? 0.0f : 3.4028235e38f } );
+    // m_mip 0 is one level (the fresnel ramp, the reflection target). MaxLOD 0 keeps the sample on that level.
+    t.m_sampler = api.create_sampler( gfx_sampler_desc_t{ filter, k_gfx_address_map[ o.m_address_u ], k_gfx_address_map[ o.m_address_v ], 1u, 0.0f, 1u, 8u, { 0.0f, 0.0f, 0.0f, 0.0f }, 0.0f, o.m_mip == 0 ? 0.0f : 3.4028235e38f } );
 }
 
 // 0x57C9B0 (width, height, an unread word, format, options): an empty dynamic-by-update texture: the description, the view, the sampler.

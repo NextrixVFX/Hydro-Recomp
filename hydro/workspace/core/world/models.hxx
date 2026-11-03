@@ -2,9 +2,18 @@
 
 // c_world's models - member definitions moved out of world.hxx (one class, split by concern).
 
+#include <cstdio>
+
 inline std::string c_world::pack_path( ) const
 {
-#if defined( _WIN32 )
+#if defined( __EMSCRIPTEN__ )
+    if ( std::FILE* file = std::fopen( "/Base.apf", "rb" ) )
+    {
+        std::fclose( file );
+        return "/Base.apf";
+    }
+    return {};
+#elif defined( _WIN32 )
     char module_path[ MAX_PATH ]{};
     GetModuleFileNameA( nullptr, module_path, MAX_PATH );
     std::string directory = module_path;

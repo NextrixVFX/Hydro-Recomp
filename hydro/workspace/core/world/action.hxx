@@ -175,6 +175,7 @@ public:
     }
 
     // The event map's two handlers.
+    void music_level( float v ) { m_hooks.music_volume = v; m_hooks.music_channel = v > 0.0f; }
     void on_end_action_game( ) { m_next = "FrontEnd"; }       // 0x4B9B70
     void on_restart_action_game( ) { m_next = "Action"; }     // 0x4B9B90
 

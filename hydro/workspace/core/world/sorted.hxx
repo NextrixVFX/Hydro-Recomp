@@ -110,9 +110,7 @@ struct gfx_sorted_t final : gfx_sort_hooks_t
         m_pass = nullptr;
     }
 
-#if HYDRO_HOST_WINDOWS
-    gfx_direct_t m_direct;
-#endif
+    gfx_platform_api_t m_direct;
     gfx_device_t m_gfx;
     gfx_sort_t m_sort;
     const sorted_pass_t* m_pass = nullptr;

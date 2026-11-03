@@ -257,6 +257,7 @@ inline void c_world::menu_enter( )
         }
     }
     m_menu_engine.m_sound = [ this ]( const char* name ) { ui_play( name ); };
+    m_menu_engine.m_preload_action_game = [ this ] { music_cue( ); };   // 0x4D2DE0 once the title sting has finished
     m_menu_engine.m_platform = [ this ]( const char* what, int ) {
         if ( std::strcmp( what, "cloud" ) == 0 )   // 0x4BF96D 0x5547F0, 0x4BF978 0x4ABD60: the pair
             saves_commit( );

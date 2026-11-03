@@ -166,6 +166,8 @@ inline void c_world::action_start( value_t& game_data, const race_session_dbs_t&
         if ( std::strcmp( which, "0x4B9C10" ) == 0 && m_pause_menu )
             m_pause_menu->draw( );   // 0x4B9C8B
     };
+    h.action_game_data = [ this ] { music_cue( ); };   // 0x4D2DE0: start the playlist if nothing is already playing
+    h.set_music_volume = []( float ) {};
     h.broadcast_float = [ this ]( const char* name, float v ) {
         const auto at = m_menu_projects.find( m_loading_project );
         if ( at == m_menu_projects.end( ) )

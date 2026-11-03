@@ -192,3 +192,10 @@ struct gfx_direct_t final : gfx_api_t
 };
 
 #endif
+
+#if HYDRO_HOST_WASM
+#  include <workspace/core/render/webgl.hxx>
+using gfx_platform_api_t = gfx_webgl_t;
+#elif HYDRO_HOST_WINDOWS
+using gfx_platform_api_t = gfx_direct_t;
+#endif

@@ -2,6 +2,10 @@
 
 #include <workspace/utility/logger.hxx>
 
+#if HYDRO_HOST_WASM
+#  include <emscripten/emscripten.h>
+#endif
+
 namespace trace
 {
     inline double now( )
@@ -17,6 +21,8 @@ namespace trace
         LARGE_INTEGER counter{};
         QueryPerformanceCounter( &counter );
         return static_cast< double >( counter.QuadPart ) * scale;
+#elif HYDRO_HOST_WASM
+        return emscripten_get_now( );
 #else
         return 0.0;
 #endif

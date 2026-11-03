@@ -1,5 +1,10 @@
 #include <impl/includes.hxx>
 
+#if HYDRO_HOST_WASM
+#  include <emscripten/wget.h>
+#  include <sys/stat.h>
+#endif
+
 // Ours (a measurement build only, off by default): operator new counted for --spike-log (utility/spikes.hxx).
 #if defined( HYDRO_SPIKE_ALLOC )
 #include <new>
@@ -48,6 +53,13 @@ int main( int argc, char** argv )
 #endif
     }
     c_engine::guard( );
+#if HYDRO_HOST_WASM
+    // The page's server has the pack beside the html. fopen only sees the in-memory filesystem, so the file is fetched onto it first.
+    LOG_INFO( "fetching Base.apf" );
+    const int fetched = emscripten_wget( "Base.apf", "/Base.apf" );
+    if ( fetched != 0 )
+        LOG_ERROR( "Base.apf fetch failed (%d)", fetched );
+#endif
     c_game game{};
     c_engine::attach( game );
     return c_engine::run( "Hydro" );
