@@ -1,5 +1,5 @@
 # hydro-recomp
-
+[![Listed on PlayPorted](https://playported.com/badge.svg)](https://playported.com/ports/1120-hydro-thunder-hurricane/)
 A native recreation of **Hydro Thunder Hurricane** (the Windows / UWP release), rebuilt function by function
 from the shipped binary - and checked against it.
 
