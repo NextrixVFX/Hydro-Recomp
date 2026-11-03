@@ -1,5 +1,7 @@
 #pragma once
 
+#define LOGGING
+
 #include <impl/engine/engine.hxx>
 // The oracle checks need the golden vectors, which live outside the
 // repository (workspace/utility/golden.hxx says why); HYDRO_GOLDEN says

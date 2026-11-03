@@ -231,12 +231,19 @@ namespace logger
     }
 #endif
 }
-
+#ifdef LOGGING
 #define LOG_VERBOSE(...) do { if ( g_verbose ) logger::log( logger::level::verbose, __FUNCTION__, __VA_ARGS__ ); } while ( 0 )
 #define LOG_INFO(...)    logger::log( logger::level::info, __FUNCTION__, __VA_ARGS__ )
 #define LOG_SUCCESS(...) logger::log( logger::level::success, __FUNCTION__, __VA_ARGS__ )
 #define LOG_WARNING(...) logger::log( logger::level::warning, __FUNCTION__, __VA_ARGS__ )
 #define LOG_ERROR(...)   logger::log( logger::level::error, __FUNCTION__, __VA_ARGS__ )
+#else
+#define LOG_VERBOSE(...)
+#define LOG_INFO(...)
+#define LOG_SUCCESS(...)
+#define LOG_WARNING(...)
+#define LOG_ERROR(...)
+#endif
 
 #if HYDRO_HOST_WINDOWS
 #  define LOG_ERROR_WIN32( api ) do { DWORD _le = GetLastError( ); logger::log_win32_error( __FUNCTION__, api, _le ); } while ( 0 )

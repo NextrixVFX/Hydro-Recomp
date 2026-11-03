@@ -3,6 +3,11 @@
 A native recreation of **Hydro Thunder Hurricane** (the Windows / UWP release), rebuilt function by function
 from the shipped binary - and checked against it.
 
+**Status: playable, but silent.** It boots through the title sequence into retail's menus, and you can pick a
+boat and a track and race to the finish against AI boats. In play it now looks very close to the original. The
+biggest thing missing is audio: there is no sound yet. See [What runs today](#what-runs-today) and
+[Not there yet](#not-there-yet).
+
 > **No game data is included, and none ever will be.** You need your own legally owned copy of the game.
 > The executable, `Base.apf` and anything derived from their contents stay on your machine (see
 > [Game data](#game-data)).
@@ -32,24 +37,51 @@ Measured, not estimated: see **[docs/INVENTORY.md](docs/INVENTORY.md)** (summary
 | cited - recreated or referenced here, but no oracle case runs it yet | 631 |
 | absent | 3,549 |
 
-Verified so far, by area: Bullet physics (collision, broadphase, the constraint solver, integration - 154
-functions), the boat's tick path and fluid / buoyancy forces, the water wave kernels, the VUJB asset document
-reader, VuTransformComponent, the VuEntity constructor's object graph, the whole VuBoatEntity construction (0x41B850: 43 objects, every byte and pointer, and its event registrations), and the
-entity type registry (all 294 types - the engine's, the game's and one per template - in retail's order), and
-VuProject::load, VuEntity::load's child loading and template instances (the entity tree retail builds from real
-project and level data: names, parents, child order, which template made what), the components' loading (an entity's
-transform from the tree), and the dynamic light's and the corona's property loads (the bool / float / angle /
-colour / vector / string property classes).
+Those totals cover the whole binary, including the C++ runtime, platform code and dead code. The inventory also
+splits functions by what a race actually reaches:
 
-**What runs today:** the Hydroelectric track loads and renders - terrain, lights, fog, props, skinned props,
-coronas, particle effects, triggers, the event graph, and the ocean with point waves.
+| tier | functions | verified | game + engine logic not verified yet |
+|---|---:|---:|---:|
+| race - what a race creates and runs | 4,905 | 2,772 | 1,763 |
+| game - the rest of what is in scope, including the front end | 2,431 | 910 | 1,216 |
 
-**Not there yet** (a visible-feature summary, not the full scope - the inventory is the full scope): the boat
-itself (its tick path, construction, registration and teardown are done and checked; it is not yet placed in the world), handling,
-AI, wakes, water surfaces, sky, audio, menus, HUD, race rules / checkpoints / laps / timing / modes / boost,
-damage debris, the boat camera, input, save / unlocks / settings, multiplayer and leaderboards, the real
-shaders (the retail DXBC), the UWP / Xbox 360 look toggle, and retail's full entity framework (the world loader
-still reads the level data its own way; moving it onto retail's entity model is the next architectural step).
+So the game can look finished while the count is well short of it. "Not verified" does not mean missing: code
+can run in the game with no oracle case behind it yet (the *cited* row). `--selftest` currently passes all 622
+checks.
+
+Most verified, by share of code: particles (86%), boat (82%), AI (76%), input (70%) and water (68%). Least
+verified: network (6%), audio (22%) and save / settings (23%).
+
+### What runs today
+
+- **Front end:** the title sequence, retail's menus and screens, boat and track selection with the dock boat and
+  track posters, loading screens, settings, key remapping, credits, the awards panel and the pause menu.
+- **Racing:** Race, Time Trial, Slalom, Ghost and Championship modes, with AI opponents, checkpoints, laps, timing,
+  results, boost, ramps and pickups, hidden packages, nuisance boats, the race HUD and the minimap.
+- **Boats:** handling and fluid / buoyancy physics, skinned and animated hulls, the race camera, damage,
+  destruction and respawn.
+- **World:** levels load through retail's entity model, with event graphs, triggers, keyframed and attached props,
+  breakables, mines and explosions, foliage, and dynamic lights.
+- **Rendering:** retail's own shaders through retail's sort and frame composer, including the water, sky and
+  reflections, particles and coronas.
+- **Saves:** profile, records, ghosts and hidden packages, in a local file that matches retail's byte for byte.
+
+A few things here are ours, not retail's, and each is off or at retail's behaviour by default unless noted: extra
+video settings (frame rate limit, VSync, FOV, camera shake, zoom out), a resizable window, and a Benchmark button
+on the Main Menu (it replaces retail's two store buttons) that runs AI boats through every level and logs the
+frame rate.
+
+### Not there yet
+
+The [inventory](docs/INVENTORY.md) is the full scope; this is what you would notice:
+
+- **Audio.** Retail plays everything through FMOD, and nothing replaces it yet, so engines, music, effects and
+  voice-over are silent. The game logic that asks for them is largely in place and has nothing to play them.
+- **Online.** Leaderboards, online ghosts, online play and achievements. These are platform services, so they
+  will be remade for this project rather than recreated 1:1. Saves are local only.
+- **Windows only.** There is no other platform build yet.
+- **Rendering details:** a few visual differences remain, such as lens water, which is not on screen yet.
+- **Unfinished checks.** Some of what runs is not yet covered by an oracle case, as the table above shows.
 
 ## Repository layout
 
@@ -89,8 +121,8 @@ against.
 
 ## Game data
 
-`hydro.exe` looks for your install, walking up from its own folder (up to 8 levels), for either
-`HydroThunderUWP\Base.apf` or `Base.apf`. The simplest layout:
+`hydro.exe` looks for your install, walking up from its own folder (up to 8 levels). At each level `Base.apf`
+wins over `HydroThunderUWP\Base.apf`, so a copy beside the exe is used first. The simplest layout:
 
 ```
 <any folder>\
@@ -102,16 +134,19 @@ against.
 ## Running
 
 ```
-hydro.exe                                   # the Hydroelectric track, free camera
-hydro.exe --race Hydroelectric --mode ... --course ...
+hydro.exe                                   # the game: title sequence, then the menus
+hydro.exe --menu                            # skip the title sequence, straight to the menus
+hydro.exe --race Hydroelectric --mode Race --boat Vector --skin VectorSkin01
+                                            # straight into a race (--course picks the course)
+hydro.exe --race Hydroelectric              # the level with no race
 hydro.exe --bench --still 200,400,800 --frames 820 --fixed-step 0.016666667 --race Hydroelectric --out <dir>
                                             # deterministic stills (the regression gate)
 hydro.exe --selftest                        # every oracle check; exit 0 = all pass (the -selftest build)
 hydro.exe --verbose                         # extra diagnostics
 ```
 
-Other switches: `--no-reflect`, `--no-rig`, `--skip-reflective`, `--background`, `--vantage`, `--drive`,
-`--drive-to`, `--stream-rigid-props`, `--shots`.
+Other switches: `--unlock-all`, `--save-dir`, `--window-size`, `--frame-limit`, `--vsync`, `--fov`, `--language`,
+`--freecam`, `--no-pfx`, `--no-rig`, `--autopilot`, `--input-script`, `--draw-stats`, `--spike-log`.
 
 ## The tools (kept outside this repository)
 
@@ -132,7 +167,7 @@ The projects find the generated golden headers through the MSBuild property `Hyd
 
 ### The gates, after every change
 
-Build exit 0 with a fresh exe; the three bench stills' MD5s unchanged (or the change explained and the new
+Build exit 0 with a fresh exe; the bench and race stills' MD5s unchanged (or the change explained and the new
 MD5s recorded); `--selftest` all pass; `constaudit` 0 differing; `regen.py --check` clean.
 
 ## Legal
@@ -154,8 +189,8 @@ belong to their respective owners.
   Every "verified" in this project means retail's own machine code was executed under Unicorn on chosen inputs
   and this repository's recreation reproduced its output exactly; without it the claim "1:1" would rest on
   reading code rather than on measuring it.
-- **[Bullet Physics](https://github.com/bulletphysics/bullet3)** (2.79, zlib licence) - the physics library
-  the retail game ships statically linked. Its source is vendored in `engine/impl/bullet` as reference only -
-  it is not compiled: the physics this project runs is recreated function by function from retail's own
+- **[Bullet Physics](https://github.com/bulletphysics/bullet3)** (zlib licence) - the physics library the
+  retail game ships statically linked, at version 2.79. The 2.82 source is vendored in `engine/impl/bullet` as
+  reference only - it is not compiled: the physics this project runs is recreated function by function from retail's own
   build of it (collision, broadphase, the constraint solver, integration), which is the largest verified
   subsystem so far.
